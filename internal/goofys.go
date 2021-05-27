@@ -625,6 +625,10 @@ func (fs *Goofys) LookUpInode(
 		}
 	} else {
 		ok = false
+		if !expired(parent.dir.DirTime, fs.flags.StatCacheTTL) {
+			parent.mu.Unlock()
+			return fuse.ENOENT
+		}
 	}
 	parent.mu.Unlock()
 

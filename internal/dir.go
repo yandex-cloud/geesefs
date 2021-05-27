@@ -954,6 +954,8 @@ func (parent *Inode) MkDir(
 	inode = NewInode(fs, parent, &name)
 	inode.ToDir()
 	inode.touch()
+	// Record dir as actual
+	inode.dir.DirTime = inode.Attributes.Mtime
 	if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
 		parent.Attributes.Mtime = inode.Attributes.Mtime
 	}
