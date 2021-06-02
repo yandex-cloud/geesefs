@@ -625,7 +625,15 @@ func (fs *Goofys) LookUpInode(
 		}
 	} else {
 		ok = false
+		if parent.dir.DeletedChildren != nil {
+			if _, ok := parent.dir.DeletedChildren[op.Name]; ok {
+				// File is deleted locally
+				parent.mu.Unlock()
+				return fuse.ENOENT
+			}
+		}
 		if !expired(parent.dir.DirTime, fs.flags.StatCacheTTL) {
+			// Don't recheck from the server if directory cache is actual
 			parent.mu.Unlock()
 			return fuse.ENOENT
 		}
@@ -768,14 +776,14 @@ func (fs *Goofys) ForgetInode(
 	}
 	stale := inode.DeRef(op.N)
 
-	if stale {
+	if stale && !inode.dirty {
 		fs.mu.Lock()
 		defer fs.mu.Unlock()
 
 		delete(fs.inodes, op.Inode)
 		fs.forgotCnt += 1
 
-		if inode.Parent != nil {
+		if inode.CacheState != ST_DELETED {
 			inode.Parent.removeChildUnlocked(inode)
 		}
 	}

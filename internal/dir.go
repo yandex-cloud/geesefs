@@ -41,6 +41,7 @@ type DirInodeData struct {
 	DirTime         time.Time
 
 	Children []*Inode
+	DeletedChildren map[string]*Inode
 }
 
 type DirHandleEntry struct {
@@ -126,7 +127,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 		panic(fmt.Sprintf("%v is not a directory", inode.FullName()))
 	}
 
-	if isS3 && parent != nil && inode.fs.flags.TypeCacheTTL != 0 {
+	if isS3 && inode.CacheState != ST_DELETED && inode.fs.flags.TypeCacheTTL != 0 {
 		parent.mu.Lock()
 		defer parent.mu.Unlock()
 
@@ -210,7 +211,7 @@ func (dh *DirHandle) listObjectsSlurp(prefix string) (resp *ListBlobsOutput, err
 
 	cloud, key := inode.cloud()
 
-	if dh.inode.Parent != nil {
+	if dh.inode.CacheState != ST_DELETED {
 		inode = dh.inode.Parent
 		var parentCloud StorageBackend
 		parentCloud, reqPrefix = inode.cloud()
@@ -314,7 +315,7 @@ func (dh *DirHandle) listObjects(prefix string) (resp *ListBlobsOutput, err erro
 
 	if dh.Marker == nil &&
 		fs.flags.TypeCacheTTL != 0 &&
-		(parent != nil && parent.dir.seqOpenDirScore >= 2) {
+		(dh.inode.CacheState != ST_DELETED && parent.dir.seqOpenDirScore >= 2) {
 		go func() {
 			resp, err := dh.listObjectsSlurp(prefix)
 			if err != nil {
@@ -872,10 +873,11 @@ func (parent *Inode) getChildName(name string) string {
 func (parent *Inode) Unlink(name string) (err error) {
 	parent.logFuse("Unlink", name)
 
-	cloud, key := parent.cloud()
+//	cloud, key := parent.cloud()
+	_, key := parent.cloud()
 	key = appendChildName(key, name)
 
-	_, err = cloud.DeleteBlob(&DeleteBlobInput{
+/*	_, err = cloud.DeleteBlob(&DeleteBlobInput{
 		Key: key,
 	})
 	if err == fuse.ENOENT {
@@ -884,7 +886,7 @@ func (parent *Inode) Unlink(name string) (err error) {
 	}
 	if err != nil {
 		return
-	}
+	}*/
 
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
@@ -892,7 +894,12 @@ func (parent *Inode) Unlink(name string) (err error) {
 	inode := parent.findChildUnlocked(name)
 	if inode != nil {
 		parent.removeChildUnlocked(inode)
-		inode.Parent = nil
+		//inode.Parent = nil
+		if parent.dir.DeletedChildren == nil {
+			parent.dir.DeletedChildren = make(map[string]*Inode)
+		}
+		parent.dir.DeletedChildren[name] = inode
+		inode.CacheState = ST_DELETED
 	}
 
 	return
@@ -914,11 +921,12 @@ func (parent *Inode) Create(
 		Size:  0,
 		Mtime: now,
 	}
+	inode.CacheState = ST_CREATED
 
 	fh = NewFileHandle(inode, metadata)
-	fh.poolHandle = fs.bufferPool
-	fh.dirty = true
+	inode.dirty = true
 	inode.fileHandles = 1
+	inode.fileHandle = fh
 
 	parent.touch()
 
@@ -932,7 +940,7 @@ func (parent *Inode) MkDir(
 
 	fs := parent.fs
 
-	cloud, key := parent.cloud()
+	/*cloud, key := parent.cloud()
 	key = appendChildName(key, name)
 	if !cloud.Capabilities().DirBlob {
 		key += "/"
@@ -946,7 +954,7 @@ func (parent *Inode) MkDir(
 	_, err = cloud.PutBlob(params)
 	if err != nil {
 		return
-	}
+	}*/
 
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
@@ -954,6 +962,7 @@ func (parent *Inode) MkDir(
 	inode = NewInode(fs, parent, &name)
 	inode.ToDir()
 	inode.touch()
+	inode.CacheState = ST_CREATED
 	// Record dir as actual
 	inode.dir.DirTime = inode.Attributes.Mtime
 	if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
@@ -1003,7 +1012,7 @@ func (parent *Inode) isEmptyDir(fs *Goofys, name string) (isDir bool, err error)
 func (parent *Inode) RmDir(name string) (err error) {
 	parent.logFuse("Rmdir", name)
 
-	isDir, err := parent.isEmptyDir(parent.fs, name)
+	/*isDir, err := parent.isEmptyDir(parent.fs, name)
 	if err != nil {
 		return
 	}
@@ -1021,7 +1030,7 @@ func (parent *Inode) RmDir(name string) (err error) {
 		if err != nil {
 			return
 		}
-	}
+	}*/
 
 	// we know this entry is gone
 	parent.mu.Lock()
@@ -1030,7 +1039,11 @@ func (parent *Inode) RmDir(name string) (err error) {
 	inode := parent.findChildUnlocked(name)
 	if inode != nil {
 		parent.removeChildUnlocked(inode)
-		inode.Parent = nil
+		if parent.dir.DeletedChildren == nil {
+			parent.dir.DeletedChildren = make(map[string]*Inode)
+		}
+		parent.dir.DeletedChildren[name] = inode
+		inode.CacheState = ST_DELETED
 	}
 
 	return

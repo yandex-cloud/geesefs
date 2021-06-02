@@ -15,12 +15,13 @@
 package internal
 
 import (
-	"errors"
-	"fmt"
+//	"errors"
+//	"fmt"
 	"io"
+	"io/ioutil"
 	"sync"
 	"sync/atomic"
-	"syscall"
+//	"syscall"
 	"time"
 
 	"github.com/jacobsa/fuse"
@@ -32,30 +33,23 @@ type FileHandle struct {
 	cloud StorageBackend
 	key   string
 
-	mpuName   *string
+/*	mpuName   *string
 	dirty     bool
 	writeInit sync.Once
 	mpuWG     sync.WaitGroup
 
 	mu              sync.Mutex
 	mpuId           *MultipartBlobCommitInput
-	nextWriteOffset int64
 	lastPartId      uint32
-
-	poolHandle *BufferPool
-	buf        *MBuf
-
 	lastWriteError error
 
 	// read
 	reader        io.ReadCloser
 	readBufOffset int64
 
-	// parallel read
-	buffers           []*S3ReadBuffer
 	existingReadahead int
 	seqReadAmount     uint64
-	numOOORead        uint64 // number of out of order read
+	numOOORead        uint64 // number of out of order read*/
 	// User space PID. All threads created by a process will have the same TGID,
 	// but different PIDs[1].
 	// This value can be nil if we fail to get TGID from PID[2].
@@ -66,6 +60,8 @@ type FileHandle struct {
 	keepPageCache bool // the same value we returned to OpenFile
 }
 
+// FIXME -> to configuration
+const MAX_BUF_INC = uint32(1024 * 1024)
 const MAX_READAHEAD = uint32(400 * 1024 * 1024)
 const READAHEAD_CHUNK = uint32(20 * 1024 * 1024)
 
@@ -83,6 +79,7 @@ func NewFileHandle(inode *Inode, opMetadata fuseops.OpMetadata) *FileHandle {
 	return fh
 }
 
+/*
 func (fh *FileHandle) initWrite() {
 	fh.writeInit.Do(func() {
 		fh.mpuWG.Add(1)
@@ -223,74 +220,166 @@ func (fh *FileHandle) uploadCurrentBuf(parallel bool) (err error) {
 	}
 
 	return
+}*/
+
+/*func extendBuf(buf []byte, request int64) []byte {
+	oldLen := len(buf)
+	if cap(buf) < request {
+		inc := oldLen
+		if inc > MAX_BUF_INC {
+			inc = MAX_BUF_INC
+		}
+		if inc < request-oldLen {
+			inc = request-oldLen
+		}
+		newBuf := make([]byte, oldLen+inc)
+		copy(newBuf, buf)
+		return newBuf[0:request]
+	}
+	return buf[0:request]
+}*/
+
+func locateBuffer(buffers []FileBuffer, offset uint64) int {
+	start := 0
+	for start < len(buffers) {
+		b := &buffers[start]
+		if b.offset + uint64(len(b.buf)) > offset {
+			break
+		}
+		start++
+	}
+	return start
+}
+
+func addFileBuffer(buffers []FileBuffer, offset uint64, data []byte, dirty bool, copyData bool) []FileBuffer {
+	start := locateBuffer(buffers, offset)
+	dataLen := uint64(len(data))
+	endOffset := offset+dataLen
+
+	// Remove intersecting parts as they're being overwritten
+	// If we're inserting a clean buffer, don't remove dirty ones
+	for pos := start; pos < len(buffers); pos++ {
+		b := &buffers[pos]
+		if b.offset >= endOffset {
+			break
+		}
+		bufEnd := b.offset+uint64(len(b.buf))
+		if (dirty || !b.dirty) && bufEnd > offset && endOffset > b.offset {
+			if offset <= b.offset {
+				if endOffset >= bufEnd {
+					// whole buffer
+					buffers = append(buffers[0 : pos], buffers[pos+1 : ]...)
+					pos--
+				} else {
+					// beginning
+					b.buf = b.buf[endOffset - b.offset : ]
+					b.offset = endOffset
+				}
+			} else if endOffset >= bufEnd {
+				// end
+				b.buf = b.buf[0:offset - b.offset]
+			} else {
+				// middle
+				startBuf := FileBuffer{
+					offset: b.offset,
+					dirty: b.dirty,
+					buf: b.buf[0:offset-b.offset],
+				}
+				endBuf := FileBuffer{
+					offset: endOffset,
+					dirty: b.dirty,
+					buf: b.buf[endOffset-b.offset : ],
+				}
+				last := buffers[pos+1 : ]
+				buffers = append(buffers[0 : pos], startBuf, endBuf)
+				buffers = append(buffers, last...)
+			}
+		}
+	}
+
+	// Insert non-overlapping parts of the buffer
+	curOffset := offset
+	for pos := start; pos < len(buffers) && curOffset < endOffset; pos++ {
+		b := &buffers[pos]
+		if b.offset > curOffset {
+			// insert curOffset->min(b.offset,endOffset)
+			var newBuf []byte
+			nextEnd := b.offset
+			if nextEnd > endOffset {
+				nextEnd = endOffset
+			}
+			if copyData {
+				newBuf = make([]byte, nextEnd-curOffset)
+				copy(newBuf, data[curOffset-offset : nextEnd-offset])
+			} else {
+				newBuf = data[curOffset-offset : nextEnd-offset]
+			}
+			// FIXME maybe try to append to the previous buffer?
+			last := buffers[pos+1 : ]
+			buffers = append(buffers[0 : pos], FileBuffer{
+				offset: curOffset,
+				dirty: dirty,
+				buf: newBuf,
+			})
+			buffers = append(buffers, last...)
+		}
+		curOffset = b.offset+uint64(len(b.buf))
+	}
+	if curOffset < endOffset {
+		// Insert curOffset->endOffset
+		var newBuf []byte
+		if copyData {
+			newBuf = make([]byte, endOffset-curOffset)
+			copy(newBuf, data[curOffset-offset : ])
+		} else {
+			newBuf = data[curOffset-offset : ]
+		}
+		buffers = append(buffers, FileBuffer{
+			offset: curOffset,
+			dirty: dirty,
+			buf: newBuf,
+		})
+	}
+
+	return buffers
 }
 
 func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 	fh.inode.logFuse("WriteFile", offset, len(data))
 
-	fh.mu.Lock()
-	defer fh.mu.Unlock()
+	fh.inode.mu.Lock()
+	defer fh.inode.mu.Unlock()
 
-	if fh.lastWriteError != nil {
-		fh.inode.mu.Lock()
-		// our write failed, next time we open we should not
-		// use page cache so we will read from cloud again
-		fh.inode.invalidateCache = true
-		fh.inode.mu.Unlock()
-		return fh.lastWriteError
+	// FIXME With this cache in action, usual kernel page cache is probably redundant
+	fh.inode.buffers = addFileBuffer(fh.inode.buffers, uint64(offset), data, true, true)
+
+	fh.inode.dirty = true
+	if fh.inode.Attributes.Size < uint64(offset)+uint64(len(data)) {
+		fh.inode.Attributes.Size = uint64(offset)+uint64(len(data))
 	}
-
-	if offset != fh.nextWriteOffset {
-		fh.inode.errFuse("WriteFile: only sequential writes supported", fh.nextWriteOffset, offset)
-		fh.lastWriteError = syscall.ENOTSUP
-		return fh.lastWriteError
-	}
-
-	if offset == 0 {
-		fh.poolHandle = fh.inode.fs.bufferPool
-		fh.dirty = true
-		fh.inode.mu.Lock()
-		// we are updating this file, set knownETag to nil so
-		// on next lookup we won't think it's changed, to
-		// always prefer to read back our own write. We set
-		// this back to the ETag at flush time
-		//
-		// XXX this doesn't actually work, see the notes in
-		// Goofys.OpenFile about KeepPageCache
-		fh.inode.knownETag = nil
-		fh.inode.invalidateCache = false
-		fh.inode.mu.Unlock()
-	}
-
-	for {
-		if fh.buf == nil {
-			fh.buf = MBuf{}.Init(fh.poolHandle, fh.partSize(), true)
-		}
-
-		nCopied, _ := fh.buf.Write(data)
-		fh.nextWriteOffset += int64(nCopied)
-
-		if fh.buf.Full() {
-			err = fh.uploadCurrentBuf(!fh.cloud.Capabilities().NoParallelMultipart)
-			if err != nil {
-				return
-			}
-		}
-
-		if nCopied == len(data) {
-			break
-		}
-
-		data = data[nCopied:]
-	}
-
-	fh.inode.Attributes.Size = uint64(fh.nextWriteOffset)
 	fh.inode.Attributes.Mtime = time.Now()
+
+	/*
+	// we are updating this file, set knownETag to nil so
+	// on next lookup we won't think it's changed, to
+	// always prefer to read back our own write. We set
+	// this back to the ETag at flush time
+	//
+	// XXX this doesn't actually work, see the notes in
+	// Goofys.OpenFile about KeepPageCache
+	fh.inode.knownETag = nil
+	fh.inode.invalidateCache = false
+
+	err = fh.uploadCurrentBuf(!fh.cloud.Capabilities().NoParallelMultipart)
+	if err != nil {
+		return
+	}
+	*/
 
 	return
 }
 
-type S3ReadBuffer struct {
+/*type S3ReadBuffer struct {
 	s3          StorageBackend
 	startOffset uint64
 	nRetries    uint8
@@ -308,7 +397,7 @@ func (b S3ReadBuffer) Init(fh *FileHandle, offset uint64, size uint32) *S3ReadBu
 	b.size = size
 	b.nRetries = 3
 
-	b.mbuf = MBuf{}.Init(fh.poolHandle, uint64(size), false)
+	b.mbuf = MBuf{}.Init(fh.inode.fs.bufferPool, uint64(size), false)
 	if b.mbuf == nil {
 		return nil
 	}
@@ -463,13 +552,26 @@ func (fh *FileHandle) readAhead(offset uint64, needAtLeast int) (err error) {
 	}
 
 	return nil
+}*/
+
+func appendRequest(requests []uint64, offset uint64, size uint64, requestCost uint64) []uint64 {
+	if len(requests) > 0 {
+		lastOffset := requests[len(requests)-2]
+		lastSize := requests[len(requests)-1]
+		if offset-lastOffset-lastSize <= requestCost {
+			requests[len(requests)-1] = offset+size-lastOffset
+			return requests
+		}
+	}
+	return append(requests, offset, size)
 }
 
-func (fh *FileHandle) ReadFile(offset int64, buf []byte) (bytesRead int, err error) {
+func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err error) {
+	offset := uint64(sOffset)
+
 	fh.inode.logFuse("ReadFile", offset, len(buf))
 	defer func() {
 		fh.inode.logFuse("< ReadFile", bytesRead, err)
-
 		if err != nil {
 			if err == io.EOF {
 				err = nil
@@ -477,23 +579,129 @@ func (fh *FileHandle) ReadFile(offset int64, buf []byte) (bytesRead int, err err
 		}
 	}()
 
-	fh.mu.Lock()
-	defer fh.mu.Unlock()
+	fh.inode.mu.Lock()
+	defer fh.inode.mu.Unlock()
 
-	nwant := len(buf)
-	var nread int
+	requestCost := uint64(512*1024) // 512 KB // FIXME move into config
+	readAheadChunk := uint64(4*1024*1024) // 4 MB // FIXME move into config
 
-	for bytesRead < nwant && err == nil {
-		nread, err = fh.readFile(offset+int64(bytesRead), buf[bytesRead:])
-		if nread > 0 {
-			bytesRead += nread
+	if offset >= fh.inode.Attributes.Size {
+		// nothing to read
+		if fh.inode.Invalid {
+			err = fuse.ENOENT
+		} else if fh.inode.KnownSize == nil {
+			err = io.EOF
+		} else {
+			err = io.EOF
 		}
+		return
 	}
+	end := offset+uint64(len(buf))
+	if end >= fh.inode.Attributes.Size {
+		end = fh.inode.Attributes.Size
+	}
+	start := locateBuffer(fh.inode.buffers, offset)
+
+	pos := offset
+	requests := make([]uint64, 0)
+	for i := start; i < len(fh.inode.buffers); i++ {
+		b := &fh.inode.buffers[i]
+		if b.offset >= end {
+			break
+		}
+		if b.offset > pos {
+			requests = appendRequest(requests, pos, b.offset-pos, requestCost)
+		}
+		pos = b.offset+uint64(len(b.buf))
+	}
+	if pos < end {
+		requests = appendRequest(requests, pos, end-pos, requestCost)
+	}
+
+	// add readahead
+	if len(requests) > 0 {
+		nr := len(requests)
+		lastEnd := requests[nr-2]+requests[nr-1]+readAheadChunk
+		if lastEnd > fh.inode.Attributes.Size {
+			lastEnd = fh.inode.Attributes.Size
+		}
+		requests[nr-1] = lastEnd-requests[nr-2]
+	}
+
+	// FIXME split requests into smaller chunks if we want to read in parallel
+
+	// FIXME free unused buffers at some point
+
+	// send requests
+	var wg sync.WaitGroup
+	var requestErr error
+	for i := 0; i < len(requests); i += 2 {
+		offset := requests[i]
+		size := requests[i+1]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := fh.cloud.GetBlob(&GetBlobInput{
+				Key:   fh.key,
+				Start: offset,
+				Count: uint64(size),
+			})
+			if err != nil {
+				requestErr = err
+				return
+			}
+			data, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				requestErr = err
+				return
+			}
+			// Cache result from the server
+			fh.inode.buffers = addFileBuffer(fh.inode.buffers, offset, data, false, false)
+		}()
+	}
+	wg.Wait()
+
+	// we don't have to unlock the inode here, because FUSE lacks parallelism within a single file :)
+	// FIXME: What about multithreaded FUSE?
+
+	// copy cached buffers into the result
+	pos = offset
+	for i := start; i < len(fh.inode.buffers); i++ {
+		b := &fh.inode.buffers[i]
+		if b.offset >= end {
+			break
+		}
+		if b.offset > pos {
+			// How is this possible? We should've just received it from the server!
+			err = requestErr
+			if err == nil {
+				err = fuse.EIO
+			}
+			return
+		}
+		readEnd := b.offset+uint64(len(b.buf))
+		if readEnd > end {
+			readEnd = end
+		}
+		copy(buf[pos-offset : readEnd-offset], b.buf[pos-b.offset : readEnd-b.offset])
+		pos = readEnd
+	}
+	if pos < end {
+		// How is this possible? We should've just received it from the server!
+		err = requestErr
+		if err == nil {
+			err = fuse.EIO
+		}
+		return
+	}
+
+	// FIXME: maybe we want to not read everything to return the first byte faster in some cases?
+	bytesRead = int(end-offset)
 
 	return
 }
 
-func (fh *FileHandle) readFile(offset int64, buf []byte) (bytesRead int, err error) {
+/*func (fh *FileHandle) readFile(offset int64, buf []byte) (bytesRead int, err error) {
 	defer func() {
 		if bytesRead > 0 {
 			fh.readBufOffset += int64(bytesRead)
@@ -503,7 +711,7 @@ func (fh *FileHandle) readFile(offset int64, buf []byte) (bytesRead int, err err
 		fh.inode.logFuse("< readFile", bytesRead, err)
 	}()
 
-	if uint64(offset) >= fh.inode.Attributes.Size {
+	if offset >= fh.inode.Attributes.Size {
 		// nothing to read
 		if fh.inode.Invalid {
 			err = fuse.ENOENT
@@ -516,10 +724,6 @@ func (fh *FileHandle) readFile(offset int64, buf []byte) (bytesRead int, err err
 	}
 
 	fs := fh.inode.fs
-
-	if fh.poolHandle == nil {
-		fh.poolHandle = fs.bufferPool
-	}
 
 	if fh.readBufOffset != offset {
 		// XXX out of order read, maybe disable prefetching
@@ -568,10 +772,10 @@ func (fh *FileHandle) readFile(offset int64, buf []byte) (bytesRead int, err err
 	bytesRead, err = fh.readFromStream(offset, buf)
 
 	return
-}
+}*/
 
 func (fh *FileHandle) Release() {
-	// read buffers
+/*	// read buffers
 	for _, b := range fh.buffers {
 		b.buf.Close()
 	}
@@ -582,7 +786,7 @@ func (fh *FileHandle) Release() {
 	}
 
 	// write buffers
-	if fh.poolHandle != nil {
+	if fh.inode.fs.bufferPool != nil {
 		if fh.buf != nil && fh.buf.buffers != nil {
 			if fh.lastWriteError == nil {
 				panic("buf not freed but error is nil")
@@ -592,17 +796,21 @@ func (fh *FileHandle) Release() {
 			// the other in-flight multipart PUT buffers will be
 			// freed when they finish/error out
 		}
-	}
+	}*/
 
 	fh.inode.mu.Lock()
 	defer fh.inode.mu.Unlock()
 
-	if atomic.AddInt32(&fh.inode.fileHandles, -1) == -1 {
+	n := atomic.AddInt32(&fh.inode.fileHandles, -1)
+	if n == -1 {
 		panic(fh.inode.fileHandles)
+	} else if n == 0 {
+		// delete fh
+		fh.inode.fileHandle = nil
 	}
 }
 
-func (fh *FileHandle) readFromStream(offset int64, buf []byte) (bytesRead int, err error) {
+/*func (fh *FileHandle) readFromStream(offset int64, buf []byte) (bytesRead int, err error) {
 	defer func() {
 		if fh.inode.fs.flags.DebugFuse {
 			fh.inode.logFuse("< readFromStream", bytesRead)
@@ -645,7 +853,7 @@ func (fh *FileHandle) flushSmallFile() (err error) {
 	fh.buf = nil
 
 	if buf == nil {
-		buf = MBuf{}.Init(fh.poolHandle, 0, true)
+		buf = MBuf{}.Init(fh.inode.fs.bufferPool, 0, true)
 	}
 
 	defer buf.Free()
@@ -703,15 +911,15 @@ func (fh *FileHandle) resetToKnownSize() {
 		fh.inode.Attributes.Size = 0
 		fh.inode.Invalid = true
 	}
-}
+}*/
 
 func (fh *FileHandle) FlushFile() (err error) {
-	fh.mu.Lock()
-	defer fh.mu.Unlock()
+//	fh.mu.Lock()
+//	defer fh.mu.Unlock()
 
 	fh.inode.logFuse("FlushFile")
 
-	if !fh.dirty || fh.lastWriteError != nil {
+/*	if !fh.dirty || fh.lastWriteError != nil {
 		if fh.lastWriteError != nil {
 			err = fh.lastWriteError
 			fh.resetToKnownSize()
@@ -797,7 +1005,7 @@ func (fh *FileHandle) FlushFile() (err error) {
 	if *fh.mpuName != key {
 		// the file was renamed
 		err = fh.inode.renameObject(fs, PUInt64(uint64(fh.nextWriteOffset)), *fh.mpuName, *fh.inode.FullName())
-	}
+	}*/
 
 	return
 }

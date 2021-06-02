@@ -34,6 +34,16 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type InodeCacheState int
+
+const (
+	ST_CACHED_META InodeCacheState = 0
+	ST_CACHED_DATA
+	ST_CREATED
+	ST_MODIFIED
+	ST_DELETED
+)
+
 type InodeAttributes struct {
 	Size  uint64
 	Mtime time.Time
@@ -41,6 +51,12 @@ type InodeAttributes struct {
 
 func (i InodeAttributes) Equal(other InodeAttributes) bool {
 	return i.Size == other.Size && i.Mtime.Equal(other.Mtime)
+}
+
+type FileBuffer struct {
+	offset uint64
+	dirty bool
+	buf []byte
 }
 
 type Inode struct {
@@ -68,11 +84,16 @@ type Inode struct {
 
 	dir *DirInodeData
 
+	CacheState  InodeCacheState
 	Invalid     bool
 	ImplicitDir bool
 
 	fileHandles int32
 
+	fileHandle *FileHandle
+
+	dirty bool
+	buffers []FileBuffer
 	userMetadata map[string][]byte
 	s3Metadata   map[string][]byte
 
@@ -524,8 +545,10 @@ func (inode *Inode) OpenFile(metadata fuseops.OpMetadata) (fh *FileHandle, err e
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 
-	fh = NewFileHandle(inode, metadata)
+	if atomic.AddInt32(&inode.fileHandles, 1) == 1 {
+		inode.fileHandle = NewFileHandle(inode, metadata)
+	}
+	fh = inode.fileHandle
 
-	atomic.AddInt32(&inode.fileHandles, 1)
 	return
 }
