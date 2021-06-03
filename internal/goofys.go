@@ -213,7 +213,11 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		Mtime: now,
 	}
 
-	fs.bufferPool = BufferPool{}.Init()
+	// FIXME: Configure limit
+	fs.bufferPool = NewBufferPool(20*1024*1024)
+	fs.bufferPool.FreeSomeCleanBuffers = func(inode fuseops.InodeID, size uint64) uint64 {
+		return fs.FreeSomeCleanBuffers(inode, size)
+	}
 
 	fs.nextInodeID = fuseops.RootInodeID + 1
 	fs.inodes = make(map[fuseops.InodeID]*Inode)
@@ -283,6 +287,51 @@ func (fs *Goofys) getInodeOrDie(id fuseops.InodeID) (inode *Inode) {
 	}
 
 	return
+}
+
+// Try to reclaim some clean buffers
+func (fs *Goofys) FreeSomeCleanBuffers(forInode fuseops.InodeID, size uint64) uint64 {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	freed := uint64(0)
+	for _, inode := range fs.inodes {
+		if inode.Id == forInode || inode.mu.TryLock() {
+			// Need TryLock() to not produce deadlocks
+			for i := 0; i < len(inode.buffers); i++ {
+				buf := &inode.buffers[i]
+				// FIXME: STUPID. Add generations ?
+				fmt.Printf("buf %v %v is dirty=%v\n", inode.Id, i, buf.dirty)
+				if !buf.dirty {
+					requiredByReads := false
+					for _, r := range inode.readRanges {
+						if r.Offset < buf.offset+uint64(len(buf.buf)) &&
+							r.Offset+r.Size >= buf.offset {
+							requiredByReads = true
+							break
+						}
+					}
+					if !requiredByReads {
+						freed += fs.bufferPool.FreeBufferUnlocked(&inode.buffers, i)
+						i--
+					}
+				}
+			}
+			if inode.Id != forInode {
+				inode.mu.Unlock()
+			}
+		}
+		if freed >= size {
+			break
+		}
+	}
+	if freed < size {
+		fs.StartFlusher()
+	}
+	return freed
+}
+
+func (fs *Goofys) StartFlusher() {
+	
 }
 
 type Mount struct {

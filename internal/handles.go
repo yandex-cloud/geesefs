@@ -20,7 +20,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -53,10 +52,9 @@ func (i InodeAttributes) Equal(other InodeAttributes) bool {
 	return i.Size == other.Size && i.Mtime.Equal(other.Mtime)
 }
 
-type FileBuffer struct {
-	offset uint64
-	dirty bool
-	buf []byte
+type ReadRange struct {
+	Offset uint64
+	Size uint64
 }
 
 type Inode struct {
@@ -75,7 +73,7 @@ type Inode struct {
 	// Ref: https://github.com/golang/go/blob/e42ae65a8507/src/time/time.go#L12:L56
 	AttrTime time.Time
 
-	mu sync.Mutex // everything below is protected by mu
+	mu TryMutex // everything below is protected by mu
 
 	// We are not very consistent about enforcing locks for `Parent` because, the
 	// parent field very very rarely changes and it is generally fine to operate on
@@ -94,6 +92,7 @@ type Inode struct {
 
 	dirty bool
 	buffers []FileBuffer
+	readRanges []ReadRange
 	userMetadata map[string][]byte
 	s3Metadata   map[string][]byte
 

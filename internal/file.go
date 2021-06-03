@@ -1,4 +1,5 @@
 // Copyright 2015 - 2017 Ka-Hing Cheung
+// Copyright 2021 Vitaliy Filippov
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -251,7 +252,7 @@ func locateBuffer(buffers []FileBuffer, offset uint64) int {
 	return start
 }
 
-func addFileBuffer(buffers []FileBuffer, offset uint64, data []byte, dirty bool, copyData bool) []FileBuffer {
+func addFileBuffer(forInode fuseops.InodeID, pool *BufferPool, buffers []FileBuffer, offset uint64, data []byte, dirty bool, copyData bool) []FileBuffer {
 	start := locateBuffer(buffers, offset)
 	dataLen := uint64(len(data))
 	endOffset := offset+dataLen
@@ -268,7 +269,7 @@ func addFileBuffer(buffers []FileBuffer, offset uint64, data []byte, dirty bool,
 			if offset <= b.offset {
 				if endOffset >= bufEnd {
 					// whole buffer
-					buffers = append(buffers[0 : pos], buffers[pos+1 : ]...)
+					pool.FreeBuffer(&buffers, pos)
 					pos--
 				} else {
 					// beginning
@@ -280,15 +281,18 @@ func addFileBuffer(buffers []FileBuffer, offset uint64, data []byte, dirty bool,
 				b.buf = b.buf[0:offset - b.offset]
 			} else {
 				// middle
+				b.ptr.refs++
 				startBuf := FileBuffer{
 					offset: b.offset,
 					dirty: b.dirty,
 					buf: b.buf[0:offset-b.offset],
+					ptr: b.ptr,
 				}
 				endBuf := FileBuffer{
 					offset: endOffset,
 					dirty: b.dirty,
 					buf: b.buf[endOffset-b.offset : ],
+					ptr: b.ptr,
 				}
 				last := buffers[pos+1 : ]
 				buffers = append(buffers[0 : pos], startBuf, endBuf)
@@ -299,6 +303,10 @@ func addFileBuffer(buffers []FileBuffer, offset uint64, data []byte, dirty bool,
 
 	// Insert non-overlapping parts of the buffer
 	curOffset := offset
+	dataPtr := &BufferPointer{
+		buf: data,
+		refs: 0,
+	}
 	for pos := start; pos < len(buffers) && curOffset < endOffset; pos++ {
 		b := &buffers[pos]
 		if b.offset > curOffset {
@@ -310,16 +318,23 @@ func addFileBuffer(buffers []FileBuffer, offset uint64, data []byte, dirty bool,
 			}
 			if copyData {
 				newBuf = make([]byte, nextEnd-curOffset)
+				pool.Use(forInode, nextEnd-curOffset, dirty)
 				copy(newBuf, data[curOffset-offset : nextEnd-offset])
+				dataPtr = &BufferPointer{
+					buf: newBuf,
+					refs: 0,
+				}
 			} else {
 				newBuf = data[curOffset-offset : nextEnd-offset]
 			}
+			dataPtr.refs++
 			// FIXME maybe try to append to the previous buffer?
 			last := buffers[pos+1 : ]
 			buffers = append(buffers[0 : pos], FileBuffer{
 				offset: curOffset,
 				dirty: dirty,
 				buf: newBuf,
+				ptr: dataPtr,
 			})
 			buffers = append(buffers, last...)
 		}
@@ -330,14 +345,21 @@ func addFileBuffer(buffers []FileBuffer, offset uint64, data []byte, dirty bool,
 		var newBuf []byte
 		if copyData {
 			newBuf = make([]byte, endOffset-curOffset)
+			pool.Use(forInode, endOffset-curOffset, dirty)
 			copy(newBuf, data[curOffset-offset : ])
+			dataPtr = &BufferPointer{
+				buf: newBuf,
+				refs: 0,
+			}
 		} else {
 			newBuf = data[curOffset-offset : ]
 		}
+		dataPtr.refs++
 		buffers = append(buffers, FileBuffer{
 			offset: curOffset,
 			dirty: dirty,
 			buf: newBuf,
+			ptr: dataPtr,
 		})
 	}
 
@@ -351,7 +373,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 	defer fh.inode.mu.Unlock()
 
 	// FIXME With this cache in action, usual kernel page cache is probably redundant
-	fh.inode.buffers = addFileBuffer(fh.inode.buffers, uint64(offset), data, true, true)
+	fh.inode.buffers = addFileBuffer(fh.inode.Id, fh.inode.fs.bufferPool, fh.inode.buffers, uint64(offset), data, true, true)
 
 	fh.inode.dirty = true
 	if fh.inode.Attributes.Size < uint64(offset)+uint64(len(data)) {
@@ -580,7 +602,19 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	}()
 
 	fh.inode.mu.Lock()
-	defer fh.inode.mu.Unlock()
+	fh.inode.readRanges = append(fh.inode.readRanges, ReadRange{
+		Offset: offset,
+		Size: uint64(len(buf)),
+	})
+	defer func() {
+		for i, v := range fh.inode.readRanges {
+			if v.Offset == offset && v.Size == uint64(len(buf)) {
+				fh.inode.readRanges = append(fh.inode.readRanges[0 : i], fh.inode.readRanges[i+1 : ]...)
+				break
+			}
+		}
+		fh.inode.mu.Unlock()
+	}()
 
 	requestCost := uint64(512*1024) // 512 KB // FIXME move into config
 	readAheadChunk := uint64(4*1024*1024) // 4 MB // FIXME move into config
@@ -632,6 +666,8 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 
 	// FIXME free unused buffers at some point
 
+	fh.inode.mu.Unlock()
+
 	// send requests
 	var wg sync.WaitGroup
 	var requestErr error
@@ -641,31 +677,41 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// Maybe free some buffers first
+			fh.inode.fs.bufferPool.Use(fh.inode.Id, size, false)
 			resp, err := fh.cloud.GetBlob(&GetBlobInput{
 				Key:   fh.key,
 				Start: offset,
-				Count: uint64(size),
+				Count: size,
 			})
 			if err != nil {
+				fh.inode.fs.bufferPool.Free(size, false)
 				requestErr = err
 				return
 			}
 			data, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
+				fh.inode.fs.bufferPool.Free(size, false)
 				requestErr = err
 				return
 			}
+			if uint64(len(data)) < size {
+				fh.inode.fs.bufferPool.Free(size-uint64(len(data)), false)
+			}
 			// Cache result from the server
-			fh.inode.buffers = addFileBuffer(fh.inode.buffers, offset, data, false, false)
+			fh.inode.buffers = addFileBuffer(fh.inode.Id, fh.inode.fs.bufferPool, fh.inode.buffers, offset, data, false, false)
 		}()
 	}
 	wg.Wait()
+
+	fh.inode.mu.Lock()
 
 	// we don't have to unlock the inode here, because FUSE lacks parallelism within a single file :)
 	// FIXME: What about multithreaded FUSE?
 
 	// copy cached buffers into the result
 	pos = offset
+	start = locateBuffer(fh.inode.buffers, offset)
 	for i := start; i < len(fh.inode.buffers); i++ {
 		b := &fh.inode.buffers[i]
 		if b.offset >= end {
@@ -673,6 +719,12 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 		}
 		if b.offset > pos {
 			// How is this possible? We should've just received it from the server!
+			for ; i < len(fh.inode.buffers); i++ {
+				b := &fh.inode.buffers[i]
+				if b.offset >= end {
+					break
+				}
+			}
 			err = requestErr
 			if err == nil {
 				err = fuse.EIO
