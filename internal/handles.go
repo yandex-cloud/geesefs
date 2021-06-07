@@ -36,8 +36,7 @@ import (
 type InodeCacheState int
 
 const (
-	ST_CACHED_META InodeCacheState = 0
-	ST_CACHED_DATA
+	ST_CACHED InodeCacheState = 0
 	ST_CREATED
 	ST_MODIFIED
 	ST_DELETED
@@ -55,6 +54,13 @@ func (i InodeAttributes) Equal(other InodeAttributes) bool {
 type ReadRange struct {
 	Offset uint64
 	Size uint64
+}
+
+type MPUPart struct {
+	Num uint32
+	Offset uint64
+	Size uint64
+	ETag string
 }
 
 type Inode struct {
@@ -82,17 +88,22 @@ type Inode struct {
 
 	dir *DirInodeData
 
-	CacheState  InodeCacheState
 	Invalid     bool
 	ImplicitDir bool
 
 	fileHandles int32
-
 	fileHandle *FileHandle
 
-	dirty bool
+	// cached/buffered data
+	CacheState  InodeCacheState
 	buffers []FileBuffer
 	readRanges []ReadRange
+	IsFlushing bool
+
+	// multipart upload state
+	mpuName string
+	mpuParts []MPUPart
+
 	userMetadata map[string][]byte
 	s3Metadata   map[string][]byte
 

@@ -225,6 +225,17 @@ func NewApp() (app *cli.App) {
 				Usage: "Assume all directory objects (\"dir/\") exist (default: off)",
 			},
 
+			cli.BoolFlag{
+				Name:  "no-dir-object",
+				Usage: "Do not create and check directory objects (\"dir/\") (default: off)",
+			},
+
+			cli.DurationFlag{
+				Name:  "max-flushers",
+				Value: 16,
+				Usage: "How much parallel requests should be used for flushing objects to server (default: 16)",
+			},
+
 			cli.DurationFlag{
 				Name:  "stat-cache-ttl",
 				Value: time.Minute,
@@ -237,6 +248,7 @@ func NewApp() (app *cli.App) {
 				Usage: "How long to cache name -> file/dir mappings in directory " +
 					"inodes.",
 			},
+
 			cli.DurationFlag{
 				Name:  "http-timeout",
 				Value: 30 * time.Second,
@@ -329,6 +341,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		// Tuning,
 		Cheap:        c.Bool("cheap"),
 		ExplicitDir:  c.Bool("no-implicit-dir"),
+		NoDirObject:  c.Bool("no-dir-object"),
+		MaxFlushers:  int64(c.Int("max-flushers")),
 		StatCacheTTL: c.Duration("stat-cache-ttl"),
 		TypeCacheTTL: c.Duration("type-cache-ttl"),
 		HTTPTimeout:  c.Duration("http-timeout"),

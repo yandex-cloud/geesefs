@@ -47,6 +47,8 @@ type FlagStorage struct {
 	// Tuning
 	Cheap        bool
 	ExplicitDir  bool
+	NoDirObject  bool
+	MaxFlushers  int64
 	StatCacheTTL time.Duration
 	TypeCacheTTL time.Duration
 	HTTPTimeout  time.Duration

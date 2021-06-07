@@ -873,28 +873,12 @@ func (parent *Inode) getChildName(name string) string {
 func (parent *Inode) Unlink(name string) (err error) {
 	parent.logFuse("Unlink", name)
 
-//	cloud, key := parent.cloud()
-	_, key := parent.cloud()
-	key = appendChildName(key, name)
-
-/*	_, err = cloud.DeleteBlob(&DeleteBlobInput{
-		Key: key,
-	})
-	if err == fuse.ENOENT {
-		// this might have been deleted out of band
-		err = nil
-	}
-	if err != nil {
-		return
-	}*/
-
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
 
 	inode := parent.findChildUnlocked(name)
 	if inode != nil {
 		parent.removeChildUnlocked(inode)
-		//inode.Parent = nil
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
@@ -903,6 +887,42 @@ func (parent *Inode) Unlink(name string) (err error) {
 	}
 
 	return
+}
+
+func (inode *Inode) SendDelete() {
+	cloud, key := inode.Parent.cloud()
+	key = appendChildName(key, *inode.Name)
+	if inode.isDir() && !cloud.Capabilities().DirBlob {
+		key += "/"
+	}
+	atomic.AddInt64(&inode.Parent.fs.activeFlushers, 1)
+	inode.IsFlushing = true
+	go func() {
+		_, err := cloud.DeleteBlob(&DeleteBlobInput{
+			Key: key,
+		})
+		inode.mu.Lock()
+		defer inode.mu.Unlock()
+		atomic.AddInt64(&inode.Parent.fs.activeFlushers, -1)
+		inode.IsFlushing = false
+		if err == fuse.ENOENT {
+			// object is already deleted
+			err = nil
+		}
+		if err != nil {
+			// FIXME Handle failures (retry or something else)
+			log.Errorf("Failed to delete object %v: %v", key, err)
+			return
+		}
+		delete(inode.Parent.dir.DeletedChildren, *inode.Name)
+		if inode.CacheState == ST_DELETED {
+			inode.CacheState = ST_CACHED
+			// FIXME And if all children are deleted, too!!!
+			if inode.refcnt == 0 {
+				inode.Parent.fs.DoForgetInode(inode.Id)
+			}
+		}
+	}()
 }
 
 func (parent *Inode) Create(
@@ -924,7 +944,6 @@ func (parent *Inode) Create(
 	inode.CacheState = ST_CREATED
 
 	fh = NewFileHandle(inode, metadata)
-	inode.dirty = true
 	inode.fileHandles = 1
 	inode.fileHandle = fh
 
@@ -938,10 +957,27 @@ func (parent *Inode) MkDir(
 
 	parent.logFuse("MkDir", name)
 
-	fs := parent.fs
+	parent.mu.Lock()
+	defer parent.mu.Unlock()
 
-	/*cloud, key := parent.cloud()
-	key = appendChildName(key, name)
+	inode = NewInode(parent.fs, parent, &name)
+	inode.ToDir()
+	inode.touch()
+	if !parent.fs.flags.NoDirObject {
+		inode.CacheState = ST_CREATED
+	}
+	// Record dir as actual
+	inode.dir.DirTime = inode.Attributes.Mtime
+	if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
+		parent.Attributes.Mtime = inode.Attributes.Mtime
+	}
+
+	return
+}
+
+func (dir *Inode) SendMkDir() {
+	cloud, key := dir.Parent.cloud()
+	key = appendChildName(key, *dir.Name)
 	if !cloud.Capabilities().DirBlob {
 		key += "/"
 	}
@@ -950,26 +986,22 @@ func (parent *Inode) MkDir(
 		Body:    nil,
 		DirBlob: true,
 	}
-
-	_, err = cloud.PutBlob(params)
-	if err != nil {
-		return
-	}*/
-
-	parent.mu.Lock()
-	defer parent.mu.Unlock()
-
-	inode = NewInode(fs, parent, &name)
-	inode.ToDir()
-	inode.touch()
-	inode.CacheState = ST_CREATED
-	// Record dir as actual
-	inode.dir.DirTime = inode.Attributes.Mtime
-	if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
-		parent.Attributes.Mtime = inode.Attributes.Mtime
-	}
-
-	return
+	dir.IsFlushing = true
+	atomic.AddInt64(&dir.fs.activeFlushers, 1)
+	go func() {
+		_, err := cloud.PutBlob(params)
+		dir.mu.Lock()
+		defer dir.mu.Unlock()
+		atomic.AddInt64(&dir.fs.activeFlushers, -1)
+		dir.IsFlushing = false
+		if err != nil {
+			log.Errorf("Failed to create directory object %v: %v", key, err)
+			return
+		}
+		if dir.CacheState == ST_CREATED {
+			dir.CacheState = ST_CACHED
+		}
+	}()
 }
 
 func appendChildName(parent, child string) string {
@@ -1012,26 +1044,6 @@ func (parent *Inode) isEmptyDir(fs *Goofys, name string) (isDir bool, err error)
 func (parent *Inode) RmDir(name string) (err error) {
 	parent.logFuse("Rmdir", name)
 
-	/*isDir, err := parent.isEmptyDir(parent.fs, name)
-	if err != nil {
-		return
-	}
-	// if this was an implicit dir, isEmptyDir would have returned
-	// isDir = false
-	if isDir {
-		cloud, key := parent.cloud()
-		key = appendChildName(key, name) + "/"
-
-		params := DeleteBlobInput{
-			Key: key,
-		}
-
-		_, err = cloud.DeleteBlob(&params)
-		if err != nil {
-			return
-		}
-	}*/
-
 	// we know this entry is gone
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
@@ -1039,11 +1051,16 @@ func (parent *Inode) RmDir(name string) (err error) {
 	inode := parent.findChildUnlocked(name)
 	if inode != nil {
 		parent.removeChildUnlocked(inode)
-		if parent.dir.DeletedChildren == nil {
-			parent.dir.DeletedChildren = make(map[string]*Inode)
+		if inode.ImplicitDir {
+			// FIXME: Make sure that cache remembers that this dir is removed
+			inode.Parent = nil
+		} else {
+			if parent.dir.DeletedChildren == nil {
+				parent.dir.DeletedChildren = make(map[string]*Inode)
+			}
+			parent.dir.DeletedChildren[name] = inode
+			inode.CacheState = ST_DELETED
 		}
-		parent.dir.DeletedChildren[name] = inode
-		inode.CacheState = ST_DELETED
 	}
 
 	return

@@ -87,6 +87,8 @@ type Goofys struct {
 
 	fileHandles map[fuseops.HandleID]*FileHandle
 
+	activeFlushers int64
+
 	replicators *Ticket
 	restorers   *Ticket
 
@@ -300,8 +302,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(forInode fuseops.InodeID, size uint64) ui
 			for i := 0; i < len(inode.buffers); i++ {
 				buf := &inode.buffers[i]
 				// FIXME: STUPID. Add generations ?
-				fmt.Printf("buf %v %v is dirty=%v\n", inode.Id, i, buf.dirty)
-				if !buf.dirty {
+				if buf.dirtyID == 0 {
 					requiredByReads := false
 					for _, r := range inode.readRanges {
 						if r.Offset < buf.offset+uint64(len(buf.buf)) &&
@@ -325,13 +326,68 @@ func (fs *Goofys) FreeSomeCleanBuffers(forInode fuseops.InodeID, size uint64) ui
 		}
 	}
 	if freed < size {
-		fs.StartFlusher()
+		//fs.StartFlusher()
 	}
 	return freed
 }
 
-func (fs *Goofys) StartFlusher() {
-	
+// Flusher goroutine.
+// Overall algorithm:
+// 1) File opened => reads and writes just populate cache
+// 2) File closed => flush it
+//    Created or fully overwritten =>
+//      Less than 5 MB => upload in a single part
+//      More than 5 MB => upload using multipart
+//    Updated =>
+//      CURRENTLY:
+//      Less than 5 MB => upload in a single part
+//      More than 5 MB => update using multipart copy
+//      Also we can't update less than 5 MB because it's the minimal part size
+// 3) Fsync triggered => intermediate full flush (same algorithm)
+// 4) Dirty memory limit reached => without on-disk cache we have to flush the whole object.
+//    With on-disk cache we can unload some dirty buffers to disk.
+//    If we could read our own multipart upload parts back after uploading them to server
+//    we could unload them to server.
+//    However, due to the fact that S3 parts have ___numbers___, we'll have problems
+//    if the beginning changes after the end.
+func (fs *Goofys) Flusher() {
+	for true {
+		fs.mu.RLock()
+		for _, inode := range fs.inodes {
+			if inode.mu.TryLock() {
+				if inode.IsFlushing {
+					// Already flushing
+				} else if inode.CacheState == ST_DELETED {
+					inode.SendDelete()
+				} else if inode.CacheState == ST_CREATED && inode.isDir() {
+					inode.SendMkDir()
+				} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
+					if inode.Attributes.Size < SINGLE_PART_SIZE {
+						if inode.fileHandles == 0 {
+							inode.SendSinglePartFlush()
+						}
+						// Don't flush small files with active file handles
+					} else {
+						panic("Nedopisano!")
+						for i := 0; i < len(inode.buffers); i++ {
+							buf := &inode.buffers[i]
+							if buf.dirtyID != 0 && !buf.flushed {
+								//part := fs.partNum(buf.offset)
+								//partOffset, partSize := fs.partRange(part)
+								// FIXME: First try to write out finished parts
+								//inode.SendMultiPartFlush()
+							}
+						}
+					}
+				}
+				inode.mu.Unlock()
+			}
+			if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
+				break
+			}
+		}
+		fs.mu.RUnlock()
+	}
 }
 
 type Mount struct {
@@ -825,19 +881,18 @@ func (fs *Goofys) ForgetInode(
 	}
 	stale := inode.DeRef(op.N)
 
-	if stale && !inode.dirty {
-		fs.mu.Lock()
-		defer fs.mu.Unlock()
-
-		delete(fs.inodes, op.Inode)
-		fs.forgotCnt += 1
-
-		if inode.CacheState != ST_DELETED {
-			inode.Parent.removeChildUnlocked(inode)
-		}
+	if stale && inode.CacheState == ST_CACHED {
+		fs.DoForgetInode(inode.Id)
 	}
 
 	return
+}
+
+func (fs *Goofys) DoForgetInode(inodeID fuseops.InodeID) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	delete(fs.inodes, inodeID)
+	fs.forgotCnt += 1
 }
 
 func (fs *Goofys) OpenDir(
@@ -1153,6 +1208,7 @@ func (fs *Goofys) SetInodeAttributes(
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
 
+	// FIXME: Implement truncate
 	attr, err := inode.GetAttributes()
 	if err == nil {
 		op.Attributes = *attr

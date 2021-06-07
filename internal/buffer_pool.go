@@ -18,6 +18,7 @@ package internal
 import (
 	. "github.com/kahing/goofys/api/common"
 	"github.com/jacobsa/fuse/fuseops"
+	"io"
 	"runtime"
 	"runtime/debug"
 	"sync"
@@ -30,6 +31,8 @@ var bufferLog = GetLogger("buffer")
 type BufferPool struct {
 	mu   sync.Mutex
 	cond *sync.Cond
+
+	curDirtyID uint64
 
 	cur uint64
 	curDirty uint64
@@ -51,9 +54,91 @@ type BufferPointer struct {
 
 type FileBuffer struct {
 	offset uint64
-	dirty bool
+	// Unmodified chunks (equal to the current server-side object state) have dirtyID = 0.
+	// Every write or split assigns a new unique chunk ID.
+	// Flusher tracks IDs that are currently being flushed to the server,
+	// which allows to do flush and write in parallel.
+	dirtyID uint64
+	// Is this chunk already saved to the server as a part of multipart upload?
+	flushed bool
+	// Data
 	buf []byte
 	ptr *BufferPointer
+}
+
+type MultiReader struct {
+	buffers [][]byte
+	idx int
+	pos int64
+	bufPos int
+	size int64
+}
+
+func NewMultiReader(buffers [][]byte) *MultiReader {
+	size := int64(0)
+	for i := 0; i < len(buffers); i++ {
+		size += int64(len(buffers[i]))
+	}
+	return &MultiReader{
+		buffers: buffers,
+		size: size,
+	}
+}
+
+func (r *MultiReader) Read(buf []byte) (n int, err error) {
+	n = 0
+	if r.idx >= len(r.buffers) {
+		err = io.EOF
+		return
+	}
+	remaining := len(buf)
+	for r.idx < len(r.buffers) {
+		l := len(r.buffers[r.idx]) - r.bufPos
+		if l > remaining {
+			l = remaining
+		}
+		copy(buf[n : n+l], r.buffers[r.idx][r.bufPos : r.bufPos+l])
+		n += l
+		r.pos = r.pos + int64(l)
+		r.bufPos += l
+		if r.bufPos >= len(r.buffers[r.idx]) {
+			r.idx++
+			r.bufPos = 0
+		}
+	}
+	return
+}
+
+func (r *MultiReader) Seek(offset int64, whence int) (newOffset int64, err error) {
+	if whence == io.SeekEnd {
+		offset += r.size
+	} else if whence == io.SeekCurrent {
+		offset += r.pos
+	}
+	if offset > r.size {
+		offset = r.size
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	r.idx = 0
+	r.pos = 0
+	r.bufPos = 0
+	for r.pos < offset {
+		end := r.pos + int64(len(r.buffers[r.idx]))
+		if end <= offset {
+			r.pos = end
+			r.idx++
+		} else {
+			r.bufPos = int(offset-r.pos)
+			r.pos = offset
+		}
+	}
+	return r.pos, nil
+}
+
+func (r *MultiReader) Len() int64 {
+	return r.size
 }
 
 func maxMemToUse(usedMem uint64) uint64 {
@@ -171,7 +256,7 @@ func (pool *BufferPool) FreeBuffer(buffers *[]FileBuffer, i int) uint64 {
 	buf.ptr.refs--
 	if buf.ptr.refs == 0 {
 		freed = uint64(len(buf.ptr.buf))
-		pool.Free(freed, buf.dirty)
+		pool.Free(freed, buf.dirtyID != 0)
 	}
 	*buffers = append((*buffers)[0 : i], (*buffers)[i+1 : ]...)
 	return freed
@@ -183,7 +268,7 @@ func (pool *BufferPool) FreeBufferUnlocked(buffers *[]FileBuffer, i int) uint64 
 	buf.ptr.refs--
 	if buf.ptr.refs == 0 {
 		freed = uint64(len(buf.ptr.buf))
-		pool.FreeUnlocked(freed, buf.dirty)
+		pool.FreeUnlocked(freed, buf.dirtyID != 0)
 	}
 	*buffers = append((*buffers)[0 : i], (*buffers)[i+1 : ]...)
 	return freed
