@@ -52,6 +52,8 @@ type FlagStorage struct {
 	StatCacheTTL time.Duration
 	TypeCacheTTL time.Duration
 	HTTPTimeout  time.Duration
+	ReadAheadKB  uint64
+	ReadMergeKB  uint64
 
 	// Debugging
 	DebugFuse  bool

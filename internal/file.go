@@ -668,6 +668,89 @@ func appendRequest(requests []uint64, offset uint64, size uint64, requestCost ui
 	return append(requests, offset, size)
 }
 
+// Load some inode data into memory
+// Must be called with inode.mu taken
+// Loaded range should be guarded against eviction by adding it into inode.readRanges
+func (inode *Inode) LoadRange(offset uint64, size uint64) (requestErr error) {
+
+	end := offset+size
+
+	// Collect requests to the server
+	requests := make([]uint64, 0)
+	start := locateBuffer(inode.buffers, offset)
+	pos := offset
+	for i := start; i < len(inode.buffers); i++ {
+		b := &inode.buffers[i]
+		if b.offset >= end {
+			break
+		}
+		if b.offset > pos {
+			requests = appendRequest(requests, pos, b.offset-pos, inode.fs.flags.ReadMergeKB*1024)
+		}
+		pos = b.offset+uint64(len(b.buf))
+	}
+	if pos < end {
+		requests = appendRequest(requests, pos, end-pos, inode.fs.flags.ReadMergeKB*1024)
+	}
+
+	if len(requests) == 0 {
+		return
+	}
+
+	// add readahead
+	nr := len(requests)
+	lastEnd := requests[nr-2]+requests[nr-1] + inode.fs.flags.ReadAheadKB*1024
+	if lastEnd > inode.Attributes.Size {
+		lastEnd = inode.Attributes.Size
+	}
+	requests[nr-1] = lastEnd-requests[nr-2]
+
+	// FIXME split requests into smaller chunks if we want to read in parallel
+
+	inode.mu.Unlock()
+
+	// FIXME Don't issue requests if another read is already loading the same range
+
+	// send requests
+	var wg sync.WaitGroup
+	cloud, key := inode.cloud()
+	for i := 0; i < len(requests); i += 2 {
+		offset := requests[i]
+		size := requests[i+1]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Maybe free some buffers first
+			inode.fs.bufferPool.Use(inode.Id, size, false)
+			resp, err := cloud.GetBlob(&GetBlobInput{
+				Key:   key,
+				Start: offset,
+				Count: size,
+			})
+			if err != nil {
+				inode.fs.bufferPool.Free(size, false)
+				requestErr = err
+				return
+			}
+			data, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				inode.fs.bufferPool.Free(size, false)
+				requestErr = err
+				return
+			}
+			if uint64(len(data)) < size {
+				inode.fs.bufferPool.Free(size-uint64(len(data)), false)
+			}
+			// Cache result from the server
+			inode.buffers = addFileBuffer(inode.Id, inode.fs.bufferPool, inode.buffers, offset, data, false, false)
+		}()
+	}
+	wg.Wait()
+
+	inode.mu.Lock()
+	return
+}
+
 func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err error) {
 	offset := uint64(sOffset)
 
@@ -680,25 +763,6 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 			}
 		}
 	}()
-
-	// FIXME Don't issue requests if another read is already loading the same range
-	fh.inode.mu.Lock()
-	fh.inode.readRanges = append(fh.inode.readRanges, ReadRange{
-		Offset: offset,
-		Size: uint64(len(buf)),
-	})
-	defer func() {
-		for i, v := range fh.inode.readRanges {
-			if v.Offset == offset && v.Size == uint64(len(buf)) {
-				fh.inode.readRanges = append(fh.inode.readRanges[0 : i], fh.inode.readRanges[i+1 : ]...)
-				break
-			}
-		}
-		fh.inode.mu.Unlock()
-	}()
-
-	requestCost := uint64(512*1024) // 512 KB // FIXME move into config
-	readAheadChunk := uint64(4*1024*1024) // 4 MB // FIXME move into config
 
 	if offset >= fh.inode.Attributes.Size {
 		// nothing to read
@@ -716,80 +780,26 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 		end = fh.inode.Attributes.Size
 	}
 
+	// Guard buffers against eviction
+	fh.inode.mu.Lock()
+	fh.inode.readRanges = append(fh.inode.readRanges, ReadRange{
+		Offset: offset,
+		Size: end-offset,
+	})
+	defer func() {
+		for i, v := range fh.inode.readRanges {
+			if v.Offset == offset && v.Size == end-offset {
+				fh.inode.readRanges = append(fh.inode.readRanges[0 : i], fh.inode.readRanges[i+1 : ]...)
+				break
+			}
+		}
+		fh.inode.mu.Unlock()
+	}()
+
 	// Don't read anything from the server if the file is just created
 	var requestErr error
 	if fh.inode.CacheState != ST_CREATED {
-
-		// Collect requests to the server
-		requests := make([]uint64, 0)
-		start := locateBuffer(fh.inode.buffers, offset)
-		pos := offset
-		for i := start; i < len(fh.inode.buffers); i++ {
-			b := &fh.inode.buffers[i]
-			if b.offset >= end {
-				break
-			}
-			if b.offset > pos {
-				requests = appendRequest(requests, pos, b.offset-pos, requestCost)
-			}
-			pos = b.offset+uint64(len(b.buf))
-		}
-		if pos < end {
-			requests = appendRequest(requests, pos, end-pos, requestCost)
-		}
-
-		// add readahead
-		if len(requests) > 0 {
-			nr := len(requests)
-			lastEnd := requests[nr-2]+requests[nr-1]+readAheadChunk
-			if lastEnd > fh.inode.Attributes.Size {
-				lastEnd = fh.inode.Attributes.Size
-			}
-			requests[nr-1] = lastEnd-requests[nr-2]
-		}
-
-		// FIXME split requests into smaller chunks if we want to read in parallel
-
-		// FIXME free unused buffers at some point
-
-		fh.inode.mu.Unlock()
-
-		// send requests
-		var wg sync.WaitGroup
-		for i := 0; i < len(requests); i += 2 {
-			offset := requests[i]
-			size := requests[i+1]
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				// Maybe free some buffers first
-				fh.inode.fs.bufferPool.Use(fh.inode.Id, size, false)
-				resp, err := fh.cloud.GetBlob(&GetBlobInput{
-					Key:   fh.key,
-					Start: offset,
-					Count: size,
-				})
-				if err != nil {
-					fh.inode.fs.bufferPool.Free(size, false)
-					requestErr = err
-					return
-				}
-				data, err := ioutil.ReadAll(resp.Body)
-				if err != nil {
-					fh.inode.fs.bufferPool.Free(size, false)
-					requestErr = err
-					return
-				}
-				if uint64(len(data)) < size {
-					fh.inode.fs.bufferPool.Free(size-uint64(len(data)), false)
-				}
-				// Cache result from the server
-				fh.inode.buffers = addFileBuffer(fh.inode.Id, fh.inode.fs.bufferPool, fh.inode.buffers, offset, data, false, false)
-			}()
-		}
-		wg.Wait()
-
-		fh.inode.mu.Lock()
+		requestErr = fh.inode.LoadRange(offset, end-offset)
 	}
 
 	// copy cached buffers into the result
@@ -826,14 +836,22 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	}
 	if pos < end {
 		// How is this possible? We should've just received it from the server!
-		err = requestErr
-		if err == nil {
-			err = fuse.EIO
+		if fh.inode.CacheState == ST_CREATED {
+			// It's okay if the file is just created
+			// Zero empty ranges in this case
+			for j := pos-offset; j < end-offset; j++ {
+				buf[j] = 0
+			}
+			pos = end
+		} else {
+			err = requestErr
+			if err == nil {
+				err = fuse.EIO
+			}
+			return
 		}
-		return
 	}
 
-	// FIXME: maybe we want to not read everything to return the first byte faster in some cases?
 	bytesRead = int(end-offset)
 
 	return

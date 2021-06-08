@@ -236,6 +236,19 @@ func NewApp() (app *cli.App) {
 				Usage: "How much parallel requests should be used for flushing objects to server (default: 16)",
 			},
 
+			cli.IntFlag{
+				Name:  "read-ahead",
+				Value: 4096,
+				Usage: "How much data in KB should be pre-loaded with every HTTP request (default: 4096)",
+			},
+
+			cli.IntFlag{
+				Name:  "read-merge",
+				Value: 512,
+				Usage: "Two HTTP requests required to satisfy a read will be merged into one" +
+					" if they're at most this number of KB away (default: 512)",
+			},
+
 			cli.DurationFlag{
 				Name:  "stat-cache-ttl",
 				Value: time.Minute,
@@ -330,6 +343,11 @@ func parseOptions(m map[string]string, s string) {
 // PopulateFlags adds the flags accepted by run to the supplied flag set, returning the
 // variables into which the flags will parse.
 func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
+	readAhead := c.Int("read-ahead")
+	if readAhead < 0 {
+		readAhead = 4096
+	}
+
 	flags := &FlagStorage{
 		// File system
 		MountOptions: make(map[string]string),
@@ -346,6 +364,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		StatCacheTTL: c.Duration("stat-cache-ttl"),
 		TypeCacheTTL: c.Duration("type-cache-ttl"),
 		HTTPTimeout:  c.Duration("http-timeout"),
+		ReadAheadKB:  uint64(readAhead),
+		ReadMergeKB:  uint64(c.Int("read-merge")),
 
 		// Common Backend Config
 		Endpoint:       c.String("endpoint"),
