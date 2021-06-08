@@ -454,6 +454,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 
 	if fh.inode.CacheState != ST_CREATED {
 		fh.inode.CacheState = ST_MODIFIED
+		fh.inode.fs.flusherCond.Broadcast()
 	}
 	if fh.inode.Attributes.Size < uint64(offset)+uint64(len(data)) {
 		fh.inode.Attributes.Size = uint64(offset)+uint64(len(data))
@@ -680,6 +681,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 		}
 	}()
 
+	// FIXME Don't issue requests if another read is already loading the same range
 	fh.inode.mu.Lock()
 	fh.inode.readRanges = append(fh.inode.readRanges, ReadRange{
 		Offset: offset,
@@ -944,6 +946,8 @@ func (fh *FileHandle) Release() {
 		// delete fh
 		fh.inode.fileHandle = nil
 	}
+
+	fh.inode.fs.flusherCond.Broadcast()
 }
 
 /*func (fh *FileHandle) readFromStream(offset int64, buf []byte) (bytesRead int, err error) {
@@ -1066,6 +1070,7 @@ func (inode *Inode) SendSinglePartFlush() {
 			inode.CacheState = ST_CACHED
 		}
 		inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
+		inode.fs.flusherCond.Broadcast()
 	}()
 }
 

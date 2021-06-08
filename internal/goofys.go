@@ -64,6 +64,9 @@ type Goofys struct {
 	// from per-inode locks). Make sure to see the notes on lock ordering above.
 	mu sync.RWMutex
 
+	flusherMu sync.Mutex
+	flusherCond *sync.Cond
+
 	// The next inode ID to hand out. We assume that this will never overflow,
 	// since even if we were handing out inode IDs at 4 GHz, it would still take
 	// over a century to do so.
@@ -241,6 +244,9 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	fs.replicators = Ticket{Total: 16}.Init()
 	fs.restorers = Ticket{Total: 20}.Init()
 
+	fs.flusherCond = sync.NewCond(&fs.flusherMu)
+	go fs.Flusher()
+
 	return fs
 }
 
@@ -351,43 +357,48 @@ func (fs *Goofys) FreeSomeCleanBuffers(forInode fuseops.InodeID, size uint64) ui
 //    However, due to the fact that S3 parts have ___numbers___, we'll have problems
 //    if the beginning changes after the end.
 func (fs *Goofys) Flusher() {
+	fs.flusherMu.Lock()
 	for true {
-		fs.mu.RLock()
-		for _, inode := range fs.inodes {
-			if inode.mu.TryLock() {
-				if inode.IsFlushing {
-					// Already flushing
-				} else if inode.CacheState == ST_DELETED {
-					inode.SendDelete()
-				} else if inode.CacheState == ST_CREATED && inode.isDir() {
-					inode.SendMkDir()
-				} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
-					if inode.Attributes.Size < SINGLE_PART_SIZE {
-						if inode.fileHandles == 0 {
-							inode.SendSinglePartFlush()
-						}
-						// Don't flush small files with active file handles
-					} else {
-						panic("Nedopisano!")
-						for i := 0; i < len(inode.buffers); i++ {
-							buf := &inode.buffers[i]
-							if buf.dirtyID != 0 && !buf.flushed {
-								//part := fs.partNum(buf.offset)
-								//partOffset, partSize := fs.partRange(part)
-								// FIXME: First try to write out finished parts
-								//inode.SendMultiPartFlush()
+		fs.flusherCond.Wait()
+		if atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers {
+			fs.mu.RLock()
+			for _, inode := range fs.inodes {
+				if inode.mu.TryLock() {
+					if inode.IsFlushing {
+						// Already flushing
+					} else if inode.CacheState == ST_DELETED {
+						inode.SendDelete()
+					} else if inode.CacheState == ST_CREATED && inode.isDir() {
+						inode.SendMkDir()
+					} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
+						if inode.Attributes.Size < SINGLE_PART_SIZE {
+							if inode.fileHandles == 0 {
+								inode.SendSinglePartFlush()
+							}
+							// Don't flush small files with active file handles
+						} else {
+							panic("Nedopisano!")
+							for i := 0; i < len(inode.buffers); i++ {
+								buf := &inode.buffers[i]
+								if buf.dirtyID != 0 && !buf.flushed {
+									//part := fs.partNum(buf.offset)
+									//partOffset, partSize := fs.partRange(part)
+									// FIXME: First try to write out finished parts
+									//inode.SendMultiPartFlush()
+								}
 							}
 						}
 					}
+					inode.mu.Unlock()
 				}
-				inode.mu.Unlock()
+				if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
+					break
+				}
 			}
-			if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
-				break
-			}
+			fs.mu.RUnlock()
 		}
-		fs.mu.RUnlock()
 	}
+	fs.flusherMu.Unlock()
 }
 
 type Mount struct {

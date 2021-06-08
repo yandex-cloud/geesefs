@@ -37,9 +37,9 @@ type InodeCacheState int
 
 const (
 	ST_CACHED InodeCacheState = 0
-	ST_CREATED
-	ST_MODIFIED
-	ST_DELETED
+	ST_CREATED InodeCacheState = 1
+	ST_MODIFIED InodeCacheState = 2
+	ST_DELETED InodeCacheState = 3
 )
 
 type InodeAttributes struct {

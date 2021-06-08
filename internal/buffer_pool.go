@@ -92,13 +92,14 @@ func (r *MultiReader) Read(buf []byte) (n int, err error) {
 		return
 	}
 	remaining := len(buf)
-	for r.idx < len(r.buffers) {
+	for r.idx < len(r.buffers) && remaining > 0 {
 		l := len(r.buffers[r.idx]) - r.bufPos
 		if l > remaining {
 			l = remaining
 		}
 		copy(buf[n : n+l], r.buffers[r.idx][r.bufPos : r.bufPos+l])
 		n += l
+		remaining -= l
 		r.pos = r.pos + int64(l)
 		r.bufPos += l
 		if r.bufPos >= len(r.buffers[r.idx]) {
@@ -187,6 +188,11 @@ func (pool *BufferPool) recomputeBufferLimit() {
 }
 
 func (pool *BufferPool) Use(inode fuseops.InodeID, size uint64, dirty bool) {
+	if dirty {
+		// FIXME
+		return
+	}
+
 	bufferLog.Debugf("requesting %v", size)
 
 	pool.mu.Lock()
@@ -228,12 +234,20 @@ func (pool *BufferPool) Use(inode fuseops.InodeID, size uint64, dirty bool) {
 }
 
 func (pool *BufferPool) Free(size uint64, dirty bool) {
+	if dirty {
+		// FIXME
+		return
+	}
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	pool.FreeUnlocked(size, dirty)
 }
 
 func (pool *BufferPool) FreeUnlocked(size uint64, dirty bool) {
+	if dirty {
+		// FIXME
+		return
+	}
 	notify := pool.cur+size > pool.max
 	pool.cur -= size
 	if dirty {

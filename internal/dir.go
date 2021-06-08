@@ -127,7 +127,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 		panic(fmt.Sprintf("%v is not a directory", inode.FullName()))
 	}
 
-	if isS3 && inode.CacheState != ST_DELETED && inode.fs.flags.TypeCacheTTL != 0 {
+	if isS3 && parent != nil && inode.fs.flags.TypeCacheTTL != 0 {
 		parent.mu.Lock()
 		defer parent.mu.Unlock()
 
@@ -211,7 +211,7 @@ func (dh *DirHandle) listObjectsSlurp(prefix string) (resp *ListBlobsOutput, err
 
 	cloud, key := inode.cloud()
 
-	if dh.inode.CacheState != ST_DELETED {
+	if dh.inode.Parent != nil {
 		inode = dh.inode.Parent
 		var parentCloud StorageBackend
 		parentCloud, reqPrefix = inode.cloud()
@@ -315,7 +315,7 @@ func (dh *DirHandle) listObjects(prefix string) (resp *ListBlobsOutput, err erro
 
 	if dh.Marker == nil &&
 		fs.flags.TypeCacheTTL != 0 &&
-		(dh.inode.CacheState != ST_DELETED && parent.dir.seqOpenDirScore >= 2) {
+		(parent != nil && parent.dir.seqOpenDirScore >= 2) {
 		go func() {
 			resp, err := dh.listObjectsSlurp(prefix)
 			if err != nil {
@@ -884,6 +884,7 @@ func (parent *Inode) Unlink(name string) (err error) {
 		}
 		parent.dir.DeletedChildren[name] = inode
 		inode.CacheState = ST_DELETED
+		inode.fs.flusherCond.Broadcast()
 	}
 
 	return
@@ -922,6 +923,7 @@ func (inode *Inode) SendDelete() {
 				inode.Parent.fs.DoForgetInode(inode.Id)
 			}
 		}
+		inode.fs.flusherCond.Broadcast()
 	}()
 }
 
@@ -942,6 +944,7 @@ func (parent *Inode) Create(
 		Mtime: now,
 	}
 	inode.CacheState = ST_CREATED
+	fs.flusherCond.Broadcast()
 
 	fh = NewFileHandle(inode, metadata)
 	inode.fileHandles = 1
@@ -971,6 +974,7 @@ func (parent *Inode) MkDir(
 	if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
 		parent.Attributes.Mtime = inode.Attributes.Mtime
 	}
+	parent.fs.flusherCond.Broadcast()
 
 	return
 }
@@ -1001,6 +1005,7 @@ func (dir *Inode) SendMkDir() {
 		if dir.CacheState == ST_CREATED {
 			dir.CacheState = ST_CACHED
 		}
+		dir.fs.flusherCond.Broadcast()
 	}()
 }
 
@@ -1060,6 +1065,7 @@ func (parent *Inode) RmDir(name string) (err error) {
 			}
 			parent.dir.DeletedChildren[name] = inode
 			inode.CacheState = ST_DELETED
+			parent.fs.flusherCond.Broadcast()
 		}
 	}
 

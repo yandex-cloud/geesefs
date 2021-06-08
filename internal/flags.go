@@ -230,7 +230,7 @@ func NewApp() (app *cli.App) {
 				Usage: "Do not create and check directory objects (\"dir/\") (default: off)",
 			},
 
-			cli.DurationFlag{
+			cli.IntFlag{
 				Name:  "max-flushers",
 				Value: 16,
 				Usage: "How much parallel requests should be used for flushing objects to server (default: 16)",
