@@ -671,7 +671,7 @@ func appendRequest(requests []uint64, offset uint64, size uint64, requestCost ui
 // Load some inode data into memory
 // Must be called with inode.mu taken
 // Loaded range should be guarded against eviction by adding it into inode.readRanges
-func (inode *Inode) LoadRange(offset uint64, size uint64) (requestErr error) {
+func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool) (requestErr error) {
 
 	end := offset+size
 
@@ -698,12 +698,14 @@ func (inode *Inode) LoadRange(offset uint64, size uint64) (requestErr error) {
 	}
 
 	// add readahead
-	nr := len(requests)
-	lastEnd := requests[nr-2]+requests[nr-1] + inode.fs.flags.ReadAheadKB*1024
-	if lastEnd > inode.Attributes.Size {
-		lastEnd = inode.Attributes.Size
+	if !skipReadahead {
+		nr := len(requests)
+		lastEnd := requests[nr-2]+requests[nr-1] + inode.fs.flags.ReadAheadKB*1024
+		if lastEnd > inode.Attributes.Size {
+			lastEnd = inode.Attributes.Size
+		}
+		requests[nr-1] = lastEnd-requests[nr-2]
 	}
-	requests[nr-1] = lastEnd-requests[nr-2]
 
 	// FIXME split requests into smaller chunks if we want to read in parallel
 
@@ -742,13 +744,31 @@ func (inode *Inode) LoadRange(offset uint64, size uint64) (requestErr error) {
 				inode.fs.bufferPool.Free(size-uint64(len(data)), false)
 			}
 			// Cache result from the server
+			inode.mu.Lock()
 			inode.buffers = addFileBuffer(inode.Id, inode.fs.bufferPool, inode.buffers, offset, data, false, false)
+			inode.mu.Unlock()
 		}()
 	}
 	wg.Wait()
 
 	inode.mu.Lock()
 	return
+}
+
+func (inode *Inode) LockRange(offset uint64, size uint64) {
+	inode.readRanges = append(inode.readRanges, ReadRange{
+		Offset: offset,
+		Size: size,
+	})
+}
+
+func (inode *Inode) UnlockRange(offset uint64, size uint64) {
+	for i, v := range inode.readRanges {
+		if v.Offset == offset && v.Size == size {
+			inode.readRanges = append(inode.readRanges[0 : i], inode.readRanges[i+1 : ]...)
+			break
+		}
+	}
 }
 
 func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err error) {
@@ -782,24 +802,14 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 
 	// Guard buffers against eviction
 	fh.inode.mu.Lock()
-	fh.inode.readRanges = append(fh.inode.readRanges, ReadRange{
-		Offset: offset,
-		Size: end-offset,
-	})
-	defer func() {
-		for i, v := range fh.inode.readRanges {
-			if v.Offset == offset && v.Size == end-offset {
-				fh.inode.readRanges = append(fh.inode.readRanges[0 : i], fh.inode.readRanges[i+1 : ]...)
-				break
-			}
-		}
-		fh.inode.mu.Unlock()
-	}()
+	defer fh.inode.mu.Unlock()
+	fh.inode.LockRange(offset, end-offset)
+	defer fh.inode.UnlockRange(offset, end-offset)
 
 	// Don't read anything from the server if the file is just created
 	var requestErr error
 	if fh.inode.CacheState != ST_CREATED {
-		requestErr = fh.inode.LoadRange(offset, end-offset)
+		requestErr = fh.inode.LoadRange(offset, end-offset, false)
 	}
 
 	// copy cached buffers into the result
@@ -1006,11 +1016,25 @@ func (fh *FileHandle) Release() {
 	return
 }*/
 
-func (inode *Inode) SendSinglePartFlush() {
+func (inode *Inode) FlushSmallObject() {
 
-	loadStart := uint64(0)
-	loadEnd := uint64(0)
+	inode.mu.Lock()
+	defer inode.mu.Unlock()
+
+	sz := inode.Attributes.Size
+	if sz > SINGLE_PART_SIZE || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
+		inode.IsFlushing = false
+		atomic.AddInt64(&inode.fs.activeFlushers, -1)
+		inode.fs.flusherCond.Broadcast()
+		return
+	}
+
+	inode.LockRange(0, sz)
+	defer inode.UnlockRange(0, sz)
+
 	if inode.CacheState == ST_MODIFIED {
+		loadStart := uint64(0)
+		loadEnd := uint64(0)
 		last := uint64(0)
 		for i := 0; i < len(inode.buffers); i++ {
 			buf := &inode.buffers[i]
@@ -1021,21 +1045,19 @@ func (inode *Inode) SendSinglePartFlush() {
 				loadEnd = buf.offset
 			}
 			last = buf.offset + uint64(len(buf.buf))
-			if last >= inode.Attributes.Size {
+			if last >= sz {
 				break
 			}
 		}
-		if last < inode.Attributes.Size {
+		if last < sz {
 			if loadEnd == 0 {
 				loadStart = last
 			}
-			loadEnd = inode.Attributes.Size
+			loadEnd = sz
 		}
-	}
-
-	if loadEnd > 0 {
-		// FIXME Load data from the server
-		panic(fmt.Sprintf("Opyat nedopisano! %v", loadStart))
+		if loadEnd > 0 {
+			inode.LoadRange(loadStart, loadEnd-loadStart, true)
+		}
 	}
 
 	var bufs [][]byte
@@ -1049,8 +1071,13 @@ func (inode *Inode) SendSinglePartFlush() {
 			panic("It cannot be!")
 		}
 		last = b.offset+uint64(len(b.buf))
-		bufs[i] = b.buf
 		bufIds[inode.buffers[i].dirtyID] = true
+		if last > sz {
+			bufs[i] = b.buf[0:sz-b.offset]
+			break
+		} else {
+			bufs[i] = b.buf
+		}
 	}
 
 	cloud, key := inode.cloud()
@@ -1061,35 +1088,36 @@ func (inode *Inode) SendSinglePartFlush() {
 		Size:        PUInt64(uint64(bufReader.Len())),
 		ContentType: inode.fs.flags.GetMimeType(*inode.FullName()),
 	}
-	inode.IsFlushing = true
-	atomic.AddInt64(&inode.fs.activeFlushers, 1)
-	go func() {
-		resp, err := cloud.PutBlob(params)
-		inode.mu.Lock()
-		defer inode.mu.Unlock()
-		atomic.AddInt64(&inode.fs.activeFlushers, -1)
-		inode.IsFlushing = false
-		if err != nil {
-			log.Errorf("Failed to flush small file %v: %v", key, err)
-			return
-		}
+
+	inode.mu.Unlock()
+	resp, err := cloud.PutBlob(params)
+	inode.mu.Lock()
+
+	if err != nil {
+		log.Errorf("Failed to flush small file %v: %v", key, err)
+	} else {
+		log.Debugf("Flushed small file %v", key)
 		stillDirty := false
 		for i := 0; i < len(inode.buffers); i++ {
 			b := &inode.buffers[i]
-			if b.dirtyID != 0 && bufIds[b.dirtyID] {
-				// OK, not dirty anymore
-				b.dirtyID = 0
-				b.flushed = false
-			} else {
-				stillDirty = true
+			if b.dirtyID != 0 {
+				if bufIds[b.dirtyID] {
+					// OK, not dirty anymore
+					b.dirtyID = 0
+				} else {
+					b.flushed = false
+				}
 			}
 		}
 		if !stillDirty {
 			inode.CacheState = ST_CACHED
 		}
 		inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
-		inode.fs.flusherCond.Broadcast()
-	}()
+	}
+
+	inode.IsFlushing = false
+	atomic.AddInt64(&inode.fs.activeFlushers, -1)
+	inode.fs.flusherCond.Broadcast()
 }
 
 func (inode *Inode) updateFromFlush(etag *string, lastModified *time.Time, storageClass *string) {

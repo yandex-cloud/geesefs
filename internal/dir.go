@@ -903,7 +903,6 @@ func (inode *Inode) SendDelete() {
 			Key: key,
 		})
 		inode.mu.Lock()
-		defer inode.mu.Unlock()
 		atomic.AddInt64(&inode.Parent.fs.activeFlushers, -1)
 		inode.IsFlushing = false
 		if err == fuse.ENOENT {
@@ -913,17 +912,24 @@ func (inode *Inode) SendDelete() {
 		if err != nil {
 			// FIXME Handle failures (retry or something else)
 			log.Errorf("Failed to delete object %v: %v", key, err)
+			inode.mu.Unlock()
 			return
 		}
 		delete(inode.Parent.dir.DeletedChildren, *inode.Name)
+		forget := false
 		if inode.CacheState == ST_DELETED {
 			inode.CacheState = ST_CACHED
 			// FIXME And if all children are deleted, too!!!
 			if inode.refcnt == 0 {
-				inode.Parent.fs.DoForgetInode(inode.Id)
+				// Don't call forget with inode locks taken ... :-X
+				forget = true
 			}
 		}
 		inode.fs.flusherCond.Broadcast()
+		inode.mu.Unlock()
+		if forget {
+			inode.fs.DoForgetInode(inode.Id)
+		}
 	}()
 }
 

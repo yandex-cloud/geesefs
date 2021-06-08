@@ -366,16 +366,24 @@ func (fs *Goofys) Flusher() {
 				if inode.mu.TryLock() {
 					if inode.IsFlushing {
 						// Already flushing
+						inode.mu.Unlock()
 					} else if inode.CacheState == ST_DELETED {
 						inode.SendDelete()
+						inode.mu.Unlock()
 					} else if inode.CacheState == ST_CREATED && inode.isDir() {
 						inode.SendMkDir()
+						inode.mu.Unlock()
 					} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
 						if inode.Attributes.Size < SINGLE_PART_SIZE {
 							if inode.fileHandles == 0 {
-								inode.SendSinglePartFlush()
+								atomic.AddInt64(&inode.fs.activeFlushers, 1)
+								inode.IsFlushing = true
+								inode.mu.Unlock()
+								go inode.FlushSmallObject()
+							} else {
+								// Don't flush small files with active file handles
+								inode.mu.Unlock()
 							}
-							// Don't flush small files with active file handles
 						} else {
 							panic("Nedopisano!")
 							for i := 0; i < len(inode.buffers); i++ {
@@ -388,8 +396,9 @@ func (fs *Goofys) Flusher() {
 								}
 							}
 						}
+					} else {
+						inode.mu.Unlock()
 					}
-					inode.mu.Unlock()
 				}
 				if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
 					break
@@ -888,9 +897,11 @@ func (fs *Goofys) ForgetInode(
 
 	if inode.Parent != nil {
 		inode.Parent.mu.Lock()
-		defer inode.Parent.mu.Unlock()
 	}
 	stale := inode.DeRef(op.N)
+	if inode.Parent != nil {
+		inode.Parent.mu.Unlock()
+	}
 
 	if stale && inode.CacheState == ST_CACHED {
 		fs.DoForgetInode(inode.Id)
@@ -1142,10 +1153,12 @@ func (fs *Goofys) CreateFile(
 
 	inode, fh := parent.Create(op.Name, op.Metadata)
 
-	parent.mu.Lock()
-
+	// Always take inode locks after fs lock if you need both...
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
+
+	parent.mu.Lock()
+
 	fs.insertInode(parent, inode)
 
 	parent.mu.Unlock()
