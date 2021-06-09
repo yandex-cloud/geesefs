@@ -90,6 +90,13 @@ func (s *TestBackend) MultipartBlobAdd(param *MultipartBlobAddInput) (*Multipart
 	return s.StorageBackend.MultipartBlobAdd(param)
 }
 
+func (s *TestBackend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.StorageBackend.MultipartBlobCopy(param)
+}
+
 func (s *TestBackend) MultipartBlobAbort(param *MultipartBlobCommitInput) (*MultipartBlobAbortOutput, error) {
 	if s.err != nil {
 		return nil, s.err

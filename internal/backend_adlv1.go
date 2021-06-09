@@ -569,6 +569,11 @@ func (b *ADLv1) uploadPart(param *MultipartBlobAddInput, offset uint64) error {
 	return err
 }
 
+func (b *ADLv1) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
+	// FIXME: Implement part copy
+	return nil, syscall.ENOSYS
+}
+
 func (b *ADLv1) detectTransientError(param *MultipartBlobAddInput, offset uint64) error {
 	leaseId, err := uuid.FromString(*param.Commit.UploadId)
 	if err != nil {
@@ -629,6 +634,7 @@ func (b *ADLv1) MultipartBlobCommit(param *MultipartBlobCommitInput) (*Multipart
 	if err != nil {
 		return nil, err
 	}
+	// FIXME Allow to skip some part numbers
 	res, err := b.client.Append(context.TODO(), b.account, *param.Key,
 		&ReadSeekerCloser{bytes.NewReader([]byte(""))}, PInt64(int64(commitData.Size)),
 		adl.CLOSE, &leaseId, &leaseId)

@@ -17,7 +17,7 @@ package internal
 
 import (
 //	"errors"
-	"fmt"
+//	"fmt"
 	"io"
 	"io/ioutil"
 	"sync"
@@ -305,6 +305,7 @@ func (fs *Goofys) partRange(num uint64) (offset uint64, size uint64) {
 func locateBuffer(buffers []FileBuffer, offset uint64) int {
 	start := 0
 	for start < len(buffers) {
+		// FIXME binary search?
 		b := &buffers[start]
 		if b.offset + uint64(len(b.buf)) > offset {
 			break
@@ -451,13 +452,15 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 
 	// FIXME With this cache in action, usual kernel page cache is probably redundant
 	fh.inode.buffers = addFileBuffer(fh.inode.Id, fh.inode.fs.bufferPool, fh.inode.buffers, uint64(offset), data, true, true)
+	end := uint64(offset)+uint64(len(data))
+	fh.inode.lastWriteEnd = end
 
 	if fh.inode.CacheState != ST_CREATED {
 		fh.inode.CacheState = ST_MODIFIED
 		fh.inode.fs.flusherCond.Broadcast()
 	}
-	if fh.inode.Attributes.Size < uint64(offset)+uint64(len(data)) {
-		fh.inode.Attributes.Size = uint64(offset)+uint64(len(data))
+	if fh.inode.Attributes.Size < end {
+		fh.inode.Attributes.Size = end
 	}
 	fh.inode.Attributes.Mtime = time.Now()
 
@@ -1016,72 +1019,90 @@ func (fh *FileHandle) Release() {
 	return
 }*/
 
+func (inode *Inode) CheckLoadRange(offset uint64, size uint64) {
+	loadStart := uint64(0)
+	loadEnd := uint64(0)
+	last := offset
+	end := offset+size
+	for i := locateBuffer(inode.buffers, offset); i < len(inode.buffers); i++ {
+		buf := &inode.buffers[i]
+		if buf.offset > last {
+			if loadEnd == 0 {
+				loadStart = last
+			}
+			loadEnd = buf.offset
+		}
+		last = buf.offset + uint64(len(buf.buf))
+		if last >= end {
+			break
+		}
+	}
+	if last < end {
+		if loadEnd == 0 {
+			loadStart = last
+		}
+		loadEnd = end
+	}
+	// FIXME: Don't fail to load range when the file is extended by sparse write
+	if loadEnd > 0 {
+		inode.LoadRange(loadStart, loadEnd-loadStart, true)
+	}
+}
+
+func (inode *Inode) GetMultiReader(offset uint64, size uint64) (reader *MultiReader, bufIds map[uint64]bool) {
+	reader = NewMultiReader()
+	bufIds = make(map[uint64]bool)
+	last := offset
+	end := offset+size
+	for i := locateBuffer(inode.buffers, offset); i < len(inode.buffers); i++ {
+		b := &inode.buffers[i]
+		if last < b.offset {
+			// It can happen if the file is sparse. Then we have to zero-fill empty ranges
+			reader.AddZero(b.offset-last)
+		}
+		last = b.offset+uint64(len(b.buf))
+		if b.dirtyID != 0 {
+			bufIds[b.dirtyID] = true
+		}
+		if last > end {
+			reader.AddBuffer(b.buf[0:end-b.offset])
+			break
+		} else {
+			reader.AddBuffer(b.buf)
+		}
+	}
+	if last < end {
+		// Again, can happen for new sparse files
+		reader.AddZero(end-last)
+	}
+	return
+}
+
 func (inode *Inode) FlushSmallObject() {
 
 	inode.mu.Lock()
-	defer inode.mu.Unlock()
 
 	sz := inode.Attributes.Size
 	if sz > SINGLE_PART_SIZE || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
 		inode.IsFlushing = false
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
 		inode.fs.flusherCond.Broadcast()
+		inode.mu.Unlock()
 		return
 	}
 
 	inode.LockRange(0, sz)
-	defer inode.UnlockRange(0, sz)
 
 	if inode.CacheState == ST_MODIFIED {
-		loadStart := uint64(0)
-		loadEnd := uint64(0)
-		last := uint64(0)
-		for i := 0; i < len(inode.buffers); i++ {
-			buf := &inode.buffers[i]
-			if buf.offset > last {
-				if loadEnd == 0 {
-					loadStart = last
-				}
-				loadEnd = buf.offset
-			}
-			last = buf.offset + uint64(len(buf.buf))
-			if last >= sz {
-				break
-			}
-		}
-		if last < sz {
-			if loadEnd == 0 {
-				loadStart = last
-			}
-			loadEnd = sz
-		}
-		if loadEnd > 0 {
-			inode.LoadRange(loadStart, loadEnd-loadStart, true)
-		}
-	}
-
-	var bufs [][]byte
-	var bufIds map[uint64]bool
-	bufs = make([][]byte, len(inode.buffers))
-	bufIds = make(map[uint64]bool)
-	last := uint64(0)
-	for i := 0; i < len(inode.buffers); i++ {
-		b := &inode.buffers[i]
-		if b.offset > last {
-			panic("It cannot be!")
-		}
-		last = b.offset+uint64(len(b.buf))
-		bufIds[inode.buffers[i].dirtyID] = true
-		if last > sz {
-			bufs[i] = b.buf[0:sz-b.offset]
-			break
-		} else {
-			bufs[i] = b.buf
+		inode.CheckLoadRange(0, sz)
+		if inode.Attributes.Size < sz {
+			// File size may have been changed in between
+			sz = inode.Attributes.Size
 		}
 	}
 
 	cloud, key := inode.cloud()
-	bufReader := NewMultiReader(bufs)
+	bufReader, bufIds := inode.GetMultiReader(0, sz)
 	params := &PutBlobInput{
 		Key:         key,
 		Body:        bufReader,
@@ -1094,6 +1115,7 @@ func (inode *Inode) FlushSmallObject() {
 	inode.mu.Lock()
 
 	if err != nil {
+		// FIXME Handle failures
 		log.Errorf("Failed to flush small file %v: %v", key, err)
 	} else {
 		log.Debugf("Flushed small file %v", key)
@@ -1104,8 +1126,9 @@ func (inode *Inode) FlushSmallObject() {
 				if bufIds[b.dirtyID] {
 					// OK, not dirty anymore
 					b.dirtyID = 0
-				} else {
 					b.flushed = false
+				} else {
+					stillDirty = true
 				}
 			}
 		}
@@ -1116,6 +1139,213 @@ func (inode *Inode) FlushSmallObject() {
 	}
 
 	inode.IsFlushing = false
+	atomic.AddInt64(&inode.fs.activeFlushers, -1)
+	inode.fs.flusherCond.Broadcast()
+
+	inode.UnlockRange(0, sz)
+	inode.mu.Unlock()
+}
+
+func (inode *Inode) FlushMultipart() {
+
+	inode.mu.Lock()
+
+	// FIXME: Upload parts of the same object in parallel
+	if inode.Attributes.Size <= SINGLE_PART_SIZE || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
+		inode.IsFlushing = false
+		inode.mu.Unlock()
+		atomic.AddInt64(&inode.fs.activeFlushers, -1)
+		inode.fs.flusherCond.Broadcast()
+		return
+	}
+
+	// Pick a part ID to flush
+	var part, partOffset, partSize uint64
+	var found bool
+	for i := 0; i < len(inode.buffers); i++ {
+		buf := &inode.buffers[i]
+		if buf.dirtyID != 0 && !buf.flushed {
+			part = inode.fs.partNum(buf.offset)
+			// Don't write out the last part that's still written to
+			if inode.fileHandles == 0 || part != inode.fs.partNum(inode.lastWriteEnd) {
+				partOffset, partSize = inode.fs.partRange(part)
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		inode.IsFlushing = false
+		inode.mu.Unlock()
+		atomic.AddInt64(&inode.fs.activeFlushers, -1)
+		inode.fs.flusherCond.Broadcast()
+		return
+	}
+
+	cloud, key := inode.cloud()
+	log.Debugf("Flushing part %v (%v +%v) of %v", part, partOffset, partSize, key)
+
+	// Initiate multipart upload, if not yet
+	if inode.mpu == nil {
+		inode.mu.Unlock()
+		resp, err := cloud.MultipartBlobBegin(&MultipartBlobBeginInput{
+			Key: key,
+			ContentType: inode.fs.flags.GetMimeType(key),
+		})
+		inode.mu.Lock()
+		if err != nil {
+			//fh.lastWriteError = mapAwsError(err) // FIXME return to user?
+			log.Errorf("Failed to initiate multipart upload for %v: %v", key, err)
+		} else {
+			inode.mpu = resp
+		}
+		// File size may have been changed
+		if inode.Attributes.Size <= partOffset || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
+			// Don't flush the part at all
+			inode.IsFlushing = false
+			inode.mu.Unlock()
+			atomic.AddInt64(&inode.fs.activeFlushers, -1)
+			inode.fs.flusherCond.Broadcast()
+			return
+		}
+	}
+
+	// Last part may be shorter
+	if inode.Attributes.Size < partOffset+partSize {
+		partSize = inode.Attributes.Size-partOffset
+	}
+
+	// Guard part against eviction
+	inode.LockRange(partOffset, partSize)
+
+	// Load part from the server if we have to read-modify-write it
+	if inode.CacheState == ST_MODIFIED {
+		inode.CheckLoadRange(partOffset, partSize)
+		// File size may have been changed again
+		if inode.Attributes.Size <= partOffset || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
+			// Don't flush the part at all
+			inode.UnlockRange(partOffset, partSize)
+			inode.IsFlushing = false
+			inode.mu.Unlock()
+			atomic.AddInt64(&inode.fs.activeFlushers, -1)
+			inode.fs.flusherCond.Broadcast()
+			return
+		}
+		if inode.Attributes.Size < partOffset+partSize {
+			partSize = inode.Attributes.Size-partOffset
+		}
+	}
+
+	// Finally upload it
+	bufReader, bufIds := inode.GetMultiReader(partOffset, partSize)
+	partInput := MultipartBlobAddInput{
+		Commit:     inode.mpu,
+		PartNumber: uint32(part+1),
+		Body:       bufReader,
+		Size:       bufReader.Len(),
+		Offset:     partOffset,
+	}
+	inode.mu.Unlock()
+	_, err := cloud.MultipartBlobAdd(&partInput)
+	inode.mu.Lock()
+
+	if err != nil {
+		// FIXME Handle failures
+		log.Errorf("Failed to flush part %v of object %v: %v", part, key, err)
+	} else {
+		log.Debugf("Flushed part %v of object %v", part, key)
+		stillDirty := false
+		for i := 0; i < len(inode.buffers); i++ {
+			b := &inode.buffers[i]
+			if b.dirtyID != 0 {
+				if bufIds[b.dirtyID] {
+					// Still dirty because the upload is not completed yet,
+					// but flushed to the server
+					b.flushed = true
+				} else if !b.flushed {
+					stillDirty = true
+				}
+			}
+		}
+		if !stillDirty && inode.fileHandles == 0 && (
+			inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
+			// Server-size copy unmodified parts
+			numParts := inode.fs.partNum(inode.Attributes.Size)
+			numPartOffset, _ := inode.fs.partRange(numParts)
+			if numPartOffset < inode.Attributes.Size {
+				numParts++
+			}
+			// FIXME: Copy exact parts instead of large ranges ?
+			// FIXME2: Do it in parallel, too ?
+			var err error
+			var lastStart, lastEnd uint64
+			for i := uint64(0); i < numParts; i++ {
+				if inode.mpu.Parts[i] == nil {
+					if lastEnd == 0 {
+						lastStart = i
+					}
+					lastEnd = i+1
+				} else if lastEnd != 0 {
+					startOffset, _ := inode.fs.partRange(lastStart)
+					endOffset, endSize := inode.fs.partRange(lastEnd-1)
+					log.Debugf("Copying unmodified range %v-%v of object %v", startOffset, endOffset+endSize, key)
+					inode.mu.Unlock()
+					_, err = cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
+						Commit:     inode.mpu,
+						PartNumber: uint32(lastStart+1),
+						CopySource: key,
+						Offset:     startOffset,
+						Size:       endOffset+endSize-startOffset,
+					})
+					inode.mu.Lock()
+					if err != nil {
+						log.Errorf("Failed to copy unmodified parts %v-%v of object %v: %v", lastStart, lastEnd, key, err)
+						lastEnd = 0
+						break
+					}
+					lastEnd = 0
+				}
+			}
+			if lastEnd != 0 {
+				startOffset, _ := inode.fs.partRange(lastStart)
+				endOffset, endSize := inode.fs.partRange(lastEnd-1)
+				log.Debugf("Copying unmodified range %v-%v of object %v", startOffset, endOffset+endSize, key, err)
+				inode.mu.Unlock()
+				_, err = cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
+					Commit:     inode.mpu,
+					PartNumber: uint32(lastStart+1),
+					CopySource: key,
+					Offset:     startOffset,
+					Size:       endOffset+endSize-startOffset,
+				})
+				inode.mu.Lock()
+				if err != nil {
+					log.Errorf("Failed to copy unmodified parts %v-%v of object %v: %v", lastStart, lastEnd, key, err)
+				}
+			}
+			if err == nil {
+				// Finalize the upload
+				inode.mpu.NumParts = uint32(numParts)
+				resp, err := cloud.MultipartBlobCommit(inode.mpu)
+				if err != nil {
+					// FIXME handle failures
+					log.Errorf("Failed to finalize multi-part upload of object %v: %v", key, err)
+				} else {
+					for i := 0; i < len(inode.buffers); i++ {
+						inode.buffers[i].dirtyID = 0
+						inode.buffers[i].flushed = false
+					}
+					inode.mpu = nil
+					inode.CacheState = ST_CACHED
+					inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
+				}
+			}
+		}
+	}
+
+	inode.UnlockRange(partOffset, partSize)
+	inode.IsFlushing = false
+	inode.mu.Unlock()
 	atomic.AddInt64(&inode.fs.activeFlushers, -1)
 	inode.fs.flusherCond.Broadcast()
 }

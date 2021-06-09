@@ -22,7 +22,6 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
-	"sync/atomic"
 
 	"github.com/aws/aws-sdk-go/service/s3"
 
@@ -130,8 +129,6 @@ func (s *GCS3) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlo
 }
 
 func (s *GCS3) uploadPart(param *MultipartBlobAddInput, totalSize uint64, last bool) (etag *string, err error) {
-	atomic.AddUint32(&param.Commit.NumParts, 1)
-
 	if closer, ok := param.Body.(io.Closer); ok {
 		defer closer.Close()
 	}
@@ -183,6 +180,7 @@ func (s *GCS3) uploadPart(param *MultipartBlobAddInput, totalSize uint64, last b
 }
 
 func (s *GCS3) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error) {
+	// FIXME Allow to skip some part numbers
 	var commitData *GCSMultipartBlobCommitInput
 	var ok bool
 	if commitData, ok = param.Commit.backendData.(*GCSMultipartBlobCommitInput); !ok {

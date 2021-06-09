@@ -26,7 +26,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -840,8 +839,6 @@ func (b *AZBlob) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobA
 	blockId := fmt.Sprintf(*param.Commit.UploadId, param.PartNumber)
 	base64BlockId := base64.StdEncoding.EncodeToString([]byte(blockId))
 
-	atomic.AddUint32(&param.Commit.NumParts, 1)
-
 	_, err = blob.StageBlock(context.TODO(), base64BlockId, param.Body,
 		azblob.LeaseAccessConditions{}, nil)
 	if err != nil {
@@ -851,6 +848,11 @@ func (b *AZBlob) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobA
 	param.Commit.Parts[param.PartNumber-1] = &base64BlockId
 
 	return &MultipartBlobAddOutput{}, nil
+}
+
+func (b *AZBlob) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
+	// FIXME: Implement part copy
+	return nil, syscall.ENOSYS
 }
 
 func (b *AZBlob) MultipartBlobAbort(param *MultipartBlobCommitInput) (*MultipartBlobAbortOutput, error) {
@@ -867,6 +869,7 @@ func (b *AZBlob) MultipartBlobCommit(param *MultipartBlobCommitInput) (*Multipar
 	blob := c.NewBlockBlobURL(*param.Key)
 	parts := make([]string, param.NumParts)
 
+	// FIXME Allow to skip some part numbers
 	for i := uint32(0); i < param.NumParts; i++ {
 		parts[i] = *param.Parts[i]
 	}

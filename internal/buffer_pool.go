@@ -66,23 +66,39 @@ type FileBuffer struct {
 	ptr *BufferPointer
 }
 
-type MultiReader struct {
-	buffers [][]byte
-	idx int
-	pos int64
-	bufPos int
-	size int64
+type MultiBuffer struct {
+	data []byte
+	zero bool
+	size uint64
 }
 
-func NewMultiReader(buffers [][]byte) *MultiReader {
-	size := int64(0)
-	for i := 0; i < len(buffers); i++ {
-		size += int64(len(buffers[i]))
-	}
+type MultiReader struct {
+	buffers []MultiBuffer
+	idx int
+	pos uint64
+	bufPos uint64
+	size uint64
+}
+
+func NewMultiReader() *MultiReader {
 	return &MultiReader{
-		buffers: buffers,
-		size: size,
 	}
+}
+
+func (r *MultiReader) AddBuffer(buf []byte) {
+	r.buffers = append(r.buffers, MultiBuffer{
+		data: buf,
+		size: uint64(len(buf)),
+	})
+	r.size += uint64(len(buf))
+}
+
+func (r *MultiReader) AddZero(size uint64) {
+	r.buffers = append(r.buffers, MultiBuffer{
+		zero: true,
+		size: size,
+	})
+	r.size += size
 }
 
 func (r *MultiReader) Read(buf []byte) (n int, err error) {
@@ -91,54 +107,63 @@ func (r *MultiReader) Read(buf []byte) (n int, err error) {
 		err = io.EOF
 		return
 	}
-	remaining := len(buf)
+	remaining := uint64(len(buf))
+	outPos := uint64(0)
 	for r.idx < len(r.buffers) && remaining > 0 {
-		l := len(r.buffers[r.idx]) - r.bufPos
+		l := r.buffers[r.idx].size - r.bufPos
 		if l > remaining {
 			l = remaining
 		}
-		copy(buf[n : n+l], r.buffers[r.idx][r.bufPos : r.bufPos+l])
-		n += l
+		if r.buffers[r.idx].zero {
+			for i := outPos; i < outPos+l; i++ {
+				buf[i] = 0
+			}
+		} else {
+			copy(buf[outPos : outPos+l], r.buffers[r.idx].data[r.bufPos : r.bufPos+l])
+		}
+		outPos += l
 		remaining -= l
-		r.pos = r.pos + int64(l)
+		r.pos += l
 		r.bufPos += l
-		if r.bufPos >= len(r.buffers[r.idx]) {
+		if r.bufPos >= r.buffers[r.idx].size {
 			r.idx++
 			r.bufPos = 0
 		}
 	}
+	n = int(outPos)
 	return
 }
 
 func (r *MultiReader) Seek(offset int64, whence int) (newOffset int64, err error) {
 	if whence == io.SeekEnd {
-		offset += r.size
+		offset += int64(r.size)
 	} else if whence == io.SeekCurrent {
-		offset += r.pos
+		offset += int64(r.pos)
 	}
-	if offset > r.size {
-		offset = r.size
+	if offset > int64(r.size) {
+		offset = int64(r.size)
 	}
 	if offset < 0 {
 		offset = 0
 	}
+	uOffset := uint64(offset)
 	r.idx = 0
 	r.pos = 0
 	r.bufPos = 0
-	for r.pos < offset {
-		end := r.pos + int64(len(r.buffers[r.idx]))
-		if end <= offset {
+	for r.pos < uOffset {
+		end := r.pos + r.buffers[r.idx].size
+		if end <= uOffset {
 			r.pos = end
 			r.idx++
 		} else {
-			r.bufPos = int(offset-r.pos)
-			r.pos = offset
+			r.bufPos = uOffset-r.pos
+			r.pos = uOffset
 		}
 	}
-	return r.pos, nil
+	return int64(r.pos), nil
 }
 
-func (r *MultiReader) Len() int64 {
+func (r *MultiReader) Len() uint64 {
 	return r.size
 }
 

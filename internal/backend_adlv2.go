@@ -825,6 +825,11 @@ func (b *ADLv2) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAd
 	}, nil
 }
 
+func (b *ADLv2) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
+	// FIXME: Implement part copy
+	return nil, syscall.ENOSYS
+}
+
 func (b *ADLv2) MultipartBlobAbort(param *MultipartBlobCommitInput) (*MultipartBlobAbortOutput, error) {
 	if param.UploadId != nil {
 		err := b.lease(adl2.Release, *param.Key, *param.UploadId, 0, "")
@@ -856,6 +861,7 @@ func (b *ADLv2) MultipartBlobCommit(param *MultipartBlobCommitInput) (*Multipart
 		}
 	}()
 
+	// FIXME Allow to skip some part numbers
 	flush, err := b.flush(*param.Key, int64(commitData.Size), commitData.ContentType, *param.UploadId)
 	if err != nil {
 		return nil, err

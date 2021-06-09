@@ -22,7 +22,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -853,7 +852,6 @@ func (s *S3Backend) MultipartBlobBegin(param *MultipartBlobBeginInput) (*Multipa
 
 func (s *S3Backend) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error) {
 	en := &param.Commit.Parts[param.PartNumber-1]
-	atomic.AddUint32(&param.Commit.NumParts, 1)
 
 	params := s3.UploadPartInput{
 		Bucket:     &s.bucket,
@@ -875,20 +873,53 @@ func (s *S3Backend) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBl
 		return nil, mapAwsError(err)
 	}
 
-	if *en != nil {
-		panic(fmt.Sprintf("etags for part %v already set: %v", param.PartNumber, **en))
-	}
 	*en = resp.ETag
 
 	return &MultipartBlobAddOutput{s.getRequestId(req)}, nil
 }
 
+func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
+	en := &param.Commit.Parts[param.PartNumber-1]
+
+	src := s.bucket+"/"+param.CopySource
+	params := s3.UploadPartCopyInput{
+		Bucket:     &s.bucket,
+		Key:        param.Commit.Key,
+		PartNumber: aws.Int64(int64(param.PartNumber)),
+		CopySource: &src,
+		UploadId:   param.Commit.UploadId,
+	}
+	if param.Size != 0 {
+		r := fmt.Sprintf("bytes=%v-%v", param.Offset, param.Offset+param.Size-1)
+		params.CopySourceRange = &r
+	}
+	if s.config.SseC != "" {
+		params.SSECustomerAlgorithm = PString("AES256")
+		params.SSECustomerKey = &s.config.SseC
+		params.SSECustomerKeyMD5 = &s.config.SseCDigest
+	}
+	s3Log.Debug(params)
+
+	req, resp := s.UploadPartCopyRequest(&params)
+	err := req.Send()
+	if err != nil {
+		return nil, mapAwsError(err)
+	}
+
+	*en = resp.CopyPartResult.ETag
+
+	return &MultipartBlobCopyOutput{s.getRequestId(req)}, nil
+}
+
 func (s *S3Backend) MultipartBlobCommit(param *MultipartBlobCommitInput) (*MultipartBlobCommitOutput, error) {
-	parts := make([]*s3.CompletedPart, param.NumParts)
+	var parts []*s3.CompletedPart
 	for i := uint32(0); i < param.NumParts; i++ {
-		parts[i] = &s3.CompletedPart{
-			ETag:       param.Parts[i],
-			PartNumber: aws.Int64(int64(i + 1)),
+		// Allow to skip some numbers
+		if param.Parts[i] != nil {
+			parts = append(parts, &s3.CompletedPart{
+				ETag:       param.Parts[i],
+				PartNumber: aws.Int64(int64(i + 1)),
+			})
 		}
 	}
 

@@ -93,6 +93,7 @@ type Inode struct {
 
 	fileHandles int32
 	fileHandle *FileHandle
+	lastWriteEnd uint64
 
 	// cached/buffered data
 	CacheState  InodeCacheState
@@ -101,7 +102,7 @@ type Inode struct {
 	IsFlushing bool
 
 	// multipart upload state
-	mpuName string
+	mpu *MultipartBlobCommitInput
 	mpuParts []MPUPart
 
 	userMetadata map[string][]byte

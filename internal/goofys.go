@@ -374,7 +374,7 @@ func (fs *Goofys) Flusher() {
 						inode.SendMkDir()
 						inode.mu.Unlock()
 					} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
-						if inode.Attributes.Size < SINGLE_PART_SIZE {
+						if inode.Attributes.Size <= SINGLE_PART_SIZE {
 							if inode.fileHandles == 0 {
 								atomic.AddInt64(&inode.fs.activeFlushers, 1)
 								inode.IsFlushing = true
@@ -385,16 +385,10 @@ func (fs *Goofys) Flusher() {
 								inode.mu.Unlock()
 							}
 						} else {
-							panic("Nedopisano!")
-							for i := 0; i < len(inode.buffers); i++ {
-								buf := &inode.buffers[i]
-								if buf.dirtyID != 0 && !buf.flushed {
-									//part := fs.partNum(buf.offset)
-									//partOffset, partSize := fs.partRange(part)
-									// FIXME: First try to write out finished parts
-									//inode.SendMultiPartFlush()
-								}
-							}
+							atomic.AddInt64(&inode.fs.activeFlushers, 1)
+							inode.IsFlushing = true
+							inode.mu.Unlock()
+							go inode.FlushMultipart()
 						}
 					} else {
 						inode.mu.Unlock()

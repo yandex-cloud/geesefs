@@ -173,11 +173,22 @@ type MultipartBlobAddInput struct {
 	Body io.ReadSeeker
 
 	Size   uint64 // GCS wants to know part size
-	Last   bool   // GCS needs to know if this part is the last one
 	Offset uint64 // ADLv2 needs to know offset
 }
 
 type MultipartBlobAddOutput struct {
+	RequestId string
+}
+
+type MultipartBlobCopyInput struct {
+	Commit     *MultipartBlobCommitInput
+	PartNumber uint32
+	CopySource string
+	Offset     uint64
+	Size       uint64
+}
+
+type MultipartBlobCopyOutput struct {
 	RequestId string
 }
 
@@ -236,6 +247,7 @@ type StorageBackend interface {
 	PutBlob(param *PutBlobInput) (*PutBlobOutput, error)
 	MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlobCommitInput, error)
 	MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error)
+	MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error)
 	MultipartBlobAbort(param *MultipartBlobCommitInput) (*MultipartBlobAbortOutput, error)
 	MultipartBlobCommit(param *MultipartBlobCommitInput) (*MultipartBlobCommitOutput, error)
 	MultipartExpire(param *MultipartExpireInput) (*MultipartExpireOutput, error)
@@ -379,6 +391,11 @@ func (s *StorageBackendInitWrapper) MultipartBlobAdd(param *MultipartBlobAddInpu
 	return s.StorageBackend.MultipartBlobAdd(param)
 }
 
+func (s *StorageBackendInitWrapper) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
+	s.Init("")
+	return s.StorageBackend.MultipartBlobCopy(param)
+}
+
 func (s *StorageBackendInitWrapper) MultipartBlobAbort(param *MultipartBlobCommitInput) (*MultipartBlobAbortOutput, error) {
 	s.Init("")
 	return s.StorageBackend.MultipartBlobAbort(param)
@@ -501,6 +518,10 @@ func (e StorageBackendInitError) MultipartBlobBegin(param *MultipartBlobBeginInp
 }
 
 func (e StorageBackendInitError) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error) {
+	return nil, e
+}
+
+func (e StorageBackendInitError) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
 	return nil, e
 }
 
