@@ -1228,7 +1228,13 @@ func (fs *Goofys) SetInodeAttributes(
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
 
-	// FIXME: Implement truncate
+	if op.Size != nil {
+		// Truncate or extend
+		inode.Attributes.Size = *op.Size
+		// FIXME Remove extra buffers
+		// FIXME Remember truncated region
+	}
+
 	attr, err := inode.GetAttributes()
 	if err == nil {
 		op.Attributes = *attr
