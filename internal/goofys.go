@@ -210,6 +210,8 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		log.Errorf("Unable to access '%v': %v", bucket, err)
 		return nil
 	}
+	// FIXME: Strange shit. Abort all multipart uploads unconditionally.
+	// FIXME: And do not interfere with new flushed uploads!
 	go cloud.MultipartExpire(&MultipartExpireInput{})
 
 	now := time.Now()

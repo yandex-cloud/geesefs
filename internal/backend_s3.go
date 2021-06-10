@@ -972,24 +972,17 @@ func (s *S3Backend) MultipartExpire(param *MultipartExpireInput) (*MultipartExpi
 	}
 	s3Log.Debug(mpu)
 
-	now := time.Now()
 	for _, upload := range mpu.Uploads {
-		expireTime := upload.Initiated.Add(48 * time.Hour)
-
-		if !expireTime.After(now) {
-			params := &s3.AbortMultipartUploadInput{
-				Bucket:   &s.bucket,
-				Key:      upload.Key,
-				UploadId: upload.UploadId,
-			}
-			resp, err := s.AbortMultipartUpload(params)
-			s3Log.Debug(resp)
-
-			if mapAwsError(err) == syscall.EACCES {
-				break
-			}
-		} else {
-			s3Log.Debugf("Keeping MPU Key=%v Id=%v", *upload.Key, *upload.UploadId)
+		// FIXME: Maybe keep parts with known etags if we load them from disk
+		params := &s3.AbortMultipartUploadInput{
+			Bucket:   &s.bucket,
+			Key:      upload.Key,
+			UploadId: upload.UploadId,
+		}
+		resp, err := s.AbortMultipartUpload(params)
+		s3Log.Debug(resp)
+		if mapAwsError(err) == syscall.EACCES {
+			break
 		}
 	}
 
