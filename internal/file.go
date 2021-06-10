@@ -687,6 +687,50 @@ func (inode *Inode) FlushSmallObject() {
 	inode.mu.Unlock()
 }
 
+func (inode *Inode) copyUnmodifiedRange(startPart uint64, endPart uint64) error {
+	cloud, key := inode.cloud()
+	startOffset, _ := inode.fs.partRange(startPart)
+	endOffset, endSize := inode.fs.partRange(endPart-1)
+	log.Debugf("Copying unmodified range %v-%v MB of object %v", startOffset/1024/1024, (endOffset+endSize)/1024/1024, key)
+	inode.mu.Unlock()
+	_, err := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
+		Commit:     inode.mpu,
+		PartNumber: uint32(startPart+1),
+		CopySource: key,
+		Offset:     startOffset,
+		Size:       endOffset+endSize-startOffset,
+	})
+	inode.mu.Lock()
+	if err != nil {
+		log.Errorf("Failed to copy unmodified range %v-%v MB of object %v: %v", startOffset/1024/1024, (endOffset+endSize)/1024/1024, key, err)
+	}
+	return err
+}
+
+func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
+	// FIXME: Copy exact parts instead of large ranges ?
+	// FIXME2: Do it in parallel, too ?
+	var lastStart, lastEnd uint64
+	for i := uint64(0); i < numParts; i++ {
+		if inode.mpu.Parts[i] == nil {
+			if lastEnd == 0 {
+				lastStart = i
+			}
+			lastEnd = i+1
+		} else if lastEnd != 0 {
+			err = inode.copyUnmodifiedRange(lastStart, lastEnd)
+			lastEnd = 0
+			if err != nil {
+				return
+			}
+		}
+	}
+	if lastEnd != 0 {
+		err = inode.copyUnmodifiedRange(lastStart, lastEnd)
+	}
+	return
+}
+
 func (inode *Inode) FlushMultipart() {
 
 	inode.mu.Lock()
@@ -816,69 +860,32 @@ func (inode *Inode) FlushMultipart() {
 			if numPartOffset < inode.Attributes.Size {
 				numParts++
 			}
-			// FIXME: Copy exact parts instead of large ranges ?
-			// FIXME2: Do it in parallel, too ?
-			var err error
-			var lastStart, lastEnd uint64
-			for i := uint64(0); i < numParts; i++ {
-				if inode.mpu.Parts[i] == nil {
-					if lastEnd == 0 {
-						lastStart = i
-					}
-					lastEnd = i+1
-				} else if lastEnd != 0 {
-					startOffset, _ := inode.fs.partRange(lastStart)
-					endOffset, endSize := inode.fs.partRange(lastEnd-1)
-					log.Debugf("Copying unmodified range %v-%v of object %v", startOffset, endOffset+endSize, key)
-					inode.mu.Unlock()
-					_, err = cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
-						Commit:     inode.mpu,
-						PartNumber: uint32(lastStart+1),
-						CopySource: key,
-						Offset:     startOffset,
-						Size:       endOffset+endSize-startOffset,
-					})
-					inode.mu.Lock()
-					if err != nil {
-						log.Errorf("Failed to copy unmodified parts %v-%v of object %v: %v", lastStart, lastEnd, key, err)
-						lastEnd = 0
-						break
-					}
-					lastEnd = 0
-				}
-			}
-			if lastEnd != 0 {
-				startOffset, _ := inode.fs.partRange(lastStart)
-				endOffset, endSize := inode.fs.partRange(lastEnd-1)
-				log.Debugf("Copying unmodified range %v-%v of object %v", startOffset, endOffset+endSize, key, err)
-				inode.mu.Unlock()
-				_, err = cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
-					Commit:     inode.mpu,
-					PartNumber: uint32(lastStart+1),
-					CopySource: key,
-					Offset:     startOffset,
-					Size:       endOffset+endSize-startOffset,
-				})
-				inode.mu.Lock()
-				if err != nil {
-					log.Errorf("Failed to copy unmodified parts %v-%v of object %v: %v", lastStart, lastEnd, key, err)
-				}
-			}
+			err := inode.copyUnmodifiedParts(numParts)
 			if err == nil {
 				// Finalize the upload
 				inode.mpu.NumParts = uint32(numParts)
+				inode.mu.Unlock()
 				resp, err := cloud.MultipartBlobCommit(inode.mpu)
+				inode.mu.Lock()
 				if err != nil {
 					// FIXME handle failures
 					log.Errorf("Failed to finalize multi-part upload of object %v: %v", key, err)
 				} else {
-					for i := 0; i < len(inode.buffers); i++ {
-						inode.buffers[i].dirtyID = 0
-						inode.buffers[i].flushed = false
-					}
 					inode.mpu = nil
-					inode.CacheState = ST_CACHED
 					inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
+					stillDirty := false
+					for i := 0; i < len(inode.buffers); i++ {
+						if inode.buffers[i].flushed {
+							inode.buffers[i].dirtyID = 0
+							inode.buffers[i].flushed = false
+						}
+						if inode.buffers[i].dirtyID != 0 {
+							stillDirty = true
+						}
+					}
+					if !stillDirty && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
+						inode.CacheState = ST_CACHED
+					}
 				}
 			}
 		}
