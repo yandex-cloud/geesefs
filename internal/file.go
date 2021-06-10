@@ -34,22 +34,6 @@ type FileHandle struct {
 	cloud StorageBackend
 	key   string
 
-/*	mpuName   *string
-	writeInit sync.Once
-	mpuWG     sync.WaitGroup
-
-	mu              sync.Mutex
-	mpuId           *MultipartBlobCommitInput
-	lastPartId      uint32
-	lastWriteError error
-
-	// read
-	reader        io.ReadCloser
-	readBufOffset int64
-
-	existingReadahead int
-	seqReadAmount     uint64
-	numOOORead        uint64 // number of out of order read*/
 	// User space PID. All threads created by a process will have the same TGID,
 	// but different PIDs[1].
 	// This value can be nil if we fail to get TGID from PID[2].
@@ -62,8 +46,6 @@ type FileHandle struct {
 
 // FIXME -> to configuration
 const MAX_BUF = 5 * 1024 * 1024
-const MAX_READAHEAD = uint32(400 * 1024 * 1024)
-const READAHEAD_CHUNK = uint32(20 * 1024 * 1024)
 const SINGLE_PART_SIZE = uint64(5 * 1024 * 1024)
 
 // NewFileHandle returns a new file handle for the given `inode` triggered by fuse
@@ -79,154 +61,6 @@ func NewFileHandle(inode *Inode, opMetadata fuseops.OpMetadata) *FileHandle {
 	fh.cloud, fh.key = inode.cloud()
 	return fh
 }
-
-/*
-func (fh *FileHandle) initWrite() {
-	fh.writeInit.Do(func() {
-		fh.mpuWG.Add(1)
-		go fh.initMPU()
-	})
-}
-
-func (fh *FileHandle) initMPU() {
-	defer func() {
-		fh.mpuWG.Done()
-	}()
-
-	fs := fh.inode.fs
-	fh.mpuName = &fh.key
-
-	resp, err := fh.cloud.MultipartBlobBegin(&MultipartBlobBeginInput{
-		Key:         *fh.mpuName,
-		ContentType: fs.flags.GetMimeType(*fh.mpuName),
-	})
-
-	fh.mu.Lock()
-	defer fh.mu.Unlock()
-
-	if err != nil {
-		fh.lastWriteError = mapAwsError(err)
-	} else {
-		fh.mpuId = resp
-	}
-
-	return
-}
-
-func (fh *FileHandle) mpuPartNoSpawn(buf *MBuf, part uint32, total int64, last bool) (err error) {
-	fs := fh.inode.fs
-
-	fs.replicators.Take(1, true)
-	defer fs.replicators.Return(1)
-
-	if part == 0 || part > 10000 {
-		return errors.New(fmt.Sprintf("invalid part number: %v", part))
-	}
-
-	mpu := MultipartBlobAddInput{
-		Commit:     fh.mpuId,
-		PartNumber: part,
-		Body:       buf,
-		Size:       uint64(buf.Len()),
-		Last:       last,
-		Offset:     uint64(total - int64(buf.Len())),
-	}
-
-	defer func() {
-		if mpu.Body != nil {
-			bufferLog.Debugf("Free %T", buf)
-			buf.Free()
-		}
-	}()
-
-	_, err = fh.cloud.MultipartBlobAdd(&mpu)
-
-	return
-}
-
-func (fh *FileHandle) mpuPart(buf *MBuf, part uint32, total int64) {
-	defer func() {
-		fh.mpuWG.Done()
-	}()
-
-	// maybe wait for CreateMultipartUpload
-	if fh.mpuId == nil {
-		fh.mpuWG.Wait()
-		// initMPU might have errored
-		if fh.mpuId == nil {
-			return
-		}
-	}
-
-	err := fh.mpuPartNoSpawn(buf, part, total, false)
-	if err != nil {
-		if fh.lastWriteError == nil {
-			fh.lastWriteError = err
-		}
-	}
-}
-
-func (fh *FileHandle) waitForCreateMPU() (err error) {
-	if fh.mpuId == nil {
-		fh.mu.Unlock()
-		fh.initWrite()
-		fh.mpuWG.Wait() // wait for initMPU
-		fh.mu.Lock()
-
-		if fh.lastWriteError != nil {
-			return fh.lastWriteError
-		}
-	}
-
-	return
-}
-
-func (fh *FileHandle) partSize() uint64 {
-	var size uint64
-
-	if fh.lastPartId <= 1000 {
-		size = 5 * 1024 * 1024
-	} else if fh.lastPartId <= 2000 {
-		size = 25 * 1024 * 1024
-	} else {
-		size = 125 * 1024 * 1024
-	}
-
-	maxPartSize := fh.cloud.Capabilities().MaxMultipartSize
-	if maxPartSize != 0 {
-		size = MinUInt64(maxPartSize, size)
-	}
-
-	return size
-}
-
-func (fh *FileHandle) partNum(offset uint64) uint64 {
-	maxPartSize := fh.cloud.Capabilities().MaxMultipartSize
-	// 5 MB
-	bs = 5*1024*1024
-	if bs > maxPartSize {
-		return offset/maxPartSize
-	}
-	n := offset/bs
-	if n < 1000 {
-		return n
-	}
-	// 25 MB
-	bs := 25*1024*1024
-	if bs > maxPartSize {
-		return 1000 + (offset-1000*5*1024*1024)/maxPartSize
-	}
-	n = (offset-1000*5*1024*1024)/bs
-	if n < 1000 {
-		return 1000 + n
-	}
-	// 125 MB
-	bs = 125*1024*1024
-	if bs > maxPartSize {
-		bs = maxPartSize
-	}
-	return 2000 + (offset-1000*5*1024*1024-1000*25*1024*1024)/bs
-}*/
 
 func (fs *Goofys) partNum(offset uint64) uint64 {
 	// 5 MB
@@ -260,47 +94,6 @@ func (fs *Goofys) partRange(num uint64) (offset uint64, size uint64) {
 	}
 	return
 }
-
-/*func (fh *FileHandle) uploadCurrentBuf(parallel bool) (err error) {
-	err = fh.waitForCreateMPU()
-	if err != nil {
-		return
-	}
-
-	fh.lastPartId++
-	part := fh.lastPartId
-	buf := fh.buf
-	fh.buf = nil
-
-	if parallel {
-		fh.mpuWG.Add(1)
-		go fh.mpuPart(buf, part, fh.nextWriteOffset)
-	} else {
-		err = fh.mpuPartNoSpawn(buf, part, fh.nextWriteOffset, false)
-		if fh.lastWriteError == nil {
-			fh.lastWriteError = err
-		}
-	}
-
-	return
-}*/
-
-/*func extendBuf(buf []byte, request int64) []byte {
-	oldLen := len(buf)
-	if cap(buf) < request {
-		inc := oldLen
-		if inc > MAX_BUF_INC {
-			inc = MAX_BUF_INC
-		}
-		if inc < request-oldLen {
-			inc = request-oldLen
-		}
-		newBuf := make([]byte, oldLen+inc)
-		copy(newBuf, buf)
-		return newBuf[0:request]
-	}
-	return buf[0:request]
-}*/
 
 func locateBuffer(buffers []FileBuffer, offset uint64) int {
 	start := 0
@@ -504,190 +297,10 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 	// Goofys.OpenFile about KeepPageCache
 	fh.inode.knownETag = nil
 	fh.inode.invalidateCache = false
-
-	err = fh.uploadCurrentBuf(!fh.cloud.Capabilities().NoParallelMultipart)
-	if err != nil {
-		return
-	}
 	*/
 
 	return
 }
-
-/*type S3ReadBuffer struct {
-	s3          StorageBackend
-	startOffset uint64
-	nRetries    uint8
-	mbuf        *MBuf
-
-	offset uint64
-	size   uint32
-	buf    *Buffer
-}
-
-func (b S3ReadBuffer) Init(fh *FileHandle, offset uint64, size uint32) *S3ReadBuffer {
-	b.s3 = fh.cloud
-	b.offset = offset
-	b.startOffset = offset
-	b.size = size
-	b.nRetries = 3
-
-	b.mbuf = MBuf{}.Init(fh.inode.fs.bufferPool, uint64(size), false)
-	if b.mbuf == nil {
-		return nil
-	}
-
-	b.initBuffer(fh, offset, size)
-	return &b
-}
-
-func (b *S3ReadBuffer) initBuffer(fh *FileHandle, offset uint64, size uint32) {
-	getFunc := func() (io.ReadCloser, error) {
-		resp, err := b.s3.GetBlob(&GetBlobInput{
-			Key:   fh.key,
-			Start: offset,
-			Count: uint64(size),
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		return resp.Body, nil
-	}
-
-	if b.buf == nil {
-		b.buf = Buffer{}.Init(b.mbuf, getFunc)
-	} else {
-		b.buf.ReInit(getFunc)
-	}
-}
-
-func (b *S3ReadBuffer) Read(offset uint64, p []byte) (n int, err error) {
-	if b.offset == offset {
-		n, err = io.ReadFull(b.buf, p)
-		if n != 0 && err == io.ErrUnexpectedEOF {
-			err = nil
-		}
-		if n > 0 {
-			if uint32(n) > b.size {
-				panic(fmt.Sprintf("read more than available %v %v", n, b.size))
-			}
-
-			b.offset += uint64(n)
-			b.size -= uint32(n)
-		}
-		if b.size == 0 && err != nil {
-			// we've read everything, sometimes we may
-			// request for more bytes then there's left in
-			// this chunk so we could get an error back,
-			// ex: http2: response body closed this
-			// doesn't tend to happen because our chunks
-			// are aligned to 4K and also 128K (except for
-			// the last chunk, but seems kernel requests
-			// for a smaller buffer for the last chunk)
-			err = nil
-		}
-
-		return
-	} else {
-		panic(fmt.Sprintf("not the right buffer, expecting %v got %v, %v left", b.offset, offset, b.size))
-		err = errors.New(fmt.Sprintf("not the right buffer, expecting %v got %v", b.offset, offset))
-		return
-	}
-}
-
-func (fh *FileHandle) readFromReadAhead(offset uint64, buf []byte) (bytesRead int, err error) {
-	var nread int
-	for len(fh.buffers) != 0 {
-		readAheadBuf := fh.buffers[0]
-
-		nread, err = readAheadBuf.Read(offset+uint64(bytesRead), buf)
-		bytesRead += nread
-		if err != nil {
-			if err == io.EOF && readAheadBuf.size != 0 {
-				// in case we hit
-				// https://github.com/kahing/goofys/issues/464
-				// again, this will convert that into
-				// an error
-				fuseLog.Errorf("got EOF when data remains: %v", *fh.inode.FullName())
-				err = io.ErrUnexpectedEOF
-			} else if err != io.EOF && readAheadBuf.size > 0 {
-				// we hit some other errors when
-				// reading from this part. If we can
-				// retry, do that
-				if readAheadBuf.nRetries > 0 {
-					readAheadBuf.nRetries -= 1
-					readAheadBuf.initBuffer(fh, readAheadBuf.offset, readAheadBuf.size)
-					// we unset error and return,
-					// so upper layer will retry
-					// this read
-					err = nil
-				}
-			}
-			return
-		}
-
-		if readAheadBuf.size == 0 {
-			// we've exhausted the first buffer
-			readAheadBuf.buf.Close()
-			fh.buffers = fh.buffers[1:]
-		}
-
-		buf = buf[nread:]
-
-		if len(buf) == 0 {
-			// we've filled the user buffer
-			return
-		}
-	}
-
-	return
-}
-
-func (fh *FileHandle) readAhead(offset uint64, needAtLeast int) (err error) {
-	existingReadahead := uint32(0)
-	for _, b := range fh.buffers {
-		existingReadahead += b.size
-	}
-
-	readAheadAmount := MAX_READAHEAD
-
-	for readAheadAmount-existingReadahead >= READAHEAD_CHUNK {
-		off := offset + uint64(existingReadahead)
-		remaining := fh.inode.Attributes.Size - off
-
-		// only read up to readahead chunk each time
-		size := MinUInt32(readAheadAmount-existingReadahead, READAHEAD_CHUNK)
-		// but don't read past the file
-		size = uint32(MinUInt64(uint64(size), remaining))
-
-		if size != 0 {
-			fh.inode.logFuse("readahead", off, size, existingReadahead)
-
-			readAheadBuf := S3ReadBuffer{}.Init(fh, off, size)
-			if readAheadBuf != nil {
-				fh.buffers = append(fh.buffers, readAheadBuf)
-				existingReadahead += size
-			} else {
-				if existingReadahead != 0 {
-					// don't do more readahead now, but don't fail, cross our
-					// fingers that we will be able to allocate the buffers
-					// later
-					return nil
-				} else {
-					return syscall.ENOMEM
-				}
-			}
-		}
-
-		if size != READAHEAD_CHUNK {
-			// that was the last remaining chunk to readahead
-			break
-		}
-	}
-
-	return nil
-}*/
 
 func appendRequest(requests []uint64, offset uint64, size uint64, requestCost uint64) []uint64 {
 	if len(requests) > 0 {
@@ -840,6 +453,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	defer fh.inode.UnlockRange(offset, end-offset)
 
 	// Don't read anything from the server if the file is just created
+	// FIXME: Track random reads and temporarily disable readahead, as in the original
 	var requestErr error
 	if fh.inode.CacheState != ST_CREATED {
 		requestErr = fh.inode.LoadRange(offset, end-offset, false)
@@ -900,106 +514,11 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	return
 }
 
-/*func (fh *FileHandle) readFile(offset int64, buf []byte) (bytesRead int, err error) {
-	defer func() {
-		if bytesRead > 0 {
-			fh.readBufOffset += int64(bytesRead)
-			fh.seqReadAmount += uint64(bytesRead)
-		}
-
-		fh.inode.logFuse("< readFile", bytesRead, err)
-	}()
-
-	if offset >= fh.inode.Attributes.Size {
-		// nothing to read
-		if fh.inode.Invalid {
-			err = fuse.ENOENT
-		} else if fh.inode.KnownSize == nil {
-			err = io.EOF
-		} else {
-			err = io.EOF
-		}
-		return
-	}
-
-	fs := fh.inode.fs
-
-	if fh.readBufOffset != offset {
-		// XXX out of order read, maybe disable prefetching
-		fh.inode.logFuse("out of order read", offset, fh.readBufOffset)
-
-		fh.readBufOffset = offset
-		fh.seqReadAmount = 0
-		if fh.reader != nil {
-			fh.reader.Close()
-			fh.reader = nil
-		}
-
-		if fh.buffers != nil {
-			// we misdetected
-			fh.numOOORead++
-		}
-
-		for _, b := range fh.buffers {
-			b.buf.Close()
-		}
-		fh.buffers = nil
-	}
-
-	if !fs.flags.Cheap && fh.seqReadAmount >= uint64(READAHEAD_CHUNK) && fh.numOOORead < 3 {
-		if fh.reader != nil {
-			fh.inode.logFuse("cutover to the parallel algorithm")
-			fh.reader.Close()
-			fh.reader = nil
-		}
-
-		err = fh.readAhead(uint64(offset), len(buf))
-		if err == nil {
-			bytesRead, err = fh.readFromReadAhead(uint64(offset), buf)
-			return
-		} else {
-			// fall back to read serially
-			fh.inode.logFuse("not enough memory, fallback to serial read")
-			fh.seqReadAmount = 0
-			for _, b := range fh.buffers {
-				b.buf.Close()
-			}
-			fh.buffers = nil
-		}
-	}
-
-	bytesRead, err = fh.readFromStream(offset, buf)
-
-	return
-}*/
-
 func (fh *FileHandle) Release() {
-/*	// read buffers
-	for _, b := range fh.buffers {
-		b.buf.Close()
-	}
-	fh.buffers = nil
-
-	if fh.reader != nil {
-		fh.reader.Close()
-	}
-
-	// write buffers
-	if fh.inode.fs.bufferPool != nil {
-		if fh.buf != nil && fh.buf.buffers != nil {
-			if fh.lastWriteError == nil {
-				panic("buf not freed but error is nil")
-			}
-
-			fh.buf.Free()
-			// the other in-flight multipart PUT buffers will be
-			// freed when they finish/error out
-		}
-	}*/
-
 	fh.inode.mu.Lock()
 	defer fh.inode.mu.Unlock()
 
+	// FIXME: atomic probably isn't needed (always guarded by mutex)
 	n := atomic.AddInt32(&fh.inode.fileHandles, -1)
 	if n == -1 {
 		panic(fh.inode.fileHandles)
@@ -1010,44 +529,6 @@ func (fh *FileHandle) Release() {
 
 	fh.inode.fs.flusherCond.Broadcast()
 }
-
-/*func (fh *FileHandle) readFromStream(offset int64, buf []byte) (bytesRead int, err error) {
-	defer func() {
-		if fh.inode.fs.flags.DebugFuse {
-			fh.inode.logFuse("< readFromStream", bytesRead)
-		}
-	}()
-
-	if uint64(offset) >= fh.inode.Attributes.Size {
-		// nothing to read
-		return
-	}
-
-	if fh.reader == nil {
-		resp, err := fh.cloud.GetBlob(&GetBlobInput{
-			Key:   fh.key,
-			Start: uint64(offset),
-		})
-		if err != nil {
-			return bytesRead, err
-		}
-
-		fh.reader = resp.Body
-	}
-
-	bytesRead, err = fh.reader.Read(buf)
-	if err != nil {
-		if err != io.EOF {
-			fh.inode.logFuse("< readFromStream error", bytesRead, err)
-		}
-		// always retry error on read
-		fh.reader.Close()
-		fh.reader = nil
-		err = nil
-	}
-
-	return
-}*/
 
 func (inode *Inode) CheckLoadRange(offset uint64, size uint64) {
 	loadStart := uint64(0)
