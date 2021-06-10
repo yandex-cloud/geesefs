@@ -539,6 +539,7 @@ func (b *ADLv1) uploadPart(param *MultipartBlobAddInput, offset uint64) error {
 		return err
 	}
 
+	// FIXME: Support out-of-order parts
 	res, err := b.client.Append(context.TODO(), b.account, *param.Commit.Key,
 		&ReadSeekerCloser{param.Body}, PInt64(int64(offset-param.Size)), adl.DATA,
 		&leaseId, &leaseId)

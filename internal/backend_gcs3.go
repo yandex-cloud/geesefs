@@ -180,13 +180,13 @@ func (s *GCS3) uploadPart(param *MultipartBlobAddInput, totalSize uint64, last b
 }
 
 func (s *GCS3) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error) {
-	// FIXME Allow to skip some part numbers
 	var commitData *GCSMultipartBlobCommitInput
 	var ok bool
 	if commitData, ok = param.Commit.backendData.(*GCSMultipartBlobCommitInput); !ok {
 		panic("Incorrect commit data type")
 	}
 
+	// FIXME: Support out-of-order parts
 	if commitData.Prev != nil {
 		if commitData.Prev.Size == 0 || commitData.Prev.Size%(256*1024) != 0 {
 			s3Log.Errorf("size of each block must be multiple of 256KB: %v", param.Size)

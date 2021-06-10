@@ -692,7 +692,6 @@ func (inode *Inode) copyUnmodifiedRange(startPart uint64, endPart uint64) error 
 	startOffset, _ := inode.fs.partRange(startPart)
 	endOffset, endSize := inode.fs.partRange(endPart-1)
 	log.Debugf("Copying unmodified range %v-%v MB of object %v", startOffset/1024/1024, (endOffset+endSize)/1024/1024, key)
-	inode.mu.Unlock()
 	_, err := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
 		Commit:     inode.mpu,
 		PartNumber: uint32(startPart+1),
@@ -700,7 +699,6 @@ func (inode *Inode) copyUnmodifiedRange(startPart uint64, endPart uint64) error 
 		Offset:     startOffset,
 		Size:       endOffset+endSize-startOffset,
 	})
-	inode.mu.Lock()
 	if err != nil {
 		log.Errorf("Failed to copy unmodified range %v-%v MB of object %v: %v", startOffset/1024/1024, (endOffset+endSize)/1024/1024, key, err)
 	}
@@ -708,26 +706,47 @@ func (inode *Inode) copyUnmodifiedRange(startPart uint64, endPart uint64) error 
 }
 
 func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
-	// FIXME: Copy exact parts instead of large ranges ?
-	// FIXME2: Do it in parallel, too ?
+	// FIXME: move to configuration and maybe merge with MaxFlushers
+	noMerge := true
+	maxParallelCopy := 16
+	// First collect ranges to be unaffected by sudden parallel changes
+	var ranges []uint64
 	var lastStart, lastEnd uint64
 	for i := uint64(0); i < numParts; i++ {
 		if inode.mpu.Parts[i] == nil {
-			if lastEnd == 0 {
-				lastStart = i
+			if noMerge {
+				ranges = append(ranges, i, i+1)
+			} else {
+				if lastEnd == 0 {
+					lastStart = i
+				}
+				lastEnd = i+1
 			}
-			lastEnd = i+1
 		} else if lastEnd != 0 {
-			err = inode.copyUnmodifiedRange(lastStart, lastEnd)
+			ranges = append(ranges, lastStart, lastEnd)
 			lastEnd = 0
-			if err != nil {
-				return
-			}
 		}
 	}
 	if lastEnd != 0 {
-		err = inode.copyUnmodifiedRange(lastStart, lastEnd)
+		ranges = append(ranges, lastStart, lastEnd)
 	}
+	guard := make(chan int, maxParallelCopy)
+	var wg sync.WaitGroup
+	inode.mu.Unlock()
+	for i := 0; i < len(ranges); i += 2 {
+		guard <- i
+		wg.Add(1)
+		go func(start, end uint64) {
+			requestErr := inode.copyUnmodifiedRange(start, end)
+			if requestErr != nil {
+				err = requestErr
+			}
+			wg.Done()
+			<- guard
+		}(uint64(ranges[i]), uint64(ranges[i+1]))
+	}
+	wg.Wait()
+	inode.mu.Lock()
 	return
 }
 

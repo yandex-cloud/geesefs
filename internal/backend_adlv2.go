@@ -813,6 +813,7 @@ func (b *ADLv2) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAd
 		panic("Incorrect commit data type")
 	}
 
+	// FIXME: Support out-of-order parts
 	res, err := b.append(*param.Commit.Key, int64(param.Offset), int64(param.Size),
 		param.Body, *param.Commit.UploadId)
 	if err != nil {
@@ -821,7 +822,7 @@ func (b *ADLv2) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAd
 	atomic.AddUint64(&commitData.Size, param.Size)
 
 	return &MultipartBlobAddOutput{
-		res.Response.Header.Get(ADL2_REQUEST_ID),
+		RequestId: res.Response.Header.Get(ADL2_REQUEST_ID),
 	}, nil
 }
 
