@@ -99,7 +99,7 @@ type Inode struct {
 	CacheState  InodeCacheState
 	buffers []FileBuffer
 	readRanges []ReadRange
-	IsFlushing bool
+	IsFlushing int
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput

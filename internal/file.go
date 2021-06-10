@@ -1084,7 +1084,7 @@ func (inode *Inode) FlushSmallObject() {
 
 	sz := inode.Attributes.Size
 	if sz > SINGLE_PART_SIZE || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
-		inode.IsFlushing = false
+		inode.IsFlushing--
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
 		inode.fs.flusherCond.Broadcast()
 		inode.mu.Unlock()
@@ -1138,7 +1138,7 @@ func (inode *Inode) FlushSmallObject() {
 		inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
 	}
 
-	inode.IsFlushing = false
+	inode.IsFlushing--
 	atomic.AddInt64(&inode.fs.activeFlushers, -1)
 	inode.fs.flusherCond.Broadcast()
 
@@ -1152,7 +1152,7 @@ func (inode *Inode) FlushMultipart() {
 
 	// FIXME: Upload parts of the same object in parallel
 	if inode.Attributes.Size <= SINGLE_PART_SIZE || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
-		inode.IsFlushing = false
+		inode.IsFlushing--
 		inode.mu.Unlock()
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
 		inode.fs.flusherCond.Broadcast()
@@ -1175,7 +1175,7 @@ func (inode *Inode) FlushMultipart() {
 		}
 	}
 	if !found {
-		inode.IsFlushing = false
+		inode.IsFlushing--
 		inode.mu.Unlock()
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
 		inode.fs.flusherCond.Broadcast()
@@ -1202,7 +1202,7 @@ func (inode *Inode) FlushMultipart() {
 		// File size may have been changed
 		if inode.Attributes.Size <= partOffset || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
 			// Don't flush the part at all
-			inode.IsFlushing = false
+			inode.IsFlushing--
 			inode.mu.Unlock()
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
 			inode.fs.flusherCond.Broadcast()
@@ -1225,7 +1225,7 @@ func (inode *Inode) FlushMultipart() {
 		if inode.Attributes.Size <= partOffset || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
 			// Don't flush the part at all
 			inode.UnlockRange(partOffset, partSize)
-			inode.IsFlushing = false
+			inode.IsFlushing--
 			inode.mu.Unlock()
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
 			inode.fs.flusherCond.Broadcast()
@@ -1344,7 +1344,7 @@ func (inode *Inode) FlushMultipart() {
 	}
 
 	inode.UnlockRange(partOffset, partSize)
-	inode.IsFlushing = false
+	inode.IsFlushing--
 	inode.mu.Unlock()
 	atomic.AddInt64(&inode.fs.activeFlushers, -1)
 	inode.fs.flusherCond.Broadcast()

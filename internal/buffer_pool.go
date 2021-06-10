@@ -66,14 +66,14 @@ type FileBuffer struct {
 	ptr *BufferPointer
 }
 
-type MultiBuffer struct {
+type BufferOrZero struct {
 	data []byte
 	zero bool
 	size uint64
 }
 
 type MultiReader struct {
-	buffers []MultiBuffer
+	buffers []BufferOrZero
 	idx int
 	pos uint64
 	bufPos uint64
@@ -86,7 +86,7 @@ func NewMultiReader() *MultiReader {
 }
 
 func (r *MultiReader) AddBuffer(buf []byte) {
-	r.buffers = append(r.buffers, MultiBuffer{
+	r.buffers = append(r.buffers, BufferOrZero{
 		data: buf,
 		size: uint64(len(buf)),
 	})
@@ -94,7 +94,7 @@ func (r *MultiReader) AddBuffer(buf []byte) {
 }
 
 func (r *MultiReader) AddZero(size uint64) {
-	r.buffers = append(r.buffers, MultiBuffer{
+	r.buffers = append(r.buffers, BufferOrZero{
 		zero: true,
 		size: size,
 	})

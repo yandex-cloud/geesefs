@@ -366,7 +366,7 @@ func (fs *Goofys) Flusher() {
 			fs.mu.RLock()
 			for _, inode := range fs.inodes {
 				if inode.mu.TryLock() {
-					if inode.IsFlushing {
+					if inode.IsFlushing > 0 {
 						// Already flushing
 						inode.mu.Unlock()
 					} else if inode.CacheState == ST_DELETED {
@@ -379,7 +379,7 @@ func (fs *Goofys) Flusher() {
 						if inode.Attributes.Size <= SINGLE_PART_SIZE {
 							if inode.fileHandles == 0 {
 								atomic.AddInt64(&inode.fs.activeFlushers, 1)
-								inode.IsFlushing = true
+								inode.IsFlushing++
 								inode.mu.Unlock()
 								go inode.FlushSmallObject()
 							} else {
@@ -388,7 +388,7 @@ func (fs *Goofys) Flusher() {
 							}
 						} else {
 							atomic.AddInt64(&inode.fs.activeFlushers, 1)
-							inode.IsFlushing = true
+							inode.IsFlushing++
 							inode.mu.Unlock()
 							go inode.FlushMultipart()
 						}

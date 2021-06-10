@@ -897,14 +897,14 @@ func (inode *Inode) SendDelete() {
 		key += "/"
 	}
 	atomic.AddInt64(&inode.Parent.fs.activeFlushers, 1)
-	inode.IsFlushing = true
+	inode.IsFlushing++
 	go func() {
 		_, err := cloud.DeleteBlob(&DeleteBlobInput{
 			Key: key,
 		})
 		inode.mu.Lock()
 		atomic.AddInt64(&inode.Parent.fs.activeFlushers, -1)
-		inode.IsFlushing = false
+		inode.IsFlushing--
 		if err == fuse.ENOENT {
 			// object is already deleted
 			err = nil
@@ -996,14 +996,14 @@ func (dir *Inode) SendMkDir() {
 		Body:    nil,
 		DirBlob: true,
 	}
-	dir.IsFlushing = true
+	dir.IsFlushing++
 	atomic.AddInt64(&dir.fs.activeFlushers, 1)
 	go func() {
 		_, err := cloud.PutBlob(params)
 		dir.mu.Lock()
 		defer dir.mu.Unlock()
 		atomic.AddInt64(&dir.fs.activeFlushers, -1)
-		dir.IsFlushing = false
+		dir.IsFlushing--
 		if err != nil {
 			log.Errorf("Failed to create directory object %v: %v", key, err)
 			return
