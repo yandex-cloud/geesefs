@@ -18,11 +18,8 @@ package internal
 import (
 	. "github.com/kahing/goofys/api/common"
 
-	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
-	"os/exec"
 	"strings"
 	"text/tabwriter"
 	"text/template"
@@ -108,10 +105,7 @@ func NewApp() (app *cli.App) {
 
 			cli.StringFlag{
 				Name: "cache",
-				Usage: "Directory to use for data cache. " +
-					"Requires catfs and `-o allow_other'. " +
-					"Can also pass in other catfs options " +
-					"(ex: --cache \"--free:10%:$HOME/cache\") (default: off)",
+				Usage: "Directory to use for data cache. (default: off)",
 			},
 
 			cli.IntFlag{
@@ -421,58 +415,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 	}()
 
 	if c.IsSet("cache") {
-		cache := c.String("cache")
-		cacheArgs := strings.Split(c.String("cache"), ":")
-		cacheDir := cacheArgs[len(cacheArgs)-1]
-		cacheArgs = cacheArgs[:len(cacheArgs)-1]
-
-		fi, err := os.Stat(cacheDir)
-		if err != nil || !fi.IsDir() {
-			io.WriteString(cli.ErrWriter,
-				fmt.Sprintf("Invalid value \"%v\" for --cache: not a directory\n\n",
-					cacheDir))
-			return nil
-		}
-
-		if _, ok := flags.MountOptions["allow_other"]; !ok {
-			flags.MountPointCreated, err = ioutil.TempDir("", ".goofys-mnt")
-			if err != nil {
-				io.WriteString(cli.ErrWriter,
-					fmt.Sprintf("Unable to create temp dir: %v", err))
-				return nil
-			}
-			flags.MountPoint = flags.MountPointCreated
-		}
-
-		cacheArgs = append([]string{"--test", "-f"}, cacheArgs...)
-
-		if flags.MountPointArg == flags.MountPoint {
-			cacheArgs = append(cacheArgs, "-ononempty")
-		}
-
-		cacheArgs = append(cacheArgs, "--")
-		cacheArgs = append(cacheArgs, flags.MountPoint)
-		cacheArgs = append(cacheArgs, cacheDir)
-		cacheArgs = append(cacheArgs, flags.MountPointArg)
-
-		fuseLog.Debugf("catfs %v", cacheArgs)
-		catfs := exec.Command("catfs", cacheArgs...)
-		_, err = catfs.Output()
-		if err != nil {
-			if ee, ok := err.(*exec.Error); ok {
-				io.WriteString(cli.ErrWriter,
-					fmt.Sprintf("--cache requires catfs (%v) but %v\n\n",
-						"http://github.com/kahing/catfs",
-						ee.Error()))
-			} else if ee, ok := err.(*exec.ExitError); ok {
-				io.WriteString(cli.ErrWriter,
-					fmt.Sprintf("Invalid value \"%v\" for --cache: %v\n\n",
-						cache, string(ee.Stderr)))
-			}
-			return nil
-		}
-
-		flags.Cache = cacheArgs[1:]
+		// FIXME: catfs removed. Implement local cache
 	}
 
 	return flags

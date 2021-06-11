@@ -152,7 +152,7 @@ $dir/bench_format.py <(paste $dir/bench.goofys $dir/bench.$PROG) > $dir/bench.da
 
 if [ "$CACHE" = "true" ]; then
     gnuplot -c $dir/bench_graph.gnuplot $dir/bench.data $dir/bench-cached.png \
-	    'goofys+catfs' $PROG && \
+	    'goofys+cache' $PROG && \
 	convert -rotate 90 $dir/bench-cached.png $dir/bench-cached.png
 else
     gnuplot -c $dir/bench_graph.gnuplot $dir/bench.data $dir/bench.png goofys $PROG \

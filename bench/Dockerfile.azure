@@ -25,9 +25,6 @@ RUN git clone --depth 1 https://github.com/Azure/azure-storage-fuse.git && \
     cd azure-storage-fuse && bash ./build.sh > /dev/null && make -C build install && \
     cd .. && rm -Rf azure-storage-fuse
 
-RUN curl -L -O https://github.com/kahing/catfs/releases/download/v0.8.0/catfs && \
-    mv catfs /usr/bin && chmod 0755 /usr/bin/catfs
-
 # ideally I want to clear out all the go deps too but there's no
 # way to do that with ADD
 ENV PATH=$PATH:/root/go/bin

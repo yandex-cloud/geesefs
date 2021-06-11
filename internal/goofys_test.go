@@ -1603,20 +1603,11 @@ func isTravis() bool {
 	return hasEnv("TRAVIS")
 }
 
-func isCatfs() bool {
-	return hasEnv("CATFS")
-}
-
 func (s *GoofysTest) mount(t *C, mountPoint string) {
 	err := os.MkdirAll(mountPoint, 0700)
 	t.Assert(err, IsNil)
 
 	server := fuseutil.NewFileSystemServer(s.fs)
-
-	if isCatfs() {
-		s.fs.flags.MountOptions = make(map[string]string)
-		s.fs.flags.MountOptions["allow_other"] = ""
-	}
 
 	// Mount the file system.
 	mountCfg := &fuse.MountConfig{
@@ -1629,39 +1620,6 @@ func (s *GoofysTest) mount(t *C, mountPoint string) {
 
 	_, err = fuse.Mount(mountPoint, server, mountCfg)
 	t.Assert(err, IsNil)
-
-	if isCatfs() {
-		cacheDir := mountPoint + "-cache"
-		err := os.MkdirAll(cacheDir, 0700)
-		t.Assert(err, IsNil)
-
-		catfs := exec.Command("catfs", "--test", "-ononempty", "--", mountPoint, cacheDir, mountPoint)
-		_, err = catfs.Output()
-		if err != nil {
-			if ee, ok := err.(*exec.ExitError); ok {
-				panic(ee.Stderr)
-			}
-		}
-
-		catfs = exec.Command("catfs", "-ononempty", "--", mountPoint, cacheDir, mountPoint)
-
-		if isTravis() {
-			logger := NewLogger("catfs")
-			lvl := logrus.InfoLevel
-			logger.Formatter.(*LogHandle).Lvl = &lvl
-			w := logger.Writer()
-
-			catfs.Stdout = w
-			catfs.Stderr = w
-
-			catfs.Env = append(catfs.Env, "RUST_LOG=debug")
-		}
-
-		err = catfs.Start()
-		t.Assert(err, IsNil)
-
-		time.Sleep(time.Second)
-	}
 }
 
 func (s *GoofysTest) umount(t *C, mountPoint string) {
@@ -1677,10 +1635,6 @@ func (s *GoofysTest) umount(t *C, mountPoint string) {
 	t.Assert(err, IsNil)
 
 	os.Remove(mountPoint)
-	if isCatfs() {
-		cacheDir := mountPoint + "-cache"
-		os.Remove(cacheDir)
-	}
 }
 
 func (s *GoofysTest) runFuseTest(t *C, mountPoint string, umount bool, cmdArgs ...string) {
@@ -2835,10 +2789,6 @@ func (s *GoofysTest) writeSeekWriteFuse(t *C, file string, fh *os.File, first st
 }
 
 func (s *GoofysTest) TestWriteSeekWriteFuse(t *C) {
-	if !isCatfs() {
-		t.Skip("only works with CATFS=true")
-	}
-
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)

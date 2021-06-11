@@ -6,9 +6,6 @@ import (
 
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
-	"time"
 
 	"github.com/jacobsa/fuse"
 	"github.com/jacobsa/fuse/fuseutil"
@@ -124,55 +121,7 @@ func Mount(
 	}
 
 	if len(flags.Cache) != 0 {
-		log.Infof("Starting catfs %v", flags.Cache)
-		catfs := exec.Command("catfs", flags.Cache...)
-		lvl := logrus.InfoLevel
-		if flags.DebugFuse {
-			lvl = logrus.DebugLevel
-			catfs.Env = append(catfs.Env, "RUST_LOG=debug")
-		} else {
-			catfs.Env = append(catfs.Env, "RUST_LOG=info")
-		}
-		catfsLog := GetLogger("catfs")
-		catfsLog.Formatter.(*LogHandle).Lvl = &lvl
-		catfs.Stderr = catfsLog.Writer()
-		err = catfs.Start()
-		if err != nil {
-			err = fmt.Errorf("Failed to start catfs: %v", err)
-
-			// sleep a bit otherwise can't unmount right away
-			time.Sleep(time.Second)
-			err2 := TryUnmount(flags.MountPoint)
-			if err2 != nil {
-				err = fmt.Errorf("%v. Failed to unmount: %v", err, err2)
-			}
-		}
-
-		go func() {
-			err := catfs.Wait()
-			log.Errorf("catfs exited: %v", err)
-
-			if err != nil {
-				// if catfs terminated cleanly, it
-				// should have unmounted this,
-				// otherwise we will do it ourselves
-				err2 := TryUnmount(flags.MountPointArg)
-				if err2 != nil {
-					log.Errorf("Failed to unmount: %v", err2)
-				}
-			}
-
-			if flags.MountPointArg != flags.MountPoint {
-				err2 := TryUnmount(flags.MountPoint)
-				if err2 != nil {
-					log.Errorf("Failed to unmount: %v", err2)
-				}
-			}
-
-			if err != nil {
-				os.Exit(1)
-			}
-		}()
+		// FIXME: catfs removed. Implement local cache
 	}
 
 	return

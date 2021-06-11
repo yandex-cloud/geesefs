@@ -54,20 +54,15 @@ func registerSIGINTHandler(fs *Goofys, flags *FlagStorage) {
 				continue
 			}
 
-			if len(flags.Cache) == 0 {
-				log.Infof("Received %v, attempting to unmount...", s)
+			log.Infof("Received %v, attempting to unmount...", s)
 
-				err := TryUnmount(flags.MountPoint)
-				if err != nil {
-					log.Errorf("Failed to unmount in response to %v: %v", s, err)
-				} else {
-					log.Printf("Successfully unmounted %v in response to %v",
-						flags.MountPoint, s)
-					return
-				}
+			err := TryUnmount(flags.MountPoint)
+			if err != nil {
+				log.Errorf("Failed to unmount in response to %v: %v", s, err)
 			} else {
-				log.Infof("Received %v", s)
-				// wait for catfs to die and cleanup
+				log.Printf("Successfully unmounted %v in response to %v",
+					flags.MountPoint, s)
+				return
 			}
 		}
 	}()
@@ -220,9 +215,7 @@ func main() {
 				kill(os.Getppid(), syscall.SIGUSR1)
 			}
 			log.Println("File system has been successfully mounted.")
-			// Let the user unmount with Ctrl-C
-			// (SIGINT). But if cache is on, catfs will
-			// receive the signal and we would detect that exiting
+			// Let the user unmount with Ctrl-C (SIGINT)
 			registerSIGINTHandler(fs, flags)
 
 			// Wait for the file system to be unmounted.
