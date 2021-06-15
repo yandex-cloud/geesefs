@@ -44,9 +44,7 @@ type FileHandle struct {
 	keepPageCache bool // the same value we returned to OpenFile
 }
 
-// FIXME -> to configuration
 const MAX_BUF = 5 * 1024 * 1024
-const SINGLE_PART_SIZE = uint64(5 * 1024 * 1024)
 
 // NewFileHandle returns a new file handle for the given `inode` triggered by fuse
 // operation with the given `opMetadata`
@@ -716,7 +714,7 @@ func (inode *Inode) FlushSmallObject() {
 	inode.mu.Lock()
 
 	sz := inode.Attributes.Size
-	if sz > SINGLE_PART_SIZE || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
+	if sz > inode.fs.flags.SinglePartMB*1024*1024 || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
 		inode.IsFlushing--
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
 		inode.fs.flusherCond.Broadcast()
@@ -850,7 +848,7 @@ func (inode *Inode) FlushMultipart() {
 	inode.mu.Lock()
 
 	// FIXME: Upload parts of the same object in parallel
-	if inode.Attributes.Size <= SINGLE_PART_SIZE || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
+	if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
 		inode.IsFlushing--
 		inode.mu.Unlock()
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)

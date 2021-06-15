@@ -945,6 +945,8 @@ func (parent *Inode) Create(
 
 	now := time.Now()
 	inode = NewInode(fs, parent, &name)
+	inode.mu.Lock()
+	defer inode.mu.Unlock()
 	inode.Attributes = InodeAttributes{
 		Size:  0,
 		Mtime: now,

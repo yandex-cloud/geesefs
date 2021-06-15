@@ -375,7 +375,7 @@ func (fs *Goofys) Flusher() {
 					inode.SendMkDir()
 					inode.mu.Unlock()
 				} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
-					if inode.Attributes.Size <= SINGLE_PART_SIZE {
+					if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 {
 						if inode.fileHandles == 0 {
 							atomic.AddInt64(&inode.fs.activeFlushers, 1)
 							inode.IsFlushing++

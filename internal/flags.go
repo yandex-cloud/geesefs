@@ -248,6 +248,13 @@ func NewApp() (app *cli.App) {
 					" if they're at most this number of KB away (default: 512)",
 			},
 
+			cli.IntFlag{
+				Name:  "single-part",
+				Value: 5,
+				Usage: "Maximum size of an object in MB to upload it as a single part." +
+					" Can't be less than 5 MB (default: 5 MB)",
+			},
+
 			cli.DurationFlag{
 				Name:  "stat-cache-ttl",
 				Value: time.Minute,
@@ -347,6 +354,11 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		readAhead = 4096
 	}
 
+	singlePart := c.Int("single-part")
+	if singlePart < 5 {
+		singlePart = 5
+	}
+
 	flags := &FlagStorage{
 		// File system
 		MountOptions: make(map[string]string),
@@ -366,6 +378,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		HTTPTimeout:  c.Duration("http-timeout"),
 		ReadAheadKB:  uint64(readAhead),
 		ReadMergeKB:  uint64(c.Int("read-merge")),
+		SinglePartMB: uint64(singlePart),
 
 		// Common Backend Config
 		Endpoint:       c.String("endpoint"),
