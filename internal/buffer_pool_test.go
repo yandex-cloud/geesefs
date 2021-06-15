@@ -17,11 +17,7 @@ package internal
 import (
 	"bytes"
 	"io"
-	"io/ioutil"
-	"sync"
 	"time"
-
-	"github.com/sirupsen/logrus"
 	. "gopkg.in/check.v1"
 )
 
@@ -29,7 +25,6 @@ type BufferTest struct {
 }
 
 var _ = Suite(&BufferTest{})
-var ignored2 = logrus.DebugLevel
 
 type SeqReader struct {
 	cur int64
@@ -124,183 +119,45 @@ func CompareReader(r1, r2 io.Reader, bufSize int) (int, error) {
 	}
 }
 
-func (s *BufferTest) TestMBuf(t *C) {
-	h := NewBufferPool(1000 * 1024 * 1024)
-
-	n := uint64(2 * BUF_SIZE)
-	mb := MBuf{}.Init(h, n, false)
-	t.Assert(len(mb.buffers), Equals, 2)
-
-	r := io.LimitReader(&SeqReader{}, int64(n))
-
-	for {
-		nread, err := mb.WriteFrom(r)
-		t.Assert(err, IsNil)
-		if nread == 0 {
-			break
-		}
+func (s *BufferTest) TestMultiReader(t *C) {
+	r := NewMultiReader()
+	buf := make([]byte, 355)
+	for i := 0; i < len(buf); i++ {
+		buf[i] = 0xA5
 	}
-	t.Assert(mb.wbuf, Equals, 1)
-	t.Assert(mb.wp, Equals, BUF_SIZE)
-
-	diff, err := CompareReader(mb, io.LimitReader(&SeqReader{}, int64(n)), 0)
-	t.Assert(err, IsNil)
-	t.Assert(diff, Equals, -1)
-
-	t.Assert(mb.rbuf, Equals, 1)
-	t.Assert(mb.rp, Equals, BUF_SIZE)
-
-	t.Assert(h.numBuffers, Equals, uint64(2))
-	mb.Free()
-	t.Assert(h.numBuffers, Equals, uint64(0))
-}
-
-func (s *BufferTest) TestBufferWrite(t *C) {
-	h := NewBufferPool(1000 * 1024 * 1024)
-
-	n := uint64(2 * BUF_SIZE)
-	mb := MBuf{}.Init(h, n, true)
-	t.Assert(len(mb.buffers), Equals, 2)
-
-	nwritten, err := io.Copy(mb, io.LimitReader(&SeqReader{}, int64(n)))
-	t.Assert(nwritten, Equals, int64(n))
-	t.Assert(err, IsNil)
-
-	diff, err := CompareReader(mb, io.LimitReader(&SeqReader{}, int64(n)), 0)
-	t.Assert(err, IsNil)
-	t.Assert(diff, Equals, -1)
-
-	cur, err := mb.Seek(0, 1)
-	t.Assert(err, IsNil)
-	t.Assert(cur, Equals, int64(n))
-
-	cur, err = mb.Seek(0, 2)
-	t.Assert(err, IsNil)
-	t.Assert(cur, Equals, int64(n))
-
-	cur, err = mb.Seek(0, 0)
-	t.Assert(err, IsNil)
-	t.Assert(cur, Equals, int64(0))
-	t.Assert(mb.rbuf, Equals, 0)
-	t.Assert(mb.rp, Equals, 0)
-
-	diff, err = CompareReader(mb, io.LimitReader(&SeqReader{}, int64(n)), 0)
-	t.Assert(err, IsNil)
-	t.Assert(diff, Equals, -1)
-}
-
-func (s *BufferTest) TestBufferLen(t *C) {
-	h := NewBufferPool(1000 * 1024 * 1024)
-
-	n := uint64(2*BUF_SIZE - 1)
-	mb := MBuf{}.Init(h, n, true)
-	t.Assert(len(mb.buffers), Equals, 2)
-
-	nwritten, err := io.Copy(mb, io.LimitReader(&SeqReader{}, int64(n)))
-	t.Assert(nwritten, Equals, int64(n))
-	t.Assert(err, IsNil)
-	t.Assert(mb.Len(), Equals, int(n))
-}
-
-func (s *BufferTest) TestBuffer(t *C) {
-	h := NewBufferPool(1000 * 1024 * 1024)
-
-	n := uint64(2 * BUF_SIZE)
-	mb := MBuf{}.Init(h, n, false)
-	t.Assert(len(mb.buffers), Equals, 2)
-
-	r := func() (io.ReadCloser, error) {
-		return &SlowReader{io.LimitReader(&SeqReader{}, int64(n)), 1 * time.Millisecond}, nil
+	r.AddBuffer(buf)
+	r.AddZero(1299)
+	buf = make([]byte, 567)
+	for i := 0; i < len(buf); i++ {
+		buf[i] = 0xB0
 	}
+	r.AddBuffer(buf)
+	buf = make([]byte, 4096)
 
-	b := Buffer{}.Init(mb, r)
-
-	diff, err := CompareReader(b, io.LimitReader(&SeqReader{}, int64(n)), 0)
+	b, err := r.Read(buf)
+	t.Assert(b, Equals, 355+1299+567)
 	t.Assert(err, IsNil)
-	t.Assert(diff, Equals, -1)
-	t.Assert(b.buf, IsNil)
-	t.Assert(b.reader, NotNil)
-	t.Assert(h.numBuffers, Equals, uint64(0))
-}
+	t.Assert(buf[0], Equals, byte(0xA5))
+	t.Assert(buf[355], Equals, byte(0))
+	t.Assert(buf[355+1299], Equals, byte(0xB0))
 
-// io.Limitedreader does not return EOF the first time limit is
-// reached, unlike the reader you get from http
-type OneByteReader struct {
-	read bool
-}
+	b, err = r.Read(buf)
+	t.Assert(b, Equals, 0)
+	t.Assert(err, Equals, io.EOF)
 
-func (r *OneByteReader) Read(p []byte) (n int, err error) {
-	err = io.EOF
-	if r.read {
-		return
-	}
-	p[0] = 1
-	n = 1
-	r.read = true
-	return
-}
-
-func (s *BufferTest) TestBufferTiny(t *C) {
-	h := NewBufferPool(1000 * 1024 * 1024)
-
-	n := uint64(1)
-	mb := MBuf{}.Init(h, n, false)
-	t.Assert(len(mb.buffers), Equals, 1)
-
-	r := func() (io.ReadCloser, error) {
-		return ioutil.NopCloser(&OneByteReader{}), nil
-	}
-
-	b := Buffer{}.Init(mb, r)
-
-	diff, err := CompareReader(b, &OneByteReader{}, 0)
+	pos, err := r.Seek(-700, 2)
+	t.Assert(pos, Equals, int64(355+1299+567-700))
 	t.Assert(err, IsNil)
-	t.Assert(diff, Equals, -1)
-	t.Assert(b.buf, IsNil)
-	t.Assert(b.reader, NotNil)
-	t.Assert(h.numBuffers, Equals, uint64(0))
-}
 
-func (s *BufferTest) TestPool(t *C) {
-	const MAX = 8
-	pool := BufferPool{maxBuffers: MAX}.Init()
-	var wg sync.WaitGroup
+	b, err = r.Read(buf)
+	t.Assert(b, Equals, 700)
+	t.Assert(err, IsNil)
+	t.Assert(buf[0], Equals, byte(0))
+	t.Assert(buf[700-567], Equals, byte(0xB0))
 
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			var inner sync.WaitGroup
-			for j := 0; j < 30; j++ {
-				inner.Add(1)
-				buf := pool.RequestBuffer()
-				go func() {
-					time.Sleep(1000 * time.Millisecond)
-					pool.Free(buf)
-					inner.Done()
-				}()
-				inner.Wait()
-			}
-			wg.Done()
-		}()
-	}
-
-	wg.Wait()
-}
-
-func (s *BufferTest) TestIssue193(t *C) {
-	h := NewBufferPool(1000 * 1024 * 1024)
-
-	n := uint64(2 * BUF_SIZE)
-	mb := MBuf{}.Init(h, n, false)
-
-	r := func() (io.ReadCloser, error) {
-		return &SlowReader{io.LimitReader(&SeqReader{}, int64(n)), 1 * time.Millisecond}, nil
-	}
-
-	b := Buffer{}.Init(mb, r)
-	b.Close()
-
-	// readloop would have caused a panic
+	b, err = r.Read(buf)
+	t.Assert(b, Equals, 0)
+	t.Assert(err, Equals, io.EOF)
 }
 
 func (s *BufferTest) TestCGroupMemory(t *C) {

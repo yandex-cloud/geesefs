@@ -65,6 +65,7 @@ import (
 var ignored = logrus.DebugLevel
 
 const PerTestTimeout = 10 * time.Minute
+const READAHEAD_CHUNK = 4*1024*1024
 
 func currentUid() uint32 {
 	user, err := user.Current()
@@ -1121,11 +1122,10 @@ func (s *GoofysTest) TestWriteReplicatorThrottle(t *C) {
 
 func (s *GoofysTest) TestReadWriteMinimumMemory(t *C) {
 	if _, ok := s.cloud.(*ADLv1); ok {
-		s.fs.bufferPool.maxBuffers = 4
+		s.fs.bufferPool.max = 20*1024*1024
 	} else {
-		s.fs.bufferPool.maxBuffers = 2
+		s.fs.bufferPool.max = 10*1024*1024
 	}
-	s.fs.bufferPool.computedMaxbuffers = s.fs.bufferPool.maxBuffers
 	s.testWriteFile(t, "testLargeFile", 21*1024*1024, 128*1024)
 }
 
@@ -2881,9 +2881,6 @@ func (s *GoofysTest) TestRead403(t *C) {
 
 	s3.awsConfig.Credentials = credentials.AnonymousCredentials
 	s3.newS3()
-
-	// fake enable read-ahead
-	fh.seqReadAmount = uint64(READAHEAD_CHUNK)
 
 	buf := make([]byte, 5)
 
