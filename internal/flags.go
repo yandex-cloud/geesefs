@@ -209,6 +209,11 @@ func NewApp() (app *cli.App) {
 			// Tuning
 			/////////////////////////
 
+			cli.IntFlag{
+				Name:  "memory-limit",
+				Usage: "Maximum memory in MB to use for data cache (default: use cgroup free memory limit)",
+			},
+
 			cli.BoolFlag{
 				Name:  "cheap",
 				Usage: "Reduce S3 operation costs at the expense of some performance (default: off)",
@@ -351,6 +356,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		Gid:          uint32(c.Int("gid")),
 
 		// Tuning,
+		MemoryLimit:  uint64(1024*1024*c.Int("memory-limit")),
 		Cheap:        c.Bool("cheap"),
 		ExplicitDir:  c.Bool("no-implicit-dir"),
 		NoDirObject:  c.Bool("no-dir-object"),

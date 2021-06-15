@@ -220,10 +220,9 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		Mtime: now,
 	}
 
-	// FIXME: Configure limit
-	fs.bufferPool = NewBufferPool(20*1024*1024)
-	fs.bufferPool.FreeSomeCleanBuffers = func(inode fuseops.InodeID, size uint64) uint64 {
-		return fs.FreeSomeCleanBuffers(inode, size)
+	fs.bufferPool = NewBufferPool(int64(flags.MemoryLimit))
+	fs.bufferPool.FreeSomeCleanBuffers = func(size int64) (int64, bool) {
+		return fs.FreeSomeCleanBuffers(size)
 	}
 
 	fs.nextInodeID = fuseops.RootInodeID + 1
@@ -300,43 +299,47 @@ func (fs *Goofys) getInodeOrDie(id fuseops.InodeID) (inode *Inode) {
 }
 
 // Try to reclaim some clean buffers
-func (fs *Goofys) FreeSomeCleanBuffers(forInode fuseops.InodeID, size uint64) uint64 {
+func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-	freed := uint64(0)
+	freed := int64(0)
+	haveDirty := false
 	for _, inode := range fs.inodes {
-		if inode.Id == forInode || inode.mu.TryLock() {
-			// Need TryLock() to not produce deadlocks
-			for i := 0; i < len(inode.buffers); i++ {
-				buf := &inode.buffers[i]
-				// FIXME: STUPID. Add generations ?
-				if buf.dirtyID == 0 {
-					requiredByReads := false
-					for _, r := range inode.readRanges {
-						if r.Offset < buf.offset+buf.length &&
-							r.Offset+r.Size >= buf.offset {
-							requiredByReads = true
-							break
-						}
-					}
-					if !buf.zero && !requiredByReads {
-						freed += fs.bufferPool.FreeBufferUnlocked(&inode.buffers, i)
-						i--
+		inode.mu.Lock()
+		for i := 0; i < len(inode.buffers); i++ {
+			buf := &inode.buffers[i]
+			// FIXME: STUPID. Add generations or LRU or something else
+			if buf.dirtyID == 0 {
+				requiredByReads := false
+				for _, r := range inode.readRanges {
+					if r.Offset < buf.offset+buf.length &&
+						r.Offset+r.Size >= buf.offset {
+						requiredByReads = true
+						break
 					}
 				}
-			}
-			if inode.Id != forInode {
-				inode.mu.Unlock()
+				if !buf.zero && !requiredByReads {
+					buf.ptr.refs--
+					if buf.ptr.refs == 0 {
+						freed += int64(len(buf.ptr.mem))
+						fs.bufferPool.UseUnlocked(-int64(len(buf.ptr.mem)))
+					}
+					inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)
+					i--
+				}
+			} else {
+				haveDirty = true
 			}
 		}
+		inode.mu.Unlock()
 		if freed >= size {
 			break
 		}
 	}
-	if freed < size {
-		//fs.StartFlusher()
+	fs.mu.RUnlock()
+	if haveDirty {
+		fs.flusherCond.Broadcast()
 	}
-	return freed
+	return freed, haveDirty
 }
 
 // Flusher goroutine.
@@ -354,10 +357,6 @@ func (fs *Goofys) FreeSomeCleanBuffers(forInode fuseops.InodeID, size uint64) ui
 // 3) Fsync triggered => intermediate full flush (same algorithm)
 // 4) Dirty memory limit reached => without on-disk cache we have to flush the whole object.
 //    With on-disk cache we can unload some dirty buffers to disk.
-//    If we could read our own multipart upload parts back after uploading them to server
-//    we could unload them to server.
-//    However, due to the fact that S3 parts have ___numbers___, we'll have problems
-//    if the beginning changes after the end.
 func (fs *Goofys) Flusher() {
 	fs.flusherMu.Lock()
 	for true {
@@ -365,36 +364,35 @@ func (fs *Goofys) Flusher() {
 		if atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers {
 			fs.mu.RLock()
 			for _, inode := range fs.inodes {
-				if inode.mu.TryLock() {
-					if inode.IsFlushing > 0 {
-						// Already flushing
-						inode.mu.Unlock()
-					} else if inode.CacheState == ST_DELETED {
-						inode.SendDelete()
-						inode.mu.Unlock()
-					} else if inode.CacheState == ST_CREATED && inode.isDir() {
-						inode.SendMkDir()
-						inode.mu.Unlock()
-					} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
-						if inode.Attributes.Size <= SINGLE_PART_SIZE {
-							if inode.fileHandles == 0 {
-								atomic.AddInt64(&inode.fs.activeFlushers, 1)
-								inode.IsFlushing++
-								inode.mu.Unlock()
-								go inode.FlushSmallObject()
-							} else {
-								// Don't flush small files with active file handles
-								inode.mu.Unlock()
-							}
-						} else {
+				inode.mu.Lock()
+				if inode.IsFlushing > 0 {
+					// Already flushing
+					inode.mu.Unlock()
+				} else if inode.CacheState == ST_DELETED {
+					inode.SendDelete()
+					inode.mu.Unlock()
+				} else if inode.CacheState == ST_CREATED && inode.isDir() {
+					inode.SendMkDir()
+					inode.mu.Unlock()
+				} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
+					if inode.Attributes.Size <= SINGLE_PART_SIZE {
+						if inode.fileHandles == 0 {
 							atomic.AddInt64(&inode.fs.activeFlushers, 1)
 							inode.IsFlushing++
 							inode.mu.Unlock()
-							go inode.FlushMultipart()
+							go inode.FlushSmallObject()
+						} else {
+							// Don't flush small files with active file handles
+							inode.mu.Unlock()
 						}
 					} else {
+						atomic.AddInt64(&inode.fs.activeFlushers, 1)
+						inode.IsFlushing++
 						inode.mu.Unlock()
+						go inode.FlushMultipart()
 					}
+				} else {
+					inode.mu.Unlock()
 				}
 				if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
 					break

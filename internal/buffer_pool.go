@@ -17,7 +17,6 @@ package internal
 
 import (
 	. "github.com/kahing/goofys/api/common"
-	"github.com/jacobsa/fuse/fuseops"
 	"io"
 	"runtime"
 	"runtime/debug"
@@ -31,18 +30,17 @@ var bufferLog = GetLogger("buffer")
 type BufferPool struct {
 	mu   sync.Mutex
 	cond *sync.Cond
+	wantFree int
 
 	curDirtyID uint64
 
-	cur uint64
-	curDirty uint64
-	max uint64
+	cur int64
+	max int64
+	limit int64
 
 	requests uint64
 
-	limit uint64
-
-	FreeSomeCleanBuffers func(inode fuseops.InodeID, size uint64) uint64
+	FreeSomeCleanBuffers func(size int64) (int64, bool)
 }
 
 // Several FileBuffers may be slices of the same array,
@@ -173,7 +171,7 @@ func (r *MultiReader) Len() uint64 {
 	return r.size
 }
 
-func maxMemToUse(usedMem uint64) uint64 {
+func maxMemToUse(usedMem int64) int64 {
 	m, err := mem.VirtualMemory()
 	if err != nil {
 		panic(err)
@@ -195,7 +193,7 @@ func maxMemToUse(usedMem uint64) uint64 {
 
 	log.Debugf("amount of allocated memory: %v/%v MB", ms.Sys/1024/1024, ms.Alloc/1024/1024)
 
-	max := availableMem+usedMem
+	max := int64(availableMem)+usedMem
 	log.Debugf("using up to %vMB for in-memory buffers (%v MB used)", max/1024/1024, usedMem/1024/1024)
 
 	return max
@@ -206,7 +204,7 @@ func (pool BufferPool) Init() *BufferPool {
 	return &pool
 }
 
-func NewBufferPool(limit uint64) *BufferPool {
+func NewBufferPool(limit int64) *BufferPool {
 	pool := BufferPool{limit: limit}.Init()
 	return pool
 }
@@ -218,107 +216,50 @@ func (pool *BufferPool) recomputeBufferLimit() {
 	}
 }
 
-func (pool *BufferPool) Use(inode fuseops.InodeID, size uint64, dirty bool) {
-	if dirty {
-		// FIXME
-		return
-	}
-
-	bufferLog.Debugf("requesting %v", size)
-
+func (pool *BufferPool) Use(size int64) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-	pool.requests++
-	if pool.requests >= 16 {
-		debug.FreeOSMemory()
-		pool.recomputeBufferLimit()
-		pool.requests = 0
+	pool.UseUnlocked(size)
+}
+
+func (pool *BufferPool) UseUnlocked(size int64) {
+	if size > 0 {
+		bufferLog.Debugf("requesting %v", size)
+		pool.requests++
+		if pool.requests >= 16 {
+			debug.FreeOSMemory()
+			pool.recomputeBufferLimit()
+			pool.requests = 0
+		}
 	}
 
-	for pool.cur+size > pool.max {
+	if pool.cur+size > pool.max {
 		// Try to free clean buffers, then flush dirty buffers
-		freed := pool.FreeSomeCleanBuffers(inode, pool.cur+size - pool.max)
+		freed, canFreeMoreAsync := pool.FreeSomeCleanBuffers(pool.cur+size - pool.max)
 		bufferLog.Debugf("Freed %v, now: %v %v %v", freed, pool.cur, size, pool.max)
+		for pool.cur+size > pool.max && canFreeMoreAsync {
+			pool.wantFree++
+			pool.cond.Wait()
+			pool.wantFree--
+			freed, canFreeMoreAsync = pool.FreeSomeCleanBuffers(pool.cur+size - pool.max)
+			bufferLog.Debugf("Freed %v, now: %v %v %v", freed, pool.cur, size, pool.max)
+		}
 		if pool.cur+size > pool.max {
-			if pool.cur == 0 {
-				debug.FreeOSMemory()
-				pool.recomputeBufferLimit()
-				if pool.cur+size > pool.max {
-					// we don't have any in use buffers, and we've made attempts to
-					// free memory AND correct our limits, yet we still can't allocate.
-					// it's likely that we are simply asking for too much
-					log.Errorf("Unable to allocate %d bytes, used %d bytes, limit is %d bytes", size, pool.cur, pool.max)
-					panic("OOM")
-				} else {
-					break
-				}
-			} else {
-				pool.cond.Wait()
+			debug.FreeOSMemory()
+			pool.recomputeBufferLimit()
+			if pool.cur+size > pool.max {
+				// we can't free anything else asynchronously, and we've made attempts to
+				// free memory AND correct our limits, yet we still can't allocate.
+				// it's likely that we are simply asking for too much
+				log.Errorf("Unable to allocate %d bytes, used %d bytes, limit is %d bytes", size, pool.cur, pool.max)
+				panic("OOM")
 			}
 		}
 	}
 
 	pool.cur += size
-	if dirty {
-		pool.curDirty += size
-	}
-}
 
-func (pool *BufferPool) Free(size uint64, dirty bool) {
-	if dirty {
-		// FIXME
-		return
-	}
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-	pool.FreeUnlocked(size, dirty)
-}
-
-func (pool *BufferPool) FreeUnlocked(size uint64, dirty bool) {
-	if dirty {
-		// FIXME
-		return
-	}
-	notify := pool.cur+size > pool.max
-	pool.cur -= size
-	if dirty {
-		pool.curDirty -= size
-	}
-	if notify {
+	if size < 0 && pool.wantFree > 0 {
 		pool.cond.Broadcast()
 	}
-}
-
-func (pool *BufferPool) AddDirty(size int64) {
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-	pool.curDirty = uint64(int64(pool.curDirty)+size)
-}
-
-func (pool *BufferPool) FreeBuffer(buffers *[]FileBuffer, i int) uint64 {
-	buf := &((*buffers)[i])
-	freed := uint64(0)
-	if buf.ptr != nil {
-		buf.ptr.refs--
-		if buf.ptr.refs == 0 {
-			freed = uint64(len(buf.ptr.mem))
-			pool.Free(freed, buf.dirtyID != 0)
-		}
-	}
-	*buffers = append((*buffers)[0 : i], (*buffers)[i+1 : ]...)
-	return freed
-}
-
-func (pool *BufferPool) FreeBufferUnlocked(buffers *[]FileBuffer, i int) uint64 {
-	buf := &((*buffers)[i])
-	freed := uint64(0)
-	if buf.ptr != nil {
-		buf.ptr.refs--
-		if buf.ptr.refs == 0 {
-			freed = uint64(len(buf.ptr.mem))
-			pool.FreeUnlocked(freed, buf.dirtyID != 0)
-		}
-	}
-	*buffers = append((*buffers)[0 : i], (*buffers)[i+1 : ]...)
-	return freed
 }

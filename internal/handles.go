@@ -20,6 +20,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -79,7 +80,7 @@ type Inode struct {
 	// Ref: https://github.com/golang/go/blob/e42ae65a8507/src/time/time.go#L12:L56
 	AttrTime time.Time
 
-	mu TryMutex // everything below is protected by mu
+	mu sync.Mutex // everything below is protected by mu
 
 	// We are not very consistent about enforcing locks for `Parent` because, the
 	// parent field very very rarely changes and it is generally fine to operate on

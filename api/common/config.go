@@ -45,6 +45,7 @@ type FlagStorage struct {
 	Backend interface{}
 
 	// Tuning
+	MemoryLimit  uint64
 	Cheap        bool
 	ExplicitDir  bool
 	NoDirObject  bool
