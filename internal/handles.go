@@ -111,10 +111,6 @@ type Inode struct {
 
 	// last known etag from the cloud
 	knownETag *string
-	// tell the next open to invalidate page cache because the
-	// file is changed. This is set when LookUp notices something
-	// about this file is changed
-	invalidateCache bool
 
 	// the refcnt is an exception, it's protected by the global lock
 	// Goofys.mu

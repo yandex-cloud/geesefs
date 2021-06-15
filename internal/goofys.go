@@ -799,23 +799,6 @@ func (fs *Goofys) LookUpInode(
 			inode.mu.Lock()
 
 			if newInode != nil {
-				// if only size changed, kernel seems to
-				// automatically drop cache
-				if !inode.Attributes.Equal(newInode.Attributes) {
-					inode.logFuse("invalidate cache because attributes changed", inode.Attributes, newInode.Attributes)
-					inode.invalidateCache = true
-				} else if inode.knownETag != nil &&
-					newInode.knownETag != nil &&
-					*inode.knownETag != *newInode.knownETag {
-					// if this is a new file (ie:
-					// inode.knownETag is nil),
-					// then prefer to read our own
-					// write then reading updated
-					// data
-					inode.logFuse("invalidate cache because etag changed", *inode.knownETag, *newInode.knownETag)
-					inode.invalidateCache = true
-				}
-
 				if newInode.Attributes.Mtime.IsZero() {
 					// this can happen if it's an
 					// implicit dir, use the last
@@ -1035,17 +1018,9 @@ func (fs *Goofys) OpenFile(
 	//
 	// read will read from cache
 	// write will populate cache
-	//
-	// because we have one flag to control both behaviors, if an
-	// object is updated out-of-band and we need to invalidate
-	// cache, and we write to this object locally, subsequent read
-	// will not read from cache
-	//
-	// see tests TestReadNewFileWithExternalChangesFuse and
-	// TestReadMyOwnWrite*Fuse
-	op.KeepPageCache = !in.invalidateCache
-	fh.keepPageCache = op.KeepPageCache
-	in.invalidateCache = false
+
+	// We have our own in-memory cache, kernel page cache is redundant
+	op.KeepPageCache = false
 
 	return
 }

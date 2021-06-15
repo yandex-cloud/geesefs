@@ -40,8 +40,6 @@ type FileHandle struct {
 	// [1] : https://godoc.org/github.com/shirou/gopsutil/process#Process.Tgid
 	// [2] : https://github.com/shirou/gopsutil#process-class
 	Tgid *int32
-
-	keepPageCache bool // the same value we returned to OpenFile
 }
 
 const MAX_BUF = 5 * 1024 * 1024
@@ -346,7 +344,6 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 		fh.inode.ResizeUnlocked(end)
 	}
 
-	// FIXME With this cache in action, usual kernel page cache is probably redundant
 	allocated := fh.inode.addBuffer(uint64(offset), data, true, true)
 
 	fh.inode.lastWriteEnd = end
@@ -362,18 +359,6 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 	if allocated != int64(len(data)) {
 		fh.inode.fs.bufferPool.Use(allocated-int64(len(data)))
 	}
-
-	/*
-	// we are updating this file, set knownETag to nil so
-	// on next lookup we won't think it's changed, to
-	// always prefer to read back our own write. We set
-	// this back to the ETag at flush time
-	//
-	// XXX this doesn't actually work, see the notes in
-	// Goofys.OpenFile about KeepPageCache
-	fh.inode.knownETag = nil
-	fh.inode.invalidateCache = false
-	*/
 
 	return
 }
@@ -1020,17 +1005,10 @@ func (inode *Inode) updateFromFlush(etag *string, lastModified *time.Time, stora
 	if storageClass != nil {
 		inode.s3Metadata["storage-class"] = []byte(*storageClass)
 	}
-	if false { // FIXME was if inode.keepPageCache
-		// if this write didn't update page cache, don't try
-		// to update these values so on next lookup, we would
-		// invalidate the cache. We want to do that because
-		// our cache could have been populated by subsequent
-		// reads
-		if lastModified != nil {
-			inode.Attributes.Mtime = *lastModified
-		}
-		inode.knownETag = etag
+	if lastModified != nil {
+		inode.Attributes.Mtime = *lastModified
 	}
+	inode.knownETag = etag
 }
 
 /*func (fh *FileHandle) resetToKnownSize() {
