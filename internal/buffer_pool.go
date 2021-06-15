@@ -48,7 +48,7 @@ type BufferPool struct {
 // Several FileBuffers may be slices of the same array,
 // but we want to track memory usage, so we have to refcount them...
 type BufferPointer struct {
-	buf []byte
+	mem []byte
 	refs int
 }
 
@@ -62,7 +62,9 @@ type FileBuffer struct {
 	// Is this chunk already saved to the server as a part of multipart upload?
 	flushed bool
 	// Data
-	buf []byte
+	length uint64
+	zero bool
+	data []byte
 	ptr *BufferPointer
 }
 
@@ -101,6 +103,12 @@ func (r *MultiReader) AddZero(size uint64) {
 	r.size += size
 }
 
+func memzero(buf []byte) {
+	for j := 0; j < len(buf); j++ {
+		buf[j] = 0
+	}
+}
+
 func (r *MultiReader) Read(buf []byte) (n int, err error) {
 	n = 0
 	if r.idx >= len(r.buffers) {
@@ -115,9 +123,7 @@ func (r *MultiReader) Read(buf []byte) (n int, err error) {
 			l = remaining
 		}
 		if r.buffers[r.idx].zero {
-			for i := outPos; i < outPos+l; i++ {
-				buf[i] = 0
-			}
+			memzero(buf[outPos : outPos+l])
 		} else {
 			copy(buf[outPos : outPos+l], r.buffers[r.idx].data[r.bufPos : r.bufPos+l])
 		}
@@ -292,10 +298,12 @@ func (pool *BufferPool) AddDirty(size int64) {
 func (pool *BufferPool) FreeBuffer(buffers *[]FileBuffer, i int) uint64 {
 	buf := &((*buffers)[i])
 	freed := uint64(0)
-	buf.ptr.refs--
-	if buf.ptr.refs == 0 {
-		freed = uint64(len(buf.ptr.buf))
-		pool.Free(freed, buf.dirtyID != 0)
+	if buf.ptr != nil {
+		buf.ptr.refs--
+		if buf.ptr.refs == 0 {
+			freed = uint64(len(buf.ptr.mem))
+			pool.Free(freed, buf.dirtyID != 0)
+		}
 	}
 	*buffers = append((*buffers)[0 : i], (*buffers)[i+1 : ]...)
 	return freed
@@ -304,10 +312,12 @@ func (pool *BufferPool) FreeBuffer(buffers *[]FileBuffer, i int) uint64 {
 func (pool *BufferPool) FreeBufferUnlocked(buffers *[]FileBuffer, i int) uint64 {
 	buf := &((*buffers)[i])
 	freed := uint64(0)
-	buf.ptr.refs--
-	if buf.ptr.refs == 0 {
-		freed = uint64(len(buf.ptr.buf))
-		pool.FreeUnlocked(freed, buf.dirtyID != 0)
+	if buf.ptr != nil {
+		buf.ptr.refs--
+		if buf.ptr.refs == 0 {
+			freed = uint64(len(buf.ptr.mem))
+			pool.FreeUnlocked(freed, buf.dirtyID != 0)
+		}
 	}
 	*buffers = append((*buffers)[0 : i], (*buffers)[i+1 : ]...)
 	return freed

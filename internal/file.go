@@ -100,7 +100,7 @@ func locateBuffer(buffers []FileBuffer, offset uint64) int {
 	for start < len(buffers) {
 		// FIXME binary search?
 		b := &buffers[start]
-		if b.offset + uint64(len(b.buf)) > offset {
+		if b.offset + b.length > offset {
 			break
 		}
 		start++
@@ -108,13 +108,14 @@ func locateBuffer(buffers []FileBuffer, offset uint64) int {
 	return start
 }
 
-func appendBuffer(forInode fuseops.InodeID, pool *BufferPool, buf *FileBuffer, data []byte) {
-	oldLen := len(buf.buf)
+func (inode *Inode) appendBuffer(buf *FileBuffer, data []byte) {
+	oldLen := len(buf.data)
 	newLen := oldLen + len(data)
-	if cap(buf.buf) >= newLen {
+	if cap(buf.data) >= newLen {
 		// It fits
-		buf.buf = buf.buf[0 : newLen]
-		copy(buf.buf[oldLen : ], data)
+		buf.data = buf.data[0 : newLen]
+		buf.length = uint64(newLen)
+		copy(buf.data[oldLen : ], data)
 	} else {
 		// Reallocate
 		newCap := newLen
@@ -122,48 +123,49 @@ func appendBuffer(forInode fuseops.InodeID, pool *BufferPool, buf *FileBuffer, d
 			newCap = 2*oldLen
 		}
 		newData := make([]byte, newCap)
-		copy(newData[0 : oldLen], buf.buf)
+		copy(newData[0 : oldLen], buf.data)
 		copy(newData[oldLen : newLen], data)
-		buf.buf = newData[0 : newLen]
+		buf.data = newData[0 : newLen]
+		buf.length = uint64(newLen)
 		// Refcount
 		oldPtr := buf.ptr
 		oldPtr.refs--
 		if oldPtr.refs == 0 {
-			freed := uint64(len(oldPtr.buf))
-			pool.Free(freed, buf.dirtyID != 0)
+			freed := uint64(len(oldPtr.mem))
+			inode.fs.bufferPool.Free(freed, buf.dirtyID != 0)
 		}
 		buf.ptr = &BufferPointer{
-			buf: newData,
+			mem: newData,
 			refs: 1,
 		}
 	}
 }
 
-func insertBuffer(forInode fuseops.InodeID, pool *BufferPool, buffers []FileBuffer,
-	pos int, offset uint64, data []byte, dirty bool, copyData bool, dataPtr *BufferPointer) []FileBuffer {
+func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, dirty bool, copyData bool, dataPtr *BufferPointer) {
 	dirtyID := uint64(0)
 	if dirty {
-		dirtyID = atomic.AddUint64(&pool.curDirtyID, 1)
+		dirtyID = atomic.AddUint64(&inode.fs.bufferPool.curDirtyID, 1)
 	}
 	if copyData && pos > 0 &&
-		(buffers[pos-1].offset + uint64(len(buffers[pos-1].buf)) == offset) &&
-		(buffers[pos-1].dirtyID != 0) == (dirtyID != 0) &&
-		(cap(buffers[pos-1].buf) < len(buffers[pos-1].buf)+len(data) ||
-			buffers[pos-1].ptr.refs == 1 && len(buffers[pos-1].buf) <= MAX_BUF/2) {
+		!inode.buffers[pos-1].zero &&
+		(inode.buffers[pos-1].offset + inode.buffers[pos-1].length) == offset &&
+		(inode.buffers[pos-1].dirtyID != 0) == (dirtyID != 0) &&
+		(cap(inode.buffers[pos-1].data) < len(inode.buffers[pos-1].data)+len(data) ||
+			inode.buffers[pos-1].ptr.refs == 1 && len(inode.buffers[pos-1].data) <= MAX_BUF/2) {
 		// We can append to the previous buffer if it doesn't result
 		// in overwriting data that may be referenced by other buffers
 		// This is profitable because a lot of tools write in small chunks
-		buffers[pos-1].dirtyID = dirtyID
-		buffers[pos-1].flushed = false
-		appendBuffer(forInode, pool, &buffers[pos-1], data)
+		inode.buffers[pos-1].dirtyID = dirtyID
+		inode.buffers[pos-1].flushed = false
+		inode.appendBuffer(&inode.buffers[pos-1], data)
 	} else {
 		var newBuf []byte
 		if copyData {
 			newBuf = make([]byte, len(data))
-			pool.Use(forInode, uint64(len(data)), dirty)
+			inode.fs.bufferPool.Use(inode.Id, uint64(len(data)), dirty)
 			copy(newBuf, data)
 			dataPtr = &BufferPointer{
-				buf: newBuf,
+				mem: newBuf,
 				refs: 0,
 			}
 		} else {
@@ -172,46 +174,53 @@ func insertBuffer(forInode fuseops.InodeID, pool *BufferPool, buffers []FileBuff
 		dataPtr.refs++
 		// Ugly insert()...
 		// Why can't Golang do append(buffers[0:s], a, buffers[s+1]...) ?
-		buffers = append(buffers, FileBuffer{})
-		copy(buffers[pos+1 : ], buffers[pos : ])
-		buffers[pos] = FileBuffer{
+		inode.buffers = append(inode.buffers, FileBuffer{})
+		copy(inode.buffers[pos+1 : ], inode.buffers[pos : ])
+		inode.buffers[pos] = FileBuffer{
 			offset: offset,
 			dirtyID: dirtyID,
 			flushed: false,
-			buf: newBuf,
+			zero: false,
+			length: uint64(len(newBuf)),
+			data: newBuf,
 			ptr: dataPtr,
 		}
 	}
-	return buffers
 }
 
-func addFileBuffer(forInode fuseops.InodeID, pool *BufferPool, buffers []FileBuffer, offset uint64, data []byte, dirty bool, copyData bool) []FileBuffer {
-	start := locateBuffer(buffers, offset)
+func (inode *Inode) addBuffer(offset uint64, data []byte, dirty bool, copyData bool) {
+	start := locateBuffer(inode.buffers, offset)
 	dataLen := uint64(len(data))
 	endOffset := offset+dataLen
 
 	// Remove intersecting parts as they're being overwritten
 	// If we're inserting a clean buffer, don't remove dirty ones
-	for pos := start; pos < len(buffers); pos++ {
-		b := &buffers[pos]
+	for pos := start; pos < len(inode.buffers); pos++ {
+		b := &inode.buffers[pos]
 		if b.offset >= endOffset {
 			break
 		}
-		bufEnd := b.offset+uint64(len(b.buf))
+		bufEnd := b.offset+b.length
 		if (dirty || b.dirtyID == 0) && bufEnd > offset && endOffset > b.offset {
 			if offset <= b.offset {
 				if endOffset >= bufEnd {
 					// whole buffer
-					pool.FreeBuffer(&buffers, pos)
+					inode.fs.bufferPool.FreeBuffer(&inode.buffers, pos)
 					pos--
 				} else {
 					// beginning
-					b.buf = b.buf[endOffset - b.offset : ]
+					if !b.zero {
+						b.data = b.data[endOffset - b.offset : ]
+					}
+					b.length = bufEnd-endOffset
 					b.offset = endOffset
 				}
 			} else if endOffset >= bufEnd {
 				// end
-				b.buf = b.buf[0:offset - b.offset]
+				if !b.zero {
+					b.data = b.data[0 : offset - b.offset]
+				}
+				b.length = offset - b.offset
 			} else {
 				// middle
 				b.ptr.refs++
@@ -219,24 +228,30 @@ func addFileBuffer(forInode fuseops.InodeID, pool *BufferPool, buffers []FileBuf
 					offset: b.offset,
 					dirtyID: b.dirtyID,
 					flushed: b.flushed,
-					buf: b.buf[0:offset-b.offset],
+					length: offset-b.offset,
+					zero: b.zero,
 					ptr: b.ptr,
 				}
 				endBuf := FileBuffer{
 					offset: endOffset,
 					dirtyID: b.dirtyID,
 					flushed: b.flushed,
-					buf: b.buf[endOffset-b.offset : ],
+					length: b.length-(endOffset-b.offset),
+					zero: b.zero,
 					ptr: b.ptr,
 				}
+				if !b.zero {
+					startBuf.data = b.data[0 : offset-b.offset]
+					endBuf.data = b.data[endOffset-b.offset : ]
+				}
 				if b.dirtyID != 0 {
-					endBuf.dirtyID = atomic.AddUint64(&pool.curDirtyID, 1)
+					endBuf.dirtyID = atomic.AddUint64(&inode.fs.bufferPool.curDirtyID, 1)
 				}
 				// Ugly insert() again
-				buffers = append(buffers, FileBuffer{})
-				copy(buffers[pos+2 : ], buffers[pos+1 : ])
-				buffers[pos] = startBuf
-				buffers[pos+1] = endBuf
+				inode.buffers = append(inode.buffers, FileBuffer{})
+				copy(inode.buffers[pos+2 : ], inode.buffers[pos+1 : ])
+				inode.buffers[pos] = startBuf
+				inode.buffers[pos+1] = endBuf
 			}
 		}
 	}
@@ -244,46 +259,87 @@ func addFileBuffer(forInode fuseops.InodeID, pool *BufferPool, buffers []FileBuf
 	// Insert non-overlapping parts of the buffer
 	curOffset := offset
 	dataPtr := &BufferPointer{
-		buf: data,
+		mem: data,
 		refs: 0,
 	}
-	for pos := start; pos < len(buffers) && curOffset < endOffset; pos++ {
-		b := &buffers[pos]
+	for pos := start; pos < len(inode.buffers) && curOffset < endOffset; pos++ {
+		b := &inode.buffers[pos]
 		if b.offset > curOffset {
 			// insert curOffset->min(b.offset,endOffset)
 			nextEnd := b.offset
 			if nextEnd > endOffset {
 				nextEnd = endOffset
 			}
-			buffers = insertBuffer(forInode, pool, buffers, pos, curOffset, data[curOffset-offset : nextEnd-offset], dirty, copyData, dataPtr)
+			inode.insertBuffer(pos, curOffset, data[curOffset-offset : nextEnd-offset], dirty, copyData, dataPtr)
 		}
-		curOffset = b.offset+uint64(len(b.buf))
+		curOffset = b.offset + b.length
 	}
 	if curOffset < endOffset {
 		// Insert curOffset->endOffset
-		buffers = insertBuffer(forInode, pool, buffers, len(buffers), curOffset, data[curOffset-offset : ], dirty, copyData, dataPtr)
+		inode.insertBuffer(len(inode.buffers), curOffset, data[curOffset-offset : ], dirty, copyData, dataPtr)
 	}
+}
 
-	return buffers
+func (inode *Inode) ResizeUnlocked(newSize uint64) {
+	// Truncate or extend
+	if inode.Attributes.Size > newSize && len(inode.buffers) > 0 {
+		// Truncate - remove extra buffers
+		end := len(inode.buffers)
+		for end > 0 && inode.buffers[end-1].offset >= newSize {
+			buf := &inode.buffers[end-1]
+			if buf.ptr != nil {
+				buf.ptr.refs--
+				if buf.ptr.refs == 0 {
+					inode.fs.bufferPool.Free(uint64(len(buf.ptr.mem)), buf.dirtyID != 0)
+				}
+			}
+			end--
+		}
+		inode.buffers = inode.buffers[0 : end]
+		if end > 0 {
+			buf := &inode.buffers[end-1]
+			if buf.offset + buf.length > newSize {
+				buf.length = newSize - buf.offset
+				buf.data = buf.data[0 : buf.length]
+			}
+		}
+	}
+	if inode.Attributes.Size < newSize {
+		// Zero fill extended region
+		inode.buffers = append(inode.buffers, FileBuffer{
+			offset: inode.Attributes.Size,
+			dirtyID: atomic.AddUint64(&inode.fs.bufferPool.curDirtyID, 1),
+			length: newSize - inode.Attributes.Size,
+			zero: true,
+		})
+	}
+	inode.Attributes.Size = newSize
+	if inode.CacheState != ST_CREATED {
+		inode.CacheState = ST_MODIFIED
+		inode.fs.flusherCond.Broadcast()
+	}
 }
 
 func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 	fh.inode.logFuse("WriteFile", offset, len(data))
 
+	end := uint64(offset)+uint64(len(data))
+
 	fh.inode.mu.Lock()
 	defer fh.inode.mu.Unlock()
 
+	if fh.inode.Attributes.Size < end {
+		// Extend and zero fill
+		fh.inode.ResizeUnlocked(end)
+	}
+
 	// FIXME With this cache in action, usual kernel page cache is probably redundant
-	fh.inode.buffers = addFileBuffer(fh.inode.Id, fh.inode.fs.bufferPool, fh.inode.buffers, uint64(offset), data, true, true)
-	end := uint64(offset)+uint64(len(data))
+	fh.inode.addBuffer(uint64(offset), data, true, true)
 	fh.inode.lastWriteEnd = end
 
 	if fh.inode.CacheState != ST_CREATED {
 		fh.inode.CacheState = ST_MODIFIED
 		fh.inode.fs.flusherCond.Broadcast()
-	}
-	if fh.inode.Attributes.Size < end {
-		fh.inode.Attributes.Size = end
 	}
 	fh.inode.Attributes.Mtime = time.Now()
 
@@ -333,7 +389,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool) (r
 		if b.offset > pos {
 			requests = appendRequest(requests, pos, b.offset-pos, inode.fs.flags.ReadMergeKB*1024)
 		}
-		pos = b.offset+uint64(len(b.buf))
+		pos = b.offset+b.length
 	}
 	if pos < end {
 		requests = appendRequest(requests, pos, end-pos, inode.fs.flags.ReadMergeKB*1024)
@@ -391,7 +447,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool) (r
 			}
 			// Cache result from the server
 			inode.mu.Lock()
-			inode.buffers = addFileBuffer(inode.Id, inode.fs.bufferPool, inode.buffers, offset, data, false, false)
+			inode.addBuffer(offset, data, false, false)
 			inode.mu.Unlock()
 		}()
 	}
@@ -472,9 +528,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 			if fh.inode.CacheState == ST_CREATED {
 				// It's okay if the file is just created
 				// Zero empty ranges in this case
-				for j := pos-offset; j < b.offset-offset; j++ {
-					buf[j] = 0
-				}
+				memzero(buf[pos-offset : b.offset-offset])
 				pos = b.offset
 			} else {
 				err = requestErr
@@ -484,11 +538,15 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 				return
 			}
 		}
-		readEnd := b.offset+uint64(len(b.buf))
+		readEnd := b.offset+b.length
 		if readEnd > end {
 			readEnd = end
 		}
-		copy(buf[pos-offset : readEnd-offset], b.buf[pos-b.offset : readEnd-b.offset])
+		if b.zero {
+			memzero(buf[pos-offset : readEnd-offset])
+		} else {
+			copy(buf[pos-offset : readEnd-offset], b.data[pos-b.offset : readEnd-b.offset])
+		}
 		pos = readEnd
 	}
 	if pos < end {
@@ -496,9 +554,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 		if fh.inode.CacheState == ST_CREATED {
 			// It's okay if the file is just created
 			// Zero empty ranges in this case
-			for j := pos-offset; j < end-offset; j++ {
-				buf[j] = 0
-			}
+			memzero(buf[pos-offset : end-offset])
 			pos = end
 		} else {
 			err = requestErr
@@ -543,7 +599,7 @@ func (inode *Inode) CheckLoadRange(offset uint64, size uint64) {
 			}
 			loadEnd = buf.offset
 		}
-		last = buf.offset + uint64(len(buf.buf))
+		last = buf.offset + buf.length
 		if last >= end {
 			break
 		}
@@ -566,14 +622,19 @@ func (inode *Inode) splitBuffer(i int, size uint64) {
 		offset: b.offset+size,
 		dirtyID: b.dirtyID,
 		flushed: b.flushed,
-		buf: b.buf[size : ],
+		length: b.length-size,
+		zero: b.zero,
 		ptr: b.ptr,
 	}
-	endBuf.ptr.refs++
+	b.length = size
+	if !b.zero {
+		endBuf.data = b.data[size : ]
+		b.data = b.data[0 : size]
+		endBuf.ptr.refs++
+	}
 	if b.dirtyID != 0 {
 		endBuf.dirtyID = atomic.AddUint64(&inode.fs.bufferPool.curDirtyID, 1)
 	}
-	b.buf = b.buf[0 : size]
 	// Ugly insert() again
 	inode.buffers = append(inode.buffers, FileBuffer{})
 	copy(inode.buffers[i+2 : ], inode.buffers[i+1 : ])
@@ -595,21 +656,29 @@ func (inode *Inode) GetMultiReader(offset uint64, size uint64) (reader *MultiRea
 			inode.splitBuffer(i, last-b.offset)
 			continue
 		}
-		last = b.offset+uint64(len(b.buf))
+		last = b.offset+b.length
 		if last > end {
 			// Split the buffer
 			inode.splitBuffer(i, end-b.offset)
 			b = &inode.buffers[i]
-			last = b.offset+uint64(len(b.buf))
+			last = b.offset+b.length
 		}
 		if b.dirtyID != 0 {
 			bufIds[b.dirtyID] = true
 		}
 		if last >= end {
-			reader.AddBuffer(b.buf[0 : end-b.offset])
+			if b.zero {
+				reader.AddZero(end-b.offset)
+			} else {
+				reader.AddBuffer(b.data[0 : end-b.offset])
+			}
 			break
 		} else {
-			reader.AddBuffer(b.buf)
+			if b.zero {
+				reader.AddZero(b.length)
+			} else {
+				reader.AddBuffer(b.data)
+			}
 		}
 	}
 	if last < end {

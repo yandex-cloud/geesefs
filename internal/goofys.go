@@ -313,13 +313,13 @@ func (fs *Goofys) FreeSomeCleanBuffers(forInode fuseops.InodeID, size uint64) ui
 				if buf.dirtyID == 0 {
 					requiredByReads := false
 					for _, r := range inode.readRanges {
-						if r.Offset < buf.offset+uint64(len(buf.buf)) &&
+						if r.Offset < buf.offset+buf.length &&
 							r.Offset+r.Size >= buf.offset {
 							requiredByReads = true
 							break
 						}
 					}
-					if !requiredByReads {
+					if !buf.zero && !requiredByReads {
 						freed += fs.bufferPool.FreeBufferUnlocked(&inode.buffers, i)
 						i--
 					}
@@ -1229,10 +1229,9 @@ func (fs *Goofys) SetInodeAttributes(
 	fs.mu.RUnlock()
 
 	if op.Size != nil {
-		// Truncate or extend
-		inode.Attributes.Size = *op.Size
-		// FIXME Remove extra buffers
-		// FIXME Remember truncated region
+		inode.mu.Lock()
+		inode.ResizeUnlocked(*op.Size)
+		inode.mu.Unlock()
 	}
 
 	attr, err := inode.GetAttributes()
