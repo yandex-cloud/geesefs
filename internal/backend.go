@@ -260,7 +260,7 @@ type Delegator interface {
 	Delegate() interface{}
 }
 
-var SmallActionsGate = Ticket{Total: 100}.Init()
+var SmallActionsGate = make(chan int, 100)
 
 type sortBlobPrefixOutput []BlobPrefixOutput
 

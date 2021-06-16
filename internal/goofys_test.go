@@ -1320,7 +1320,7 @@ func (s *GoofysTest) TestBackendListPagination(t *C) {
 			var wg sync.WaitGroup
 
 			for b, _ := range blobs {
-				SmallActionsGate.Take(1, true)
+				SmallActionsGate <- 1
 				wg.Add(1)
 
 				go func(key string) {
@@ -1328,7 +1328,7 @@ func (s *GoofysTest) TestBackendListPagination(t *C) {
 					// anything we didn't cleanup
 					// will be handled by teardown
 					_, _ = s.cloud.DeleteBlob(&DeleteBlobInput{key})
-					SmallActionsGate.Return(1)
+					<- SmallActionsGate
 					wg.Done()
 				}(b)
 			}

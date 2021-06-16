@@ -111,7 +111,7 @@ type AZBlob struct {
 	sasTokenProvider SASTokenProvider
 	tokenExpire      time.Time
 	tokenRenewBuffer time.Duration
-	tokenRenewGate   *Ticket
+	tokenRenewGate   chan int
 }
 
 var azbLog = GetLogger("azblob")
@@ -189,7 +189,7 @@ func NewAZBlob(container string, config *AZBlobConfig) (*AZBlob, error) {
 		u:                bu,
 		c:                bc,
 		tokenRenewBuffer: config.TokenRenewBuffer,
-		tokenRenewGate:   Ticket{Total: 1}.Init(),
+		tokenRenewGate:   make(chan int, 1),
 	}
 
 	return b, nil
@@ -220,8 +220,8 @@ func (b *AZBlob) refreshToken() (*azblob.ContainerURL, error) {
 	} else if b.tokenExpire.Before(time.Now().UTC()) {
 		// our token totally expired, renew inline before using it
 		b.mu.Unlock()
-		b.tokenRenewGate.Take(1, true)
-		defer b.tokenRenewGate.Return(1)
+		b.tokenRenewGate <- 1
+		defer func() { <- b.tokenRenewGate } ()
 
 		b.mu.Lock()
 		// check again, because in the mean time maybe it's renewed
@@ -240,14 +240,14 @@ func (b *AZBlob) refreshToken() (*azblob.ContainerURL, error) {
 	} else if b.tokenExpire.Add(b.tokenRenewBuffer).Before(time.Now().UTC()) {
 		b.mu.Unlock()
 		// only allow one token renew at a time
-		if b.tokenRenewGate.Take(1, false) {
-
+		select {
+		case b.tokenRenewGate <- 1:
 			go func() {
-				defer b.tokenRenewGate.Return(1)
 				_, err := b.updateToken()
 				if err != nil {
 					azbLog.Errorf("Unable to refresh token: %v", err)
 				}
+				<- b.tokenRenewGate
 			}()
 
 			// if we cannot renew token, treat it as a
@@ -255,7 +255,7 @@ func (b *AZBlob) refreshToken() (*azblob.ContainerURL, error) {
 			// still valid for a while. When the grace
 			// period is over we will get an error when we
 			// actually access the blob store
-		} else {
+		default:
 			// another goroutine is already renewing
 			azbLog.Infof("token renewal already in progress")
 		}
@@ -666,12 +666,12 @@ func (b *AZBlob) DeleteBlobs(param *DeleteBlobsInput) (ret *DeleteBlobsOutput, d
 	}()
 
 	for _, i := range param.Items {
-		SmallActionsGate.Take(1, true)
+		SmallActionsGate <- 1
 		wg.Add(1)
 
 		go func(key string) {
 			defer func() {
-				SmallActionsGate.Return(1)
+				<- SmallActionsGate
 				wg.Done()
 			}()
 
