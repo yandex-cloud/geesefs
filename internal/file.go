@@ -850,7 +850,7 @@ func (inode *Inode) copyUnmodifiedRange(startPart uint64, endPart uint64) error 
 	startOffset, _ := inode.fs.partRange(startPart)
 	endOffset, endSize := inode.fs.partRange(endPart-1)
 	log.Debugf("Copying unmodified range %v-%v MB of object %v", startOffset/1024/1024, (endOffset+endSize)/1024/1024, key)
-	_, err := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
+	resp, err := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
 		Commit:     inode.mpu,
 		PartNumber: uint32(startPart+1),
 		CopySource: key,
@@ -859,6 +859,10 @@ func (inode *Inode) copyUnmodifiedRange(startPart uint64, endPart uint64) error 
 	})
 	if err != nil {
 		log.Errorf("Failed to copy unmodified range %v-%v MB of object %v: %v", startOffset/1024/1024, (endOffset+endSize)/1024/1024, key, err)
+	} else {
+		inode.mu.Lock()
+		inode.mpu.Parts[startPart] = resp.PartId
+		inode.mu.Unlock()
 	}
 	return err
 }
@@ -955,13 +959,14 @@ func (inode *Inode) FlushPart(part uint64) {
 		Offset:     partOffset,
 	}
 	inode.mu.Unlock()
-	_, err := cloud.MultipartBlobAdd(&partInput)
+	resp, err := cloud.MultipartBlobAdd(&partInput)
 	inode.mu.Lock()
 
 	if err != nil {
 		// FIXME Handle failures
 		log.Errorf("Failed to flush part %v of object %v: %v", part, key, err)
 	} else {
+		inode.mpu.Parts[part] = resp.PartId
 		log.Debugf("Flushed part %v of object %v", part, key)
 		stillDirty := false
 		for i := 0; i < len(inode.buffers); i++ {

@@ -851,8 +851,6 @@ func (s *S3Backend) MultipartBlobBegin(param *MultipartBlobBeginInput) (*Multipa
 }
 
 func (s *S3Backend) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error) {
-	en := &param.Commit.Parts[param.PartNumber-1]
-
 	params := s3.UploadPartInput{
 		Bucket:     &s.bucket,
 		Key:        param.Commit.Key,
@@ -873,14 +871,13 @@ func (s *S3Backend) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBl
 		return nil, mapAwsError(err)
 	}
 
-	*en = resp.ETag
-
-	return &MultipartBlobAddOutput{s.getRequestId(req)}, nil
+	return &MultipartBlobAddOutput{
+		RequestId: s.getRequestId(req),
+		PartId: resp.ETag,
+	}, nil
 }
 
 func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
-	en := &param.Commit.Parts[param.PartNumber-1]
-
 	src := s.bucket+"/"+param.CopySource
 	params := s3.UploadPartCopyInput{
 		Bucket:     &s.bucket,
@@ -906,9 +903,10 @@ func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*Multipart
 		return nil, mapAwsError(err)
 	}
 
-	*en = resp.CopyPartResult.ETag
-
-	return &MultipartBlobCopyOutput{s.getRequestId(req)}, nil
+	return &MultipartBlobCopyOutput{
+		RequestId: s.getRequestId(req),
+		PartId: resp.CopyPartResult.ETag,
+	}, nil
 }
 
 func (s *S3Backend) MultipartBlobCommit(param *MultipartBlobCommitInput) (*MultipartBlobCommitOutput, error) {

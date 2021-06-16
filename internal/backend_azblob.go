@@ -845,9 +845,9 @@ func (b *AZBlob) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobA
 		return nil, mapAZBError(err)
 	}
 
-	param.Commit.Parts[param.PartNumber-1] = &base64BlockId
-
-	return &MultipartBlobAddOutput{}, nil
+	return &MultipartBlobAddOutput{
+		PartId: &base64BlockId,
+	}, nil
 }
 
 func (b *AZBlob) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {

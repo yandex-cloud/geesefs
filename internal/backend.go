@@ -178,6 +178,7 @@ type MultipartBlobAddInput struct {
 
 type MultipartBlobAddOutput struct {
 	RequestId string
+	PartId *string
 }
 
 type MultipartBlobCopyInput struct {
@@ -190,6 +191,7 @@ type MultipartBlobCopyInput struct {
 
 type MultipartBlobCopyOutput struct {
 	RequestId string
+	PartId *string
 }
 
 type MultipartBlobCommitOutput struct {
