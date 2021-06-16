@@ -1116,7 +1116,7 @@ func (s *GoofysTest) TestWriteReallyLargeFile(t *C) {
 }
 
 func (s *GoofysTest) TestWriteReplicatorThrottle(t *C) {
-	s.fs.replicators = Ticket{Total: 1}.Init()
+	s.fs.flags.MaxFlushers = 1
 	s.testWriteFile(t, "testLargeFile", 21*1024*1024, 128*1024)
 }
 

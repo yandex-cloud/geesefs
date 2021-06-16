@@ -92,9 +92,6 @@ type Goofys struct {
 
 	activeFlushers int64
 
-	replicators *Ticket
-	restorers   *Ticket
-
 	forgotCnt uint32
 }
 
@@ -241,9 +238,6 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	fs.dirHandles = make(map[fuseops.HandleID]*DirHandle)
 
 	fs.fileHandles = make(map[fuseops.HandleID]*FileHandle)
-
-	fs.replicators = Ticket{Total: 16}.Init()
-	fs.restorers = Ticket{Total: 20}.Init()
 
 	fs.flusherCond = sync.NewCond(&fs.flusherMu)
 	go fs.Flusher()
