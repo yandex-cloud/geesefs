@@ -580,7 +580,7 @@ func (fh *FileHandle) Release() {
 	fh.inode.mu.Lock()
 	defer fh.inode.mu.Unlock()
 
-	// FIXME: atomic probably isn't needed (always guarded by mutex)
+	// LookUpInode accesses fileHandles without mutex taken, so use atomics for now
 	n := atomic.AddInt32(&fh.inode.fileHandles, -1)
 	if n == -1 {
 		panic(fh.inode.fileHandles)
@@ -616,7 +616,6 @@ func (inode *Inode) CheckLoadRange(offset uint64, size uint64) {
 		}
 		loadEnd = end
 	}
-	// FIXME: Don't fail to load range when the file is extended by sparse write
 	if loadEnd > 0 {
 		inode.LoadRange(loadStart, loadEnd-loadStart, true)
 	}
@@ -784,21 +783,23 @@ func (inode *Inode) copyUnmodifiedRange(startPart uint64, endPart uint64) error 
 }
 
 func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
-	// FIXME: move to configuration and maybe merge with MaxFlushers
-	noMerge := true
-	maxParallelCopy := 16
+	maxMerge := inode.fs.flags.MaxMergeCopyMB * 1024*1024
 	// First collect ranges to be unaffected by sudden parallel changes
 	var ranges []uint64
 	var lastStart, lastEnd uint64
+	var startOffset, endOffset, endSize uint64
 	for i := uint64(0); i < numParts; i++ {
 		if inode.mpu.Parts[i] == nil {
-			if noMerge {
-				ranges = append(ranges, i, i+1)
-			} else {
-				if lastEnd == 0 {
-					lastStart = i
-				}
-				lastEnd = i+1
+			if lastEnd == 0 {
+				lastStart = i
+				startOffset, _ = inode.fs.partRange(lastStart)
+			}
+			lastEnd = i+1
+			endOffset, endSize = inode.fs.partRange(lastEnd-1)
+			endOffset += endSize
+			if endOffset-startOffset >= maxMerge {
+				ranges = append(ranges, lastStart, lastEnd)
+				lastStart, lastEnd = 0, 0
 			}
 		} else if lastEnd != 0 {
 			ranges = append(ranges, lastStart, lastEnd)
@@ -808,7 +809,7 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 	if lastEnd != 0 {
 		ranges = append(ranges, lastStart, lastEnd)
 	}
-	guard := make(chan int, maxParallelCopy)
+	guard := make(chan int, inode.fs.flags.MaxParallelCopy)
 	var wg sync.WaitGroup
 	inode.mu.Unlock()
 	for i := 0; i < len(ranges); i += 2 {

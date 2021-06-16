@@ -50,12 +50,15 @@ type FlagStorage struct {
 	ExplicitDir  bool
 	NoDirObject  bool
 	MaxFlushers  int64
+	MaxParallelParts int
+	MaxParallelCopy int
 	StatCacheTTL time.Duration
 	TypeCacheTTL time.Duration
 	HTTPTimeout  time.Duration
 	ReadAheadKB  uint64
 	ReadMergeKB  uint64
 	SinglePartMB uint64
+	MaxMergeCopyMB uint64
 
 	// Debugging
 	DebugFuse  bool

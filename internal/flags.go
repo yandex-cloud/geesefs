@@ -232,7 +232,21 @@ func NewApp() (app *cli.App) {
 			cli.IntFlag{
 				Name:  "max-flushers",
 				Value: 16,
-				Usage: "How much parallel requests should be used for flushing objects to server (default: 16)",
+				Usage: "How much parallel requests should be used for flushing changes to server (default: 16)",
+			},
+
+			cli.IntFlag{
+				Name:  "max-parallel-parts",
+				Value: 8,
+				Usage: "How much parallel requests out of the total number can be used for large part uploads."+
+					" Large parts take more bandwidth so they usually require less parallelism (default: 8)",
+			},
+
+			cli.IntFlag{
+				Name:  "max-parallel-copy",
+				Value: 16,
+				Usage: "How much parallel unmodified part copy requests should be used."+
+					" This limit is separate from max-flushers (default: 16)",
 			},
 
 			cli.IntFlag{
@@ -253,6 +267,14 @@ func NewApp() (app *cli.App) {
 				Value: 5,
 				Usage: "Maximum size of an object in MB to upload it as a single part." +
 					" Can't be less than 5 MB (default: 5 MB)",
+			},
+
+			cli.IntFlag{
+				Name:  "max-merge-copy",
+				Value: 0,
+				Usage: "If non-zero, allow to compose larger parts up to this number of megabytes" +
+					" in size from existing unchanged parts when doing server-side part copy."+
+					" Must be left at 0 for Yandex S3 (default: 0)",
 			},
 
 			cli.DurationFlag{
@@ -373,12 +395,15 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		ExplicitDir:  c.Bool("no-implicit-dir"),
 		NoDirObject:  c.Bool("no-dir-object"),
 		MaxFlushers:  int64(c.Int("max-flushers")),
+		MaxParallelParts: c.Int("max-parallel-parts"),
+		MaxParallelCopy: c.Int("max-parallel-copy"),
 		StatCacheTTL: c.Duration("stat-cache-ttl"),
 		TypeCacheTTL: c.Duration("type-cache-ttl"),
 		HTTPTimeout:  c.Duration("http-timeout"),
 		ReadAheadKB:  uint64(readAhead),
 		ReadMergeKB:  uint64(c.Int("read-merge")),
 		SinglePartMB: uint64(singlePart),
+		MaxMergeCopyMB: uint64(c.Int("max-merge-copy")),
 
 		// Common Backend Config
 		Endpoint:       c.String("endpoint"),
