@@ -144,9 +144,11 @@ func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, dirty bool
 	if dirty {
 		dirtyID = atomic.AddUint64(&inode.fs.bufferPool.curDirtyID, 1)
 	}
+	partStart, _ := inode.fs.partRange(inode.fs.partNum(offset))
 	if copyData && pos > 0 &&
 		!inode.buffers[pos-1].zero &&
 		(inode.buffers[pos-1].offset + inode.buffers[pos-1].length) == offset &&
+		offset != partStart &&
 		(inode.buffers[pos-1].dirtyID != 0) == (dirtyID != 0) &&
 		(cap(inode.buffers[pos-1].data) < len(inode.buffers[pos-1].data)+len(data) ||
 			inode.buffers[pos-1].ptr.refs == 1 && len(inode.buffers[pos-1].data) <= MAX_BUF/2) {
