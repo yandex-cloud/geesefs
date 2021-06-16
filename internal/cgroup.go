@@ -29,7 +29,7 @@ const MEM_LIMIT_FILE_SUFFIX = "/memory.limit_in_bytes"
 const MEM_USAGE_FILE_SUFFIX = "/memory.usage_in_bytes"
 
 func getCgroupAvailableMem() (retVal uint64, err error) {
-	//get the memory cgroup for self and send limit - usage for the cgroup
+	// get the memory cgroup for self and send limit - usage for the cgroup
 
 	data, err := ioutil.ReadFile(CGROUP_PATH)
 	if err != nil {
@@ -39,7 +39,6 @@ func getCgroupAvailableMem() (retVal uint64, err error) {
 
 	path, err := getMemoryCgroupPath(string(data))
 	if err != nil {
-		log.Debugf("Unable to get memory cgroup path")
 		return 0, err
 	}
 
@@ -51,17 +50,15 @@ func getCgroupAvailableMem() (retVal uint64, err error) {
 		path = filepath.Join(CGROUP_FOLDER_PREFIX)
 	}
 
-	log.Debugf("the memory cgroup path for the current process is %v", path)
-
 	mem_limit, err := readFileAndGetValue(filepath.Join(path, MEM_LIMIT_FILE_SUFFIX))
 	if err != nil {
-		log.Debugf("Unable to get memory limit from cgroup error: %v", err)
+		log.Debugf("Unable to get memory limit from cgroup file %v error: %v", path, err)
 		return 0, err
 	}
 
 	mem_usage, err := readFileAndGetValue(filepath.Join(path, MEM_USAGE_FILE_SUFFIX))
 	if err != nil {
-		log.Debugf("Unable to get memory usage from cgroup error: %v", err)
+		log.Debugf("Unable to get memory usage from cgroup file %v error: %v", path, err)
 		return 0, err
 	}
 

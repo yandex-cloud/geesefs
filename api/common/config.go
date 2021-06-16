@@ -61,6 +61,7 @@ type FlagStorage struct {
 	MaxMergeCopyMB uint64
 
 	// Debugging
+	DebugMain  bool
 	DebugFuse  bool
 	DebugS3    bool
 	Foreground bool

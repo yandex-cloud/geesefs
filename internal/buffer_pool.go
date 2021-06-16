@@ -177,24 +177,19 @@ func maxMemToUse(usedMem int64) int64 {
 		panic(err)
 	}
 
-	availableMem, err := getCgroupAvailableMem()
-	if err != nil {
-		log.Debugf("amount of available memory from cgroup is: %v", availableMem/1024/1024)
-	}
-
-	if err != nil || availableMem < 0 || availableMem > m.Available {
-		availableMem = m.Available
-	}
-
-	log.Debugf("amount of available memory: %v", availableMem/1024/1024)
+	cgroupMem, err := getCgroupAvailableMem()
 
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 
-	log.Debugf("amount of allocated memory: %v/%v MB", ms.Sys/1024/1024, ms.Alloc/1024/1024)
-
+	availableMem := cgroupMem
+	if err != nil || availableMem < 0 || availableMem > m.Available {
+		availableMem = m.Available
+	}
 	max := int64(availableMem)+usedMem
-	log.Debugf("using up to %vMB for in-memory buffers (%v MB used)", max/1024/1024, usedMem/1024/1024)
+
+	log.Debugf("memory available: %v MB, cgroup: %v MB, buffers: %v MB, new limit: %v MB, real used: %v+%v MB",
+		m.Available >> 20, cgroupMem >> 20, usedMem >> 20, max >> 20, ms.Sys >> 20, ms.Alloc >> 20)
 
 	return max
 }
@@ -224,7 +219,6 @@ func (pool *BufferPool) Use(size int64) {
 
 func (pool *BufferPool) UseUnlocked(size int64) {
 	if size > 0 {
-		bufferLog.Debugf("requesting %v", size)
 		pool.requests++
 		if pool.requests >= 16 {
 			debug.FreeOSMemory()

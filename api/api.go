@@ -33,8 +33,11 @@ func Mount(
 	if flags.DebugFuse {
 		fuseLog := GetLogger("fuse")
 		fuseLog.Level = logrus.DebugLevel
-		log.Level = logrus.DebugLevel
 		mountCfg.DebugLogger = GetStdLogger(fuseLog, logrus.DebugLevel)
+	}
+
+	if flags.DebugFuse || flags.DebugMain {
+		log.Level = logrus.DebugLevel
 	}
 
 	if flags.Backend == nil {
