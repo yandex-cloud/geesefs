@@ -55,6 +55,7 @@ func (i InodeAttributes) Equal(other InodeAttributes) bool {
 type ReadRange struct {
 	Offset uint64
 	Size uint64
+	Flushing bool
 }
 
 type MPUPart struct {

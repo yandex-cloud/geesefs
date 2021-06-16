@@ -349,6 +349,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 	fh.inode.lastWriteEnd = end
 	if fh.inode.CacheState != ST_CREATED {
 		fh.inode.CacheState = ST_MODIFIED
+		// FIXME: Don't activate the flusher immediately for small writes
 		fh.inode.fs.flusherCond.Broadcast()
 	}
 	fh.inode.Attributes.Mtime = time.Now()
@@ -463,20 +464,32 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool) (r
 	return
 }
 
-func (inode *Inode) LockRange(offset uint64, size uint64) {
+func (inode *Inode) LockRange(offset uint64, size uint64, flushing bool) {
 	inode.readRanges = append(inode.readRanges, ReadRange{
 		Offset: offset,
 		Size: size,
+		Flushing: flushing,
 	})
 }
 
-func (inode *Inode) UnlockRange(offset uint64, size uint64) {
+func (inode *Inode) UnlockRange(offset uint64, size uint64, flushing bool) {
 	for i, v := range inode.readRanges {
-		if v.Offset == offset && v.Size == size {
+		if v.Offset == offset && v.Size == size && v.Flushing == flushing {
 			inode.readRanges = append(inode.readRanges[0 : i], inode.readRanges[i+1 : ]...)
 			break
 		}
 	}
+}
+
+func (inode *Inode) IsRangeLocked(offset uint64, size uint64, onlyFlushing bool) bool {
+	for _, r := range inode.readRanges {
+		if r.Offset < offset+size &&
+			r.Offset+r.Size >= offset &&
+			(!onlyFlushing || r.Flushing) {
+			return true
+		}
+	}
+	return false
 }
 
 func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err error) {
@@ -511,8 +524,8 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	// Guard buffers against eviction
 	fh.inode.mu.Lock()
 	defer fh.inode.mu.Unlock()
-	fh.inode.LockRange(offset, end-offset)
-	defer fh.inode.UnlockRange(offset, end-offset)
+	fh.inode.LockRange(offset, end-offset, false)
+	defer fh.inode.UnlockRange(offset, end-offset, false)
 
 	// Don't read anything from the server if the file is just created
 	// FIXME: Track random reads and temporarily disable readahead, as in the original
@@ -693,31 +706,100 @@ func (inode *Inode) GetMultiReader(offset uint64, size uint64) (reader *MultiRea
 	return
 }
 
+func (inode *Inode) SendUpload() bool {
+
+	if inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
+		return false
+	}
+
+	if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 {
+		// Don't flush small files with active file handles (if not under memory pressure)
+		if inode.IsFlushing == 0 && (inode.fileHandles == 0 || inode.fs.bufferPool.wantFree > 0) {
+			// Don't accidentally trigger a parallel multipart flush
+			inode.IsFlushing += inode.fs.flags.MaxParallelParts
+			atomic.AddInt64(&inode.fs.activeFlushers, 1)
+			go inode.FlushSmallObject()
+			return true
+		}
+		return false
+	}
+
+	if inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
+		return false
+	}
+
+	// Initiate multipart upload, if not yet
+	if inode.mpu == nil {
+		inode.IsFlushing += inode.fs.flags.MaxParallelParts
+		atomic.AddInt64(&inode.fs.activeFlushers, 1)
+		go func() {
+			cloud, key := inode.cloud()
+			resp, err := cloud.MultipartBlobBegin(&MultipartBlobBeginInput{
+				Key: key,
+				ContentType: inode.fs.flags.GetMimeType(key),
+			})
+			inode.mu.Lock()
+			if err != nil {
+				//fh.lastWriteError = mapAwsError(err) // FIXME return to user?
+				log.Errorf("Failed to initiate multipart upload for %v: %v", key, err)
+			} else {
+				inode.mpu = resp
+			}
+			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+			atomic.AddInt64(&inode.fs.activeFlushers, -1)
+			inode.fs.flusherCond.Broadcast()
+			inode.mu.Unlock()
+		}()
+		return true
+	}
+
+	// Pick part(s) to flush
+	for i := 0; i < len(inode.buffers); i++ {
+		buf := &inode.buffers[i]
+		if buf.dirtyID != 0 && !buf.flushed && !inode.IsRangeLocked(buf.offset, buf.length, true) {
+			part := inode.fs.partNum(buf.offset)
+			// Don't write out the last part that's still written to (if not under memory pressure)
+			if inode.fileHandles == 0 || inode.fs.bufferPool.wantFree > 0 || part != inode.fs.partNum(inode.lastWriteEnd) {
+				// Found
+				partOffset, partSize := inode.fs.partRange(part)
+				// Guard part against eviction
+				inode.LockRange(partOffset, partSize, true)
+				inode.IsFlushing++
+				atomic.AddInt64(&inode.fs.activeFlushers, 1)
+				go inode.FlushPart(part)
+				if atomic.LoadInt64(&inode.fs.activeFlushers) >= inode.fs.flags.MaxFlushers ||
+					inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 func (inode *Inode) FlushSmallObject() {
 
 	inode.mu.Lock()
 
-	sz := inode.Attributes.Size
-	if sz > inode.fs.flags.SinglePartMB*1024*1024 || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
-		inode.IsFlushing--
+	if inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
+		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
 		inode.fs.flusherCond.Broadcast()
 		inode.mu.Unlock()
 		return
 	}
 
-	inode.LockRange(0, sz)
+	sz := inode.Attributes.Size
+	inode.LockRange(0, sz, true)
 
 	if inode.CacheState == ST_MODIFIED {
 		inode.CheckLoadRange(0, sz)
-		if inode.Attributes.Size < sz {
-			// File size may have been changed in between
-			sz = inode.Attributes.Size
-		}
 	}
 
 	cloud, key := inode.cloud()
-	bufReader, bufIds := inode.GetMultiReader(0, sz)
+	// File size may have been changed in between
+	bufReader, bufIds := inode.GetMultiReader(0, inode.Attributes.Size)
 	params := &PutBlobInput{
 		Key:         key,
 		Body:        bufReader,
@@ -756,11 +838,10 @@ func (inode *Inode) FlushSmallObject() {
 		inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
 	}
 
-	inode.IsFlushing--
+	inode.UnlockRange(0, sz, true)
+	inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 	atomic.AddInt64(&inode.fs.activeFlushers, -1)
 	inode.fs.flusherCond.Broadcast()
-
-	inode.UnlockRange(0, sz)
 	inode.mu.Unlock()
 }
 
@@ -829,89 +910,34 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 	return
 }
 
-func (inode *Inode) FlushMultipart() {
+func (inode *Inode) FlushPart(part uint64) {
 
 	inode.mu.Lock()
 
-	// FIXME: Upload parts of the same object in parallel
-	if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
-		inode.IsFlushing--
-		inode.mu.Unlock()
-		atomic.AddInt64(&inode.fs.activeFlushers, -1)
-		inode.fs.flusherCond.Broadcast()
-		return
-	}
+	partOffset, partSize := inode.fs.partRange(part)
 
-	// Pick a part ID to flush
-	var part, partOffset, partSize uint64
-	var found bool
-	for i := 0; i < len(inode.buffers); i++ {
-		buf := &inode.buffers[i]
-		if buf.dirtyID != 0 && !buf.flushed {
-			part = inode.fs.partNum(buf.offset)
-			// Don't write out the last part that's still written to
-			if inode.fileHandles == 0 || inode.fs.bufferPool.wantFree > 0 || part != inode.fs.partNum(inode.lastWriteEnd) {
-				partOffset, partSize = inode.fs.partRange(part)
-				found = true
-				break
-			}
-		}
-	}
-	if !found {
+	defer func(partOffset, partSize uint64) {
+		inode.UnlockRange(partOffset, partSize, true)
 		inode.IsFlushing--
 		inode.mu.Unlock()
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
 		inode.fs.flusherCond.Broadcast()
-		return
-	}
+	} (partOffset, partSize)
 
 	cloud, key := inode.cloud()
 	log.Debugf("Flushing part %v (%v-%v MB) of %v", part, partOffset/1024/1024, (partOffset+partSize)/1024/1024, key)
-
-	// Initiate multipart upload, if not yet
-	if inode.mpu == nil {
-		inode.mu.Unlock()
-		resp, err := cloud.MultipartBlobBegin(&MultipartBlobBeginInput{
-			Key: key,
-			ContentType: inode.fs.flags.GetMimeType(key),
-		})
-		inode.mu.Lock()
-		if err != nil {
-			//fh.lastWriteError = mapAwsError(err) // FIXME return to user?
-			log.Errorf("Failed to initiate multipart upload for %v: %v", key, err)
-		} else {
-			inode.mpu = resp
-		}
-		// File size may have been changed
-		if inode.Attributes.Size <= partOffset || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
-			// Don't flush the part at all
-			inode.IsFlushing--
-			inode.mu.Unlock()
-			atomic.AddInt64(&inode.fs.activeFlushers, -1)
-			inode.fs.flusherCond.Broadcast()
-			return
-		}
-	}
 
 	// Last part may be shorter
 	if inode.Attributes.Size < partOffset+partSize {
 		partSize = inode.Attributes.Size-partOffset
 	}
 
-	// Guard part against eviction
-	inode.LockRange(partOffset, partSize)
-
 	// Load part from the server if we have to read-modify-write it
 	if inode.CacheState == ST_MODIFIED {
 		inode.CheckLoadRange(partOffset, partSize)
 		// File size may have been changed again
 		if inode.Attributes.Size <= partOffset || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
-			// Don't flush the part at all
-			inode.UnlockRange(partOffset, partSize)
-			inode.IsFlushing--
-			inode.mu.Unlock()
-			atomic.AddInt64(&inode.fs.activeFlushers, -1)
-			inode.fs.flusherCond.Broadcast()
+			// Abort flush
 			return
 		}
 		if inode.Attributes.Size < partOffset+partSize {
@@ -991,12 +1017,6 @@ func (inode *Inode) FlushMultipart() {
 			}
 		}
 	}
-
-	inode.UnlockRange(partOffset, partSize)
-	inode.IsFlushing--
-	inode.mu.Unlock()
-	atomic.AddInt64(&inode.fs.activeFlushers, -1)
-	inode.fs.flusherCond.Broadcast()
 }
 
 func (inode *Inode) updateFromFlush(etag *string, lastModified *time.Time, storageClass *string) {

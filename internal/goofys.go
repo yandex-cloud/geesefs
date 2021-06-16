@@ -303,15 +303,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 			buf := &inode.buffers[i]
 			// FIXME: STUPID. Add generations or LRU or something else
 			if buf.dirtyID == 0 {
-				requiredByReads := false
-				for _, r := range inode.readRanges {
-					if r.Offset < buf.offset+buf.length &&
-						r.Offset+r.Size >= buf.offset {
-						requiredByReads = true
-						break
-					}
-				}
-				if !buf.zero && !requiredByReads {
+				if !buf.zero && !inode.IsRangeLocked(buf.offset, buf.length, false) {
 					buf.ptr.refs--
 					if buf.ptr.refs == 0 {
 						freed += int64(len(buf.ptr.mem))
@@ -359,35 +351,14 @@ func (fs *Goofys) Flusher() {
 			fs.mu.RLock()
 			for _, inode := range fs.inodes {
 				inode.mu.Lock()
-				if inode.IsFlushing > 0 {
-					// Already flushing
-					inode.mu.Unlock()
-				} else if inode.CacheState == ST_DELETED {
+				if inode.IsFlushing == 0 && inode.CacheState == ST_DELETED {
 					inode.SendDelete()
-					inode.mu.Unlock()
-				} else if inode.CacheState == ST_CREATED && inode.isDir() {
+				} else if inode.IsFlushing == 0 && inode.CacheState == ST_CREATED && inode.isDir() {
 					inode.SendMkDir()
-					inode.mu.Unlock()
 				} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
-					if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 {
-						if inode.fileHandles == 0 {
-							atomic.AddInt64(&inode.fs.activeFlushers, 1)
-							inode.IsFlushing++
-							inode.mu.Unlock()
-							go inode.FlushSmallObject()
-						} else {
-							// Don't flush small files with active file handles
-							inode.mu.Unlock()
-						}
-					} else {
-						atomic.AddInt64(&inode.fs.activeFlushers, 1)
-						inode.IsFlushing++
-						inode.mu.Unlock()
-						go inode.FlushMultipart()
-					}
-				} else {
-					inode.mu.Unlock()
+					inode.SendUpload()
 				}
+				inode.mu.Unlock()
 				if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
 					break
 				}
