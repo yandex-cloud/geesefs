@@ -722,7 +722,7 @@ func (inode *Inode) ResetForUnmount() {
 	inode.userMetadata = nil
 	inode.s3Metadata = nil
 	inode.Attributes = InodeAttributes{}
-	inode.Invalid, inode.ImplicitDir = false, false
+	inode.ImplicitDir = false
 	inode.mu.Unlock()
 	// Reset DirTime for recursively for this node and all its child nodes.
 	// Note: resetDirTimeRec should be called without holding the lock.
@@ -909,8 +909,8 @@ func (inode *Inode) SendDelete() {
 			// object is already deleted
 			err = nil
 		}
+		inode.recordFlushError(err)
 		if err != nil {
-			// FIXME Handle failures (retry or something else)
 			log.Errorf("Failed to delete object %v: %v", key, err)
 			inode.mu.Unlock()
 			return
@@ -1006,6 +1006,7 @@ func (dir *Inode) SendMkDir() {
 		defer dir.mu.Unlock()
 		atomic.AddInt64(&dir.fs.activeFlushers, -1)
 		dir.IsFlushing -= dir.fs.flags.MaxParallelParts
+		dir.recordFlushError(err)
 		if err != nil {
 			log.Errorf("Failed to create directory object %v: %v", key, err)
 			return

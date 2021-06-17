@@ -493,11 +493,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 
 	if offset >= fh.inode.Attributes.Size {
 		// nothing to read
-		if fh.inode.Invalid {
-			err = fuse.ENOENT
-		} else {
-			err = io.EOF
-		}
+		err = io.EOF
 		return
 	}
 	end := offset+uint64(len(buf))
@@ -690,7 +686,23 @@ func (inode *Inode) GetMultiReader(offset uint64, size uint64) (reader *MultiRea
 	return
 }
 
+func (inode *Inode) recordFlushError(err error) {
+	inode.flushError = err
+	inode.flushErrorTime = time.Now()
+	if atomic.CompareAndSwapInt32(&inode.fs.flushRetrySet, 0, 1) {
+		fs := inode.fs
+		time.AfterFunc(fs.flags.RetryInterval, func() {
+			atomic.StoreInt32(&fs.flushRetrySet, 0)
+			// Wakeup flusher after retry interval
+			fs.flusherCond.Broadcast()
+		})
+	}
+}
+
 func (inode *Inode) TryFlush() bool {
+	if inode.flushError != nil && inode.flushErrorTime.Sub(time.Now()) < inode.fs.flags.RetryInterval {
+		return false
+	}
 	if inode.IsFlushing == 0 && inode.CacheState == ST_DELETED {
 		inode.SendDelete()
 		return true
@@ -736,8 +748,8 @@ func (inode *Inode) SendUpload() bool {
 				ContentType: inode.fs.flags.GetMimeType(key),
 			})
 			inode.mu.Lock()
+			inode.recordFlushError(err)
 			if err != nil {
-				//fh.lastWriteError = mapAwsError(err) // FIXME return to user?
 				log.Errorf("Failed to initiate multipart upload for %v: %v", key, err)
 			} else {
 				inode.mpu = resp
@@ -809,8 +821,8 @@ func (inode *Inode) FlushSmallObject() {
 	resp, err := cloud.PutBlob(params)
 	inode.mu.Lock()
 
+	inode.recordFlushError(err)
 	if err != nil {
-		// FIXME Handle failures
 		log.Errorf("Failed to flush small file %v: %v", key, err)
 	} else {
 		log.Debugf("Flushed small file %v", key)
@@ -960,8 +972,8 @@ func (inode *Inode) FlushPart(part uint64) {
 	resp, err := cloud.MultipartBlobAdd(&partInput)
 	inode.mu.Lock()
 
+	inode.recordFlushError(err)
 	if err != nil {
-		// FIXME Handle failures
 		log.Errorf("Failed to flush part %v of object %v: %v", part, key, err)
 	} else {
 		inode.mpu.Parts[part] = resp.PartId
@@ -994,8 +1006,8 @@ func (inode *Inode) FlushPart(part uint64) {
 				inode.mu.Unlock()
 				resp, err := cloud.MultipartBlobCommit(inode.mpu)
 				inode.mu.Lock()
+				inode.recordFlushError(err)
 				if err != nil {
-					// FIXME handle failures
 					log.Errorf("Failed to finalize multi-part upload of object %v: %v", key, err)
 				} else {
 					inode.mpu = nil
@@ -1040,6 +1052,12 @@ func (inode *Inode) SyncFile() (err error) {
 	for true {
 		inode.mu.Lock()
 		if inode.CacheState == ST_CACHED {
+			inode.mu.Unlock()
+			break
+		}
+		if inode.flushError != nil {
+			// Return the error to user
+			err = inode.flushError
 			inode.mu.Unlock()
 			break
 		}

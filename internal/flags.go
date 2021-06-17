@@ -301,6 +301,12 @@ func NewApp() (app *cli.App) {
 				Usage: "Set the timeout on HTTP requests to S3",
 			},
 
+			cli.DurationFlag{
+				Name:  "retry-interval",
+				Value: 30 * time.Second,
+				Usage: "Retry unsuccessful flushes after this amount of time",
+			},
+
 			/////////////////////////
 			// Debugging
 			/////////////////////////
@@ -413,6 +419,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		StatCacheTTL: c.Duration("stat-cache-ttl"),
 		TypeCacheTTL: c.Duration("type-cache-ttl"),
 		HTTPTimeout:  c.Duration("http-timeout"),
+		RetryInterval: c.Duration("retry-interval"),
 		ReadAheadKB:  uint64(readAhead),
 		ReadMergeKB:  uint64(c.Int("read-merge")),
 		SinglePartMB: uint64(singlePart),

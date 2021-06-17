@@ -91,6 +91,7 @@ type Goofys struct {
 	fileHandles map[fuseops.HandleID]*FileHandle
 
 	activeFlushers int64
+	flushRetrySet int32
 
 	forgotCnt uint32
 }

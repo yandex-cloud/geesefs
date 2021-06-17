@@ -89,7 +89,6 @@ type Inode struct {
 
 	dir *DirInodeData
 
-	Invalid     bool
 	ImplicitDir bool
 
 	fileHandles int32
@@ -102,10 +101,11 @@ type Inode struct {
 	readRanges []ReadRange
 	IsFlushing int
 	forceFlush bool
+	flushError error
+	flushErrorTime time.Time
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
-	mpuParts []MPUPart
 
 	userMetadata map[string][]byte
 	s3Metadata   map[string][]byte
@@ -326,9 +326,6 @@ func (inode *Inode) DeRef(n uint64) (stale bool) {
 func (inode *Inode) GetAttributes() (*fuseops.InodeAttributes, error) {
 	// XXX refresh attributes
 	inode.logFuse("GetAttributes")
-	if inode.Invalid {
-		return nil, fuse.ENOENT
-	}
 	attr := inode.InflateAttributes()
 	return &attr, nil
 }
