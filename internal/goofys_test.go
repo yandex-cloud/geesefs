@@ -979,7 +979,7 @@ func (s *GoofysTest) TestCreateFiles(t *C) {
 
 	_, fh := s.getRoot(t).Create(fileName, fuseops.OpMetadata{uint32(os.Getpid())})
 
-	err := fh.FlushFile()
+	err := fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err := s.cloud.GetBlob(&GetBlobInput{Key: fileName})
@@ -999,7 +999,7 @@ func (s *GoofysTest) TestCreateFiles(t *C) {
 	fh, err = inode.OpenFile(fuseops.OpMetadata{uint32(os.Getpid())})
 	t.Assert(err, IsNil)
 
-	err = fh.FlushFile()
+	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err = s.cloud.GetBlob(&GetBlobInput{Key: fileName})
@@ -1097,7 +1097,7 @@ func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size i
 		nwritten += int64(nread)
 	}
 
-	err = fh.FlushFile()
+	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err := s.cloud.HeadBlob(&HeadBlobInput{Key: fileName})
@@ -1110,7 +1110,7 @@ func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size i
 	t.Assert(diff, Equals, -1)
 	t.Assert(fr.offset, Equals, size)
 
-	err = fh.FlushFile()
+	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	// read again with exact 4KB to catch aligned read case
@@ -1210,7 +1210,7 @@ func (s *GoofysTest) TestMkDir(t *C) {
 	fileName := "file"
 	_, fh := inode.Create(fileName, fuseops.OpMetadata{uint32(os.Getpid())})
 
-	err = fh.FlushFile()
+	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	_, err = s.LookUpInode(t, dirName+"/"+fileName)
@@ -2022,7 +2022,7 @@ func (s *GoofysTest) TestWriteAnonymous(t *C) {
 	err := s.fs.CreateFile(s.ctx, &createOp)
 	t.Assert(err, IsNil)
 
-	err = s.fs.FlushFile(s.ctx, &fuseops.FlushFileOp{
+	err = s.fs.SyncFile(s.ctx, &fuseops.SyncFileOp{
 		Handle: createOp.Handle,
 		Inode:  createOp.Entry.Child,
 	})
@@ -2030,15 +2030,6 @@ func (s *GoofysTest) TestWriteAnonymous(t *C) {
 
 	err = s.fs.ReleaseFileHandle(s.ctx, &fuseops.ReleaseFileHandleOp{Handle: createOp.Handle})
 	t.Assert(err, IsNil)
-
-	err = s.fs.LookUpInode(s.ctx, &fuseops.LookUpInodeOp{
-		Parent: s.getRoot(t).Id,
-		Name:   fileName,
-	})
-	t.Assert(err, Equals, fuse.ENOENT)
-	// BUG! the file shouldn't exist, see test below for comment,
-	// this behaves as expected only because we are bypassing
-	// linux vfs in this test
 }
 
 func (s *GoofysTest) TestWriteAnonymousFuse(t *C) {
@@ -2051,35 +2042,25 @@ func (s *GoofysTest) TestWriteAnonymousFuse(t *C) {
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
 
-	err := ioutil.WriteFile(mountPoint+"/test", []byte(""), 0600)
+	file, err := os.OpenFile(mountPoint+"/test", os.O_WRONLY|os.O_CREATE, 0600)
+	// Writes always succeed because flushes are asynchronous
+	t.Assert(err, IsNil)
+
+	// Flushes return an error
+	err = file.Sync()
 	t.Assert(err, NotNil)
 	pathErr, ok := err.(*os.PathError)
 	t.Assert(ok, Equals, true)
 	t.Assert(pathErr.Err, Equals, syscall.EACCES)
 
+	err = file.Close()
+	t.Assert(err, IsNil)
+
 	_, err = os.Stat(mountPoint + "/test")
 	t.Assert(err, IsNil)
-	// BUG! the file shouldn't exist, the condition below should hold instead
-	// see comment in Goofys.FlushFile
-	// pathErr, ok = err.(*os.PathError)
-	// t.Assert(ok, Equals, true)
-	// t.Assert(pathErr.Err, Equals, fuse.ENOENT)
 
 	_, err = ioutil.ReadFile(mountPoint + "/test")
-	t.Assert(err, NotNil)
-	pathErr, ok = err.(*os.PathError)
-	t.Assert(ok, Equals, true)
-	t.Assert(pathErr.Err, Equals, fuse.ENOENT)
-
-	// reading the file and getting ENOENT causes the kernel to
-	// invalidate the entry, failing at open is not sufficient, we
-	// have to fail at read (which means that if the application
-	// uses splice(2) it won't get to us, so this wouldn't work
-	_, err = os.Stat(mountPoint + "/test")
-	t.Assert(err, NotNil)
-	pathErr, ok = err.(*os.PathError)
-	t.Assert(ok, Equals, true)
-	t.Assert(pathErr.Err, Equals, fuse.ENOENT)
+	t.Assert(err, IsNil)
 }
 
 func (s *GoofysTest) TestWriteSyncWriteFuse(t *C) {
@@ -3356,7 +3337,7 @@ func (s *GoofysTest) TestVFS(t *C) {
 	t.Assert(err, Equals, fuse.ENOENT)
 
 	_, fh := in.Create("testfile", fuseops.OpMetadata{uint32(os.Getpid())})
-	err = fh.FlushFile()
+	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err := cloud2.GetBlob(&GetBlobInput{Key: "cloud2Prefix/testfile"})
@@ -3391,7 +3372,7 @@ func (s *GoofysTest) TestVFS(t *C) {
 	// create another file inside subdir to make sure that our
 	// mount check is correct for dir inside the root
 	_, fh = subdir.Create("testfile2", fuseops.OpMetadata{uint32(os.Getpid())})
-	err = fh.FlushFile()
+	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err = cloud2.GetBlob(&GetBlobInput{Key: "cloud2Prefix/subdir/testfile2"})
@@ -3659,7 +3640,7 @@ func (s *GoofysTest) testMountsNested(t *C, cloud StorageBackend,
 	t.Assert(dir_dir.dir.cloud == cloud, Equals, true)
 
 	_, fh := dir_in.Create("testfile", fuseops.OpMetadata{uint32(os.Getpid())})
-	err = fh.FlushFile()
+	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err := cloud.GetBlob(&GetBlobInput{Key: "b/testfile"})
@@ -3667,7 +3648,7 @@ func (s *GoofysTest) testMountsNested(t *C, cloud StorageBackend,
 	defer resp.Body.Close()
 
 	_, fh = dir_dir.Create("testfile", fuseops.OpMetadata{uint32(os.Getpid())})
-	err = fh.FlushFile()
+	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err = cloud.GetBlob(&GetBlobInput{Key: "a/dir/testfile"})
@@ -3925,7 +3906,7 @@ func (s *GoofysTest) TestWriteListFlush(t *C) {
 	// in should still be valid
 	t.Assert(in.Parent, NotNil)
 	t.Assert(in.Parent, Equals, dir)
-	fh.FlushFile()
+	fh.inode.SyncFile()
 
 	s.assertEntries(t, dir, []string{"file1"})
 }
@@ -3974,7 +3955,7 @@ func (s *GoofysTest) TestWriteUnlinkFlush(t *C) {
 	t.Assert(err, IsNil)
 
 	s.disableS3()
-	err = fh.FlushFile()
+	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	dh := dir.OpenDir()
