@@ -12,6 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/*
+
+USAGE:
+
+[ BUCKET=.. ] \
+[ AWS_ACCESS_KEY_ID=.. ] \
+[ AWS_SECRET_ACCESS_KEY=.. ] \
+[ ENDPOINT=.. ] \
+[ EMULATOR=1 ] \
+[ EVENTUAL_CONSISTENCY=1 ] \
+CLOUD=s3|gcs|azblob|adlv1|adlv2 \
+    go test -v github.com/kahing/goofys/internal \
+    [ -check.f TestName ]
+
+NOTES:
+
+- If BUCKET is empty, an empty bucket will be created to run tests
+- EMULATOR is for s3proxy/azurite
+
+*/
+
 package internal
 
 import (
@@ -26,7 +47,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
 	"os/user"
 	"reflect"
 	"runtime"
@@ -242,21 +262,48 @@ func (s *GoofysTest) selectTestConfig(t *C, flags *FlagStorage) (conf S3Config) 
 		conf.SecretKey = "zuf+tfteSlswRu7BJ86wekitnifILbZam1KYY3TG"
 		flags.Endpoint = "https://play.minio.io:9000"
 	} else {
-		s.emulator = true
+		s.emulator = hasEnv("EMULATOR")
 
 		conf.Region = "us-west-2"
 		conf.AccessKey = "foo"
 		conf.SecretKey = "bar"
 		flags.Endpoint = "http://127.0.0.1:8080"
+
+		if os.Getenv("REGION") != "" {
+			conf.Region = os.Getenv("REGION")
+		}
+		if os.Getenv("AWS_ACCESS_KEY_ID") != "" {
+			conf.AccessKey = os.Getenv("AWS_ACCESS_KEY_ID")
+		}
+		if os.Getenv("AWS_SECRET_ACCESS_KEY") != "" {
+			conf.SecretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
+		}
+		if os.Getenv("ENDPOINT") != "" {
+			flags.Endpoint = os.Getenv("ENDPOINT")
+		}
 	}
 
 	return
 }
 
-func (s *GoofysTest) waitForEmulator(t *C) {
+func (s *GoofysTest) waitForEmulator(t *C, addr string) {
 	if s.emulator {
-		addr := "127.0.0.1:8080"
-
+		port := "80"
+		p := strings.Index(addr, "://")
+		if p >= 0 {
+			addr = addr[p+3 : ]
+			if strings.ToLower(addr[0 : p]) == "https" {
+				port = "443"
+			}
+		}
+		p = strings.Index(addr, "/")
+		if p >= 0 {
+			addr = addr[0 : p]
+		}
+		p = strings.Index(addr, ":")
+		if p < 0 {
+			addr = addr+":"+port
+		}
 		err := waitFor(t, addr)
 		t.Assert(err, IsNil)
 	}
@@ -401,28 +448,7 @@ func (s *GoofysTest) setupBlobs(cloud StorageBackend, t *C, env map[string]*stri
 	}
 }
 
-func (s *GoofysTest) setupEnv(t *C, env map[string]*string, public bool) {
-	if public {
-		if s3, ok := s.cloud.Delegate().(*S3Backend); ok {
-			s3.config.ACL = "public-read"
-		} else {
-			t.Error("Not S3 backend")
-		}
-	}
-
-	_, err := s.cloud.MakeBucket(&MakeBucketInput{})
-	t.Assert(err, IsNil)
-
-	if !s.emulator {
-		//time.Sleep(time.Second)
-	}
-
-	s.setupBlobs(s.cloud, t, env)
-
-	t.Log("setupEnv done")
-}
-
-func (s *GoofysTest) setupDefaultEnv(t *C, public bool) {
+func (s *GoofysTest) setupDefaultEnv(t *C) {
 	s.env = map[string]*string{
 		"file1":           nil,
 		"file2":           nil,
@@ -436,7 +462,7 @@ func (s *GoofysTest) setupDefaultEnv(t *C, public bool) {
 		"zero":            PString(""),
 	}
 
-	s.setupEnv(t, s.env, public)
+	s.setupBlobs(s.cloud, t, s.env)
 }
 
 func (s *GoofysTest) setUpTestTimeout(t *C, timeout time.Duration) {
@@ -461,18 +487,17 @@ func (s *GoofysTest) setUpTestTimeout(t *C, timeout time.Duration) {
 }
 
 func (s *GoofysTest) SetUpTest(t *C) {
-	log.Infof("Starting at %v", time.Now())
+	log.Infof("Starting %v at %v", t.TestName(), time.Now())
 
 	s.setUpTestTimeout(t, PerTestTimeout)
 
-	var bucket string
-	mount := os.Getenv("MOUNT")
-
-	if mount != "false" {
-		bucket = mount
-	} else {
+	var createBucket bool
+	bucket := os.Getenv("BUCKET")
+	if bucket == "" {
 		bucket = "goofys-test-" + RandStringBytesMaskImprSrc(16)
+		createBucket = true
 	}
+
 	uid, gid := MyUserAndGroup()
 	flags := &FlagStorage{
 		DirMode:     0700,
@@ -485,18 +510,18 @@ func (s *GoofysTest) SetUpTest(t *C) {
 	cloud := os.Getenv("CLOUD")
 
 	if cloud == "s3" {
-		s.emulator = !hasEnv("AWS")
-		s.waitForEmulator(t)
-
 		conf := s.selectTestConfig(t, flags)
 		flags.Backend = &conf
+
+		s.emulator = hasEnv("EMULATOR")
+		s.waitForEmulator(t, flags.Endpoint)
 
 		s3, err := NewS3(bucket, flags, &conf)
 		t.Assert(err, IsNil)
 
 		s.cloud = s3
 		s3.aws = hasEnv("AWS")
-		if s3.aws {
+		if hasEnv("EVENTUAL_CONSISTENCY") {
 			s.cloud = NewS3BucketEventualConsistency(s3)
 		}
 
@@ -523,7 +548,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		if config.Endpoint == AzuriteEndpoint {
 			s.azurite = true
 			s.emulator = true
-			s.waitForEmulator(t)
+			s.waitForEmulator(t, config.Endpoint)
 		}
 
 		// Azurite's SAS is buggy, ex: https://github.com/Azure/Azurite/issues/216
@@ -619,25 +644,21 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		t.Fatal("Unsupported backend")
 	}
 
-	if mount == "false" {
-		s.removeBucket = append(s.removeBucket, s.cloud)
-		s.setupDefaultEnv(t, false)
-	} else {
+	if createBucket {
 		_, err := s.cloud.MakeBucket(&MakeBucketInput{})
-		if err == fuse.EEXIST {
-			err = nil
-		}
 		t.Assert(err, IsNil)
+		s.removeBucket = append(s.removeBucket, s.cloud)
 	}
 
-	if hasEnv("AWS") {
+	s.setupDefaultEnv(t)
+
+	if hasEnv("EVENTUAL_CONSISTENCY") {
 		s.fs = newGoofys(context.Background(), bucket, flags,
 			func(bucket string, flags *FlagStorage) (StorageBackend, error) {
 				cloud, err := NewBackend(bucket, flags)
 				if err != nil {
 					return nil, err
 				}
-
 				return NewS3BucketEventualConsistency(cloud.(*S3Backend)), nil
 			})
 	} else {
@@ -1954,20 +1975,21 @@ func (s *GoofysTest) anonymous(t *C) {
 		t.Skip("only for S3")
 	}
 
-	err := s.deleteBucket(s.cloud)
-	t.Assert(err, IsNil)
-
 	// use a different bucket name to prevent 409 Conflict from
-	// delete bucket above
-	s.fs.bucket = "goofys-test-" + RandStringBytesMaskImprSrc(16)
-	s3.bucket = s.fs.bucket
-	s.setupDefaultEnv(t, true)
+	bucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
+	cloud := s.newBackend(t, bucket, false)
+	s3, ok = cloud.Delegate().(*S3Backend)
+	t.Assert(ok, Equals, true)
+	s3.config.ACL = "public-read"
+	_, err := cloud.MakeBucket(&MakeBucketInput{})
+	t.Assert(err, IsNil)
+	s.removeBucket = append(s.removeBucket, cloud)
 
-	s.fs = NewGoofys(context.Background(), s.fs.bucket, s.fs.flags)
+	s.fs = NewGoofys(context.Background(), bucket, s.fs.flags)
 	t.Assert(s.fs, NotNil)
 
 	// should have auto-detected by S3 backend
-	cloud := s.getRoot(t).dir.cloud
+	cloud = s.getRoot(t).dir.cloud
 	t.Assert(cloud, NotNil)
 	s3, ok = cloud.Delegate().(*S3Backend)
 	t.Assert(ok, Equals, true)
@@ -3279,7 +3301,7 @@ func (s *GoofysTest) newBackend(t *C, bucket string, createBucket bool) (cloud S
 			s3.Handlers.Sign.PushBackNamed(corehandlers.BuildContentLengthHandler)
 		}
 
-		if s3.aws {
+		if hasEnv("EVENTUAL_CONSISTENCY") {
 			cloud = NewS3BucketEventualConsistency(s3)
 		} else {
 			cloud = s3
@@ -3307,10 +3329,8 @@ func (s *GoofysTest) newBackend(t *C, bucket string, createBucket bool) (cloud S
 	if createBucket {
 		_, err = cloud.MakeBucket(&MakeBucketInput{})
 		t.Assert(err, IsNil)
-
 		s.removeBucket = append(s.removeBucket, cloud)
 	}
-
 	return
 }
 
@@ -3794,10 +3814,6 @@ func (s *GoofysTest) TestRmImplicitDir(t *C) {
 }
 
 func (s *GoofysTest) TestMount(t *C) {
-	if os.Getenv("MOUNT") == "false" {
-		t.Skip("Not mounting")
-	}
-
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
@@ -3805,9 +3821,7 @@ func (s *GoofysTest) TestMount(t *C) {
 
 	log.Printf("Mounted at %v", mountPoint)
 
-	c := make(chan os.Signal, 2)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-c
+	time.Sleep(5 * time.Second)
 }
 
 // Checks if 2 sorted lists are equal. Returns a helpful error if they differ.
