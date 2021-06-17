@@ -31,15 +31,6 @@ import (
 
 type FileHandle struct {
 	inode *Inode
-	cloud StorageBackend
-	key   string
-
-	// User space PID. All threads created by a process will have the same TGID,
-	// but different PIDs[1].
-	// This value can be nil if we fail to get TGID from PID[2].
-	// [1] : https://godoc.org/github.com/shirou/gopsutil/process#Process.Tgid
-	// [2] : https://github.com/shirou/gopsutil#process-class
-	Tgid *int32
 }
 
 const MAX_BUF = 5 * 1024 * 1024
@@ -47,14 +38,7 @@ const MAX_BUF = 5 * 1024 * 1024
 // NewFileHandle returns a new file handle for the given `inode` triggered by fuse
 // operation with the given `opMetadata`
 func NewFileHandle(inode *Inode, opMetadata fuseops.OpMetadata) *FileHandle {
-	tgid, err := GetTgid(opMetadata.Pid)
-	if err != nil {
-		log.Debugf(
-			"Failed to retrieve tgid for the given pid. pid: %v err: %v inode id: %v err: %v",
-			opMetadata.Pid, err, inode.Id, err)
-	}
-	fh := &FileHandle{inode: inode, Tgid: tgid}
-	fh.cloud, fh.key = inode.cloud()
+	fh := &FileHandle{inode: inode}
 	return fh
 }
 

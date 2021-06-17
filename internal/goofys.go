@@ -1020,26 +1020,6 @@ func (fs *Goofys) FlushFile(
 	fh := fs.fileHandles[op.Handle]
 	fs.mu.RUnlock()
 
-	// If the file handle has a tgid, then flush the file only if the
-	// incoming request's tgid matches the tgid in the file handle.
-	// This check helps us with scenarios like https://github.com/kahing/goofys/issues/273
-	// Also see goofys_test.go:TestClientForkExec.
-	if fh.Tgid != nil {
-		tgid, err := GetTgid(op.Metadata.Pid)
-		if err != nil {
-			fh.inode.logFuse("<-- FlushFile",
-				fmt.Sprintf("Failed to retrieve tgid from op.Metadata.Pid. FlushFileOp:%#v, err:%v",
-					op, err))
-			return fuse.EIO
-		}
-		if *fh.Tgid != *tgid {
-			fh.inode.logFuse("<-- FlushFile",
-				"Operation ignored",
-				fmt.Sprintf("fh.Pid:%v != tgid:%v, op:%#v", *fh.Tgid, *tgid, op))
-			return nil
-		}
-	}
-
 	err = fh.FlushFile()
 	if err != nil {
 		// if we returned success from creat() earlier
