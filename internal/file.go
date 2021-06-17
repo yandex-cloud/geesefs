@@ -495,8 +495,6 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 		// nothing to read
 		if fh.inode.Invalid {
 			err = fuse.ENOENT
-		} else if fh.inode.KnownSize == nil {
-			err = io.EOF
 		} else {
 			err = io.EOF
 		}
@@ -692,6 +690,19 @@ func (inode *Inode) GetMultiReader(offset uint64, size uint64) (reader *MultiRea
 	return
 }
 
+func (inode *Inode) TryFlush() bool {
+	if inode.IsFlushing == 0 && inode.CacheState == ST_DELETED {
+		inode.SendDelete()
+		return true
+	} else if inode.IsFlushing == 0 && inode.CacheState == ST_CREATED && inode.isDir() {
+		inode.SendMkDir()
+		return true
+	} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
+		return inode.SendUpload()
+	}
+	return false
+}
+
 func (inode *Inode) SendUpload() bool {
 
 	if inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
@@ -700,7 +711,7 @@ func (inode *Inode) SendUpload() bool {
 
 	if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 {
 		// Don't flush small files with active file handles (if not under memory pressure)
-		if inode.IsFlushing == 0 && (inode.fileHandles == 0 || inode.fs.bufferPool.wantFree > 0) {
+		if inode.IsFlushing == 0 && (inode.fileHandles == 0 || inode.forceFlush || inode.fs.bufferPool.wantFree > 0) {
 			// Don't accidentally trigger a parallel multipart flush
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, 1)
@@ -745,7 +756,8 @@ func (inode *Inode) SendUpload() bool {
 		if buf.dirtyID != 0 && !buf.flushed && !inode.IsRangeLocked(buf.offset, buf.length, true) {
 			part := inode.fs.partNum(buf.offset)
 			// Don't write out the last part that's still written to (if not under memory pressure)
-			if inode.fileHandles == 0 || inode.fs.bufferPool.wantFree > 0 || part != inode.fs.partNum(inode.lastWriteEnd) {
+			if inode.fileHandles == 0 || inode.forceFlush ||
+				inode.fs.bufferPool.wantFree > 0 || part != inode.fs.partNum(inode.lastWriteEnd) {
 				// Found
 				partOffset, partSize := inode.fs.partRange(part)
 				// Guard part against eviction
@@ -967,7 +979,7 @@ func (inode *Inode) FlushPart(part uint64) {
 				}
 			}
 		}
-		if !stillDirty && (inode.fileHandles == 0 || inode.fs.bufferPool.wantFree > 0) && (
+		if !stillDirty && (inode.fileHandles == 0 || inode.forceFlush || inode.fs.bufferPool.wantFree > 0) && (
 			inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
 			// Server-size copy unmodified parts
 			numParts := inode.fs.partNum(inode.Attributes.Size)
@@ -1023,108 +1035,21 @@ func (inode *Inode) updateFromFlush(etag *string, lastModified *time.Time, stora
 	inode.knownETag = etag
 }
 
-/*func (fh *FileHandle) resetToKnownSize() {
-	if fh.inode.KnownSize != nil {
-		fh.inode.Attributes.Size = *fh.inode.KnownSize
-	} else {
-		fh.inode.Attributes.Size = 0
-		fh.inode.Invalid = true
-	}
-}*/
-
-func (fh *FileHandle) FlushFile() (err error) {
-//	fh.mu.Lock()
-//	defer fh.mu.Unlock()
-
-	fh.inode.logFuse("FlushFile")
-
-/*	if !fh.dirty || fh.lastWriteError != nil {
-		if fh.lastWriteError != nil {
-			err = fh.lastWriteError
-			fh.resetToKnownSize()
+func (inode *Inode) SyncFile() (err error) {
+	inode.logFuse("SyncFile")
+	for true {
+		inode.mu.Lock()
+		if inode.CacheState == ST_CACHED {
+			inode.mu.Unlock()
+			break
 		}
-		return
+		inode.forceFlush = true
+		inode.TryFlush()
+		inode.mu.Unlock()
+		inode.fs.flusherMu.Lock()
+		inode.fs.flusherCond.Wait()
+		inode.fs.flusherMu.Unlock()
 	}
-
-	if fh.inode.Parent == nil {
-		// the file is deleted
-		if fh.mpuId != nil {
-			go func() {
-				_, _ = fh.cloud.MultipartBlobAbort(fh.mpuId)
-				fh.mpuId = nil
-			}()
-		}
-		return
-	}
-
-	fs := fh.inode.fs
-
-	// abort mpu on error
-	defer func() {
-		if err != nil {
-			if fh.mpuId != nil {
-				go func() {
-					_, _ = fh.cloud.MultipartBlobAbort(fh.mpuId)
-					fh.mpuId = nil
-				}()
-			}
-
-			fh.resetToKnownSize()
-		} else {
-			if fh.dirty {
-				// don't unset this if we never actually flushed
-				size := fh.inode.Attributes.Size
-				fh.inode.KnownSize = &size
-				fh.inode.Invalid = false
-			}
-			fh.dirty = false
-		}
-
-		fh.writeInit = sync.Once{}
-		fh.nextWriteOffset = 0
-		fh.lastPartId = 0
-	}()
-
-	if fh.lastPartId == 0 {
-		return fh.flushSmallFile()
-	}
-
-	fh.mpuWG.Wait()
-
-	if fh.lastWriteError != nil {
-		return fh.lastWriteError
-	}
-
-	if fh.mpuId == nil {
-		return
-	}
-
-	nParts := fh.lastPartId
-	if fh.buf != nil {
-		// upload last part
-		nParts++
-		err = fh.mpuPartNoSpawn(fh.buf, nParts, fh.nextWriteOffset, true)
-		if err != nil {
-			return
-		}
-		fh.buf = nil
-	}
-
-	resp, err := fh.cloud.MultipartBlobCommit(fh.mpuId)
-	if err != nil {
-		return
-	}
-
-	fh.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
-
-	fh.mpuId = nil
-
-	// we want to get key from inode because the file could have been renamed
-	_, key := fh.inode.cloud()
-	if *fh.mpuName != key {
-		// the file was renamed
-		err = fh.inode.renameObject(fs, PUInt64(uint64(fh.nextWriteOffset)), *fh.mpuName, *fh.inode.FullName())
-	}*/
-
+	inode.logFuse("Done SyncFile")
 	return
 }

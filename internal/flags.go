@@ -277,6 +277,11 @@ func NewApp() (app *cli.App) {
 					" Must be left at 0 for Yandex S3 (default: 0)",
 			},
 
+			cli.BoolFlag{
+				Name:  "ignore-fsync",
+				Usage: "Do not wait until changes are persisted to the server on fsync() call (default: off)",
+			},
+
 			cli.DurationFlag{
 				Name:  "stat-cache-ttl",
 				Value: time.Minute,
@@ -333,7 +338,10 @@ func NewApp() (app *cli.App) {
 		flagCategories[f] = "aws"
 	}
 
-	for _, f := range []string{"cheap", "no-implicit-dir", "stat-cache-ttl", "type-cache-ttl", "http-timeout"} {
+	for _, f := range []string{"memory-limit", "cheap", "no-implicit-dir",
+		"no-dir-object", "max-flushers", "max-parallel-parts", "max-parallel-copy",
+		"read-ahead", "read-merge", "single-part", "max-merge-copy", "ignore-fsync",
+		"stat-cache-ttl", "type-cache-ttl", "http-timeout"} {
 		flagCategories[f] = "tuning"
 	}
 
@@ -409,6 +417,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		ReadMergeKB:  uint64(c.Int("read-merge")),
 		SinglePartMB: uint64(singlePart),
 		MaxMergeCopyMB: uint64(c.Int("max-merge-copy")),
+		IgnoreFsync:  c.Bool("ignore-fsync"),
 
 		// Common Backend Config
 		Endpoint:       c.String("endpoint"),

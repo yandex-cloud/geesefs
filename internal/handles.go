@@ -70,7 +70,6 @@ type Inode struct {
 	Name       *string
 	fs         *Goofys
 	Attributes InodeAttributes
-	KnownSize  *uint64
 	// It is generally safe to read `AttrTime` without locking because if some other
 	// operation is modifying `AttrTime`, in most cases the reader is okay with working with
 	// stale data. But Time is a struct and modifying it is not atomic. However
@@ -102,6 +101,7 @@ type Inode struct {
 	buffers []FileBuffer
 	readRanges []ReadRange
 	IsFlushing int
+	forceFlush bool
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
@@ -166,8 +166,6 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	inode.Attributes.Size = itemcopy.Size
 	// don't want to point to the attribute because that
 	// can get updated
-	size := inode.Attributes.Size
-	inode.KnownSize = &size
 	if item.LastModified != nil {
 		inode.Attributes.Mtime = *itemcopy.LastModified
 	} else {
@@ -298,7 +296,6 @@ func (inode *Inode) ToDir() {
 			// Mtime intentionally not initialized
 		}
 		inode.dir = &DirInodeData{}
-		inode.KnownSize = &inode.fs.rootAttrs.Size
 	}
 }
 

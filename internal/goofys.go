@@ -351,13 +351,7 @@ func (fs *Goofys) Flusher() {
 			fs.mu.RLock()
 			for _, inode := range fs.inodes {
 				inode.mu.Lock()
-				if inode.IsFlushing == 0 && inode.CacheState == ST_DELETED {
-					inode.SendDelete()
-				} else if inode.IsFlushing == 0 && inode.CacheState == ST_CREATED && inode.isDir() {
-					inode.SendMkDir()
-				} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
-					inode.SendUpload()
-				}
+				inode.TryFlush()
 				inode.mu.Unlock()
 				if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
 					break
@@ -1007,8 +1001,14 @@ func (fs *Goofys) SyncFile(
 	ctx context.Context,
 	op *fuseops.SyncFileOp) (err error) {
 
-	// intentionally ignored, so that write()/sync()/write() works
-	// see https://github.com/kahing/goofys/issues/154
+	if !fs.flags.IgnoreFsync {
+		fs.mu.RLock()
+		fh := fs.fileHandles[op.Handle]
+		fs.mu.RUnlock()
+
+		err = fh.inode.SyncFile()
+	}
+
 	return
 }
 
@@ -1016,27 +1016,9 @@ func (fs *Goofys) FlushFile(
 	ctx context.Context,
 	op *fuseops.FlushFileOp) (err error) {
 
-	fs.mu.RLock()
-	fh := fs.fileHandles[op.Handle]
-	fs.mu.RUnlock()
+	// FlushFile is a no-op because we flush changes to the server asynchronously
+	// If the user really wants to persist a file to the server he should call fsync()
 
-	err = fh.FlushFile()
-	if err != nil {
-		// if we returned success from creat() earlier
-		// linux may think this file exists even when it doesn't,
-		// until TypeCacheTTL is over
-		// TODO: figure out a way to make the kernel forget this inode
-		// see TestWriteAnonymousFuse
-		fs.mu.RLock()
-		inode := fs.getInodeOrDie(op.Inode)
-		fs.mu.RUnlock()
-
-		if inode.KnownSize == nil {
-			inode.AttrTime = time.Time{}
-		}
-
-	}
-	fh.inode.logFuse("<-- FlushFile", err, op.Handle, op.Inode)
 	return
 }
 

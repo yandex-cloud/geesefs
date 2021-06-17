@@ -59,6 +59,7 @@ type FlagStorage struct {
 	ReadMergeKB  uint64
 	SinglePartMB uint64
 	MaxMergeCopyMB uint64
+	IgnoreFsync bool
 
 	// Debugging
 	DebugMain  bool
