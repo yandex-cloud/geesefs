@@ -504,7 +504,22 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		FileMode:    0700,
 		Uid:         uint32(uid),
 		Gid:         uint32(gid),
+		MemoryLimit: 0,
+		Cheap:       false,
+		ExplicitDir: false,
+		NoDirObject: false,
+		MaxFlushers: 16,
+		MaxParallelParts: 8,
+		MaxParallelCopy: 16,
+		StatCacheTTL: 30 * time.Second,
+		TypeCacheTTL: 30 * time.Second,
 		HTTPTimeout: 30 * time.Second,
+		RetryInterval: 30 * time.Second,
+		ReadAheadKB: 4096,
+		ReadMergeKB: 512,
+		SinglePartMB: 5,
+		MaxMergeCopyMB: 0,
+		IgnoreFsync: false,
 	}
 
 	cloud := os.Getenv("CLOUD")
