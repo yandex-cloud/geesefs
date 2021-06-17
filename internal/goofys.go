@@ -224,6 +224,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	fs.nextInodeID = fuseops.RootInodeID + 1
 	fs.inodes = make(map[fuseops.InodeID]*Inode)
 	root := NewInode(fs, nil, PString(""))
+	root.refcnt = 1
 	root.Id = fuseops.RootInodeID
 	root.ToDir()
 	root.dir.cloud = cloud
@@ -729,14 +730,7 @@ func (fs *Goofys) LookUpInode(
 		} else if err != nil {
 			if inode != nil {
 				// just kidding! pretend we didn't up the ref
-				fs.mu.Lock()
-				defer fs.mu.Unlock()
-
-				stale := inode.DeRef(1)
-				if stale {
-					delete(fs.inodes, inode.Id)
-					parent.removeChild(inode)
-				}
+				parent.removeChild(inode)
 			}
 			return err
 		}
@@ -770,6 +764,7 @@ func (fs *Goofys) LookUpInode(
 
 			inode.mu.Unlock()
 		}
+		inode.Ref()
 	}
 
 	op.Entry.Child = inode.Id
@@ -830,26 +825,21 @@ func (fs *Goofys) ForgetInode(
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
 
-	if inode.Parent != nil {
-		inode.Parent.mu.Lock()
-	}
-	stale := inode.DeRef(op.N)
-	if inode.Parent != nil {
-		inode.Parent.mu.Unlock()
-	}
-
-	if stale && inode.CacheState == ST_CACHED {
-		fs.DoForgetInode(inode.Id)
-	}
+	inode.Parent.mu.Lock()
+	fs.DeRefInode(inode, op.N)
+	inode.Parent.mu.Unlock()
 
 	return
 }
 
-func (fs *Goofys) DoForgetInode(inodeID fuseops.InodeID) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	delete(fs.inodes, inodeID)
-	fs.forgotCnt += 1
+func (fs *Goofys) DeRefInode(inode *Inode, N uint64) {
+	stale := inode.DeRef(N)
+	if stale && inode.CacheState == ST_CACHED {
+		fs.mu.Lock()
+		delete(fs.inodes, inode.Id)
+		fs.forgotCnt += 1
+		fs.mu.Unlock()
+	}
 }
 
 func (fs *Goofys) OpenDir(

@@ -1604,9 +1604,12 @@ func (s *GoofysTest) TestConcurrentRefDeref(t *C) {
 	for i := 0; i < 20; i++ {
 		err := s.fs.LookUpInode(nil, &lookupOp)
 		t.Assert(err, IsNil)
+		t.Assert(lookupOp.Entry.Child, Not(Equals), 0)
 
 		var wg sync.WaitGroup
 
+		// FIXME: I suppose the real idea of this test is just that
+		// lookup->forget->lookup shouldn't crash with "Unknown inode: xxx"
 		wg.Add(2)
 		go func() {
 			// we want to yield to the forget goroutine so that it's run first
@@ -1626,6 +1629,11 @@ func (s *GoofysTest) TestConcurrentRefDeref(t *C) {
 		}()
 
 		wg.Wait()
+
+		s.fs.ForgetInode(nil, &fuseops.ForgetInodeOp{
+			Inode: lookupOp.Entry.Child,
+			N:     1,
+		})
 	}
 }
 

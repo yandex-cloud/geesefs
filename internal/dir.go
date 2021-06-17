@@ -497,10 +497,6 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 				inode := NewInode(fs, parent, &dirName)
 				inode.ToDir()
 				fs.insertInode(parent, inode)
-				// these are fake dir entries, we will
-				// realize the refcnt when lookup is
-				// done
-				inode.refcnt = 0
 			}
 
 			dh.lastFromCloud = &dirName
@@ -524,10 +520,6 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 				inode := parent.findChildUnlocked(baseName)
 				if inode == nil {
 					inode = NewInode(fs, parent, &baseName)
-					// these are fake dir entries,
-					// we will realize the refcnt
-					// when lookup is done
-					inode.refcnt = 0
 					fs.insertInode(parent, inode)
 				}
 				inode.SetFromBlobItem(&obj)
@@ -812,6 +804,8 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 		copy(tmp, parent.dir.Children)
 		parent.dir.Children = tmp
 	}
+
+	parent.fs.DeRefInode(inode, 1)
 }
 
 func (parent *Inode) removeChild(inode *Inode) {
@@ -830,6 +824,8 @@ func (parent *Inode) insertChild(inode *Inode) {
 }
 
 func (parent *Inode) insertChildUnlocked(inode *Inode) {
+	inode.Ref()
+
 	l := len(parent.dir.Children)
 	if l == 0 {
 		parent.dir.Children = []*Inode{inode}
@@ -928,7 +924,9 @@ func (inode *Inode) SendDelete() {
 		inode.fs.flusherCond.Broadcast()
 		inode.mu.Unlock()
 		if forget {
-			inode.fs.DoForgetInode(inode.Id)
+			inode.Parent.mu.Lock()
+			inode.fs.DeRefInode(inode, 1)
+			inode.Parent.mu.Unlock()
 		}
 	}()
 }
@@ -939,6 +937,9 @@ func (parent *Inode) Create(
 	parent.logFuse("Create", name)
 
 	fs := parent.fs
+
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
 
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
@@ -952,6 +953,7 @@ func (parent *Inode) Create(
 		Mtime: now,
 	}
 	inode.CacheState = ST_CREATED
+	fs.insertInode(parent, inode)
 	fs.flusherCond.Broadcast()
 
 	fh = NewFileHandle(inode, metadata)
@@ -968,6 +970,9 @@ func (parent *Inode) MkDir(
 
 	parent.logFuse("MkDir", name)
 
+	parent.fs.mu.Lock()
+	defer parent.fs.mu.Unlock()
+
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
 
@@ -982,6 +987,7 @@ func (parent *Inode) MkDir(
 	if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
 		parent.Attributes.Mtime = inode.Attributes.Mtime
 	}
+	parent.fs.insertInode(parent, inode)
 	parent.fs.flusherCond.Broadcast()
 
 	return
@@ -1215,7 +1221,6 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 		inode := parent.findChildUnlocked(path)
 		if inode == nil {
 			inode = NewInode(fs, parent, &path)
-			inode.refcnt = 0
 			fs.insertInode(parent, inode)
 			inode.SetFromBlobItem(obj)
 		} else {
@@ -1241,7 +1246,6 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			if inode == nil {
 				inode = NewInode(fs, parent, &dir)
 				inode.ToDir()
-				inode.refcnt = 0
 				fs.insertInode(parent, inode)
 				inode.SetFromBlobItem(obj)
 			} else if !inode.isDir() {
@@ -1261,7 +1265,6 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			if inode == nil {
 				inode = NewInode(fs, parent, &dir)
 				inode.ToDir()
-				inode.refcnt = 0
 				fs.insertInode(parent, inode)
 			} else if !inode.isDir() {
 				inode.ToDir()

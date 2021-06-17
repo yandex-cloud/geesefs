@@ -113,8 +113,8 @@ type Inode struct {
 	// last known etag from the cloud
 	knownETag *string
 
-	// the refcnt is an exception, it's protected by the global lock
-	// Goofys.mu
+	// the refcnt is an exception, it's protected by the global lock Goofys.mu
+	// being part of parent.dir.Children increases refcnt by 1
 	refcnt uint64
 }
 
@@ -129,7 +129,7 @@ func NewInode(fs *Goofys, parent *Inode, name *string) (inode *Inode) {
 		AttrTime:   time.Now(),
 		Parent:     parent,
 		s3Metadata: make(map[string][]byte),
-		refcnt:     1,
+		refcnt:     0,
 	}
 
 	return
