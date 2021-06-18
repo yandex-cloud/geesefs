@@ -1042,12 +1042,6 @@ func (fs *Goofys) CreateFile(
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	parent.mu.Lock()
-
-	fs.insertInode(parent, inode)
-
-	parent.mu.Unlock()
-
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
@@ -1079,14 +1073,6 @@ func (fs *Goofys) MkDir(
 	if err != nil {
 		return err
 	}
-
-	parent.mu.Lock()
-
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	fs.insertInode(parent, inode)
-
-	parent.mu.Unlock()
 
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
