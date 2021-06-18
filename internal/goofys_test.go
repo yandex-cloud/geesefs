@@ -1649,6 +1649,9 @@ func isTravis() bool {
 
 func (s *GoofysTest) mount(t *C, mountPoint string) {
 	err := os.MkdirAll(mountPoint, 0700)
+	if err == syscall.EEXIST {
+		err = nil
+	}
 	t.Assert(err, IsNil)
 
 	server := fuseutil.NewFileSystemServer(s.fs)
