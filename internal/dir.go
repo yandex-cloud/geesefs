@@ -982,6 +982,9 @@ func (parent *Inode) Create(
 		Mtime: now,
 	}
 	inode.CacheState = ST_CREATED
+	// one ref is for lookup
+	inode.Ref()
+	// another ref is for being in Children
 	fs.insertInode(parent, inode)
 	fs.flusherCond.Broadcast()
 
