@@ -893,8 +893,20 @@ func (fs *Goofys) ReadDir(
 	dh.mu.Lock()
 	defer dh.mu.Unlock()
 
-	for i := op.Offset; ; i++ {
-		e, err := dh.ReadDir(i)
+	if op.Offset != 0 && op.Offset != dh.lastExternalOffset {
+		// seekdir() to an arbitrary offset is not supported
+		// jacobsa/fuse says it's not a problem
+		err = syscall.ENOTSUP
+		return
+	}
+
+	dh.lastExternalOffset = op.Offset
+	if dh.lastExternalOffset == 0 {
+		dh.lastInternalOffset = 0
+	}
+
+	for true {
+		e, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
 		if err != nil {
 			return err
 		}
@@ -914,6 +926,8 @@ func (fs *Goofys) ReadDir(
 		dh.inode.logFuse("<-- ReadDir", e.Name, e.Offset)
 
 		op.BytesRead += n
+		dh.lastInternalOffset++
+		dh.lastExternalOffset++
 	}
 
 	return

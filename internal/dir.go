@@ -42,6 +42,7 @@ type DirInodeData struct {
 
 	Children []*Inode
 	DeletedChildren map[string]*Inode
+	handles []*DirHandle
 }
 
 type DirHandleEntry struct {
@@ -93,15 +94,17 @@ func shouldFetchNextListBlobsPage(resp *ListBlobsOutput) bool {
 
 type DirHandle struct {
 	inode *Inode
-
 	mu sync.Mutex // everything below is protected by mu
-
 	Marker        *string
 	lastFromCloud *string
 	done          bool
 	// Time at which we started fetching child entries
 	// from cloud for this handle.
 	refreshStartTime time.Time
+	// readdir() is allowed either at zero (restart from the beginning)
+	// or from the previous offset
+	lastExternalOffset fuseops.DirOffset
+	lastInternalOffset int
 }
 
 func NewDirHandle(inode *Inode) (dh *DirHandle) {
@@ -201,6 +204,9 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 	}
 
 	dh = NewDirHandle(inode)
+	inode.mu.Lock()
+	inode.dir.handles = append(inode.dir.handles, dh)
+	inode.mu.Unlock()
 	return
 }
 
@@ -430,8 +436,8 @@ func listBlobsSafe(cloud StorageBackend, param *ListBlobsInput) (*ListBlobsOutpu
 // LOCKS_REQUIRED(dh.mu)
 // LOCKS_EXCLUDED(dh.inode.mu)
 // LOCKS_EXCLUDED(dh.inode.fs)
-func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err error) {
-	en, ok := dh.inode.readDirFromCache(offset)
+func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, err error) {
+	en, ok := dh.readDirFromCache(internalOffset, offset)
 	if ok {
 		return
 	}
@@ -555,9 +561,9 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 	// first ListBlobs for this dir handle, but is not being
 	// written to (ie: not a new file)
 	var child *Inode
-	for int(offset) < len(parent.dir.Children) {
+	for int(internalOffset) < len(parent.dir.Children) {
 		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
-		childTmp := parent.dir.Children[offset]
+		childTmp := parent.dir.Children[internalOffset]
 		if atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
 			childTmp.AttrTime.Before(dh.refreshStartTime) {
 			// childTmp.AttrTime < dh.refreshStartTime => the child entry was not
@@ -582,7 +588,7 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 	en = &DirHandleEntry{
 		Name:   *child.Name,
 		Inode:  child.Id,
-		Offset: fuseops.DirOffset(offset) + 1,
+		Offset: offset + 1,
 	}
 	if child.isDir() {
 		en.Type = fuseutil.DT_Directory
@@ -593,10 +599,19 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 	if dh.lastFromCloud != nil && en.Name == *dh.lastFromCloud {
 		dh.lastFromCloud = nil
 	}
+
 	return en, nil
 }
 
 func (dh *DirHandle) CloseDir() error {
+	dh.inode.mu.Lock()
+	i := 0
+	for ; i < len(dh.inode.dir.handles) && dh.inode.dir.handles[i] != dh; i++ {
+	}
+	if i < len(dh.inode.dir.handles) {
+		dh.inode.dir.handles = append(dh.inode.dir.handles[0 : i], dh.inode.dir.handles[i+1 : ]...)
+	}
+	dh.inode.mu.Unlock()
 	return nil
 }
 
@@ -795,6 +810,13 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 			*parent.FullName(), *inode.Name, i))
 	}
 
+	// POSIX allows parallel readdir() and modifications,
+	// so preserve position of all directory handles
+	for _, dh := range parent.dir.handles {
+		if dh.lastInternalOffset > i {
+			dh.lastInternalOffset--
+		}
+	}
 	copy(parent.dir.Children[i:], parent.dir.Children[i+1:])
 	parent.dir.Children[l-1] = nil
 	parent.dir.Children = parent.dir.Children[:l-1]
@@ -841,6 +863,13 @@ func (parent *Inode) insertChildUnlocked(inode *Inode) {
 			panic(fmt.Sprintf("double insert of %v", parent.getChildName(*inode.Name)))
 		}
 
+		// POSIX allows parallel readdir() and modifications,
+		// so preserve position of all directory handles
+		for _, dh := range parent.dir.handles {
+			if dh.lastInternalOffset > i {
+				dh.lastInternalOffset++
+			}
+		}
 		parent.dir.Children = append(parent.dir.Children, nil)
 		copy(parent.dir.Children[i+1:], parent.dir.Children[i:])
 		parent.dir.Children[i] = inode
@@ -1308,20 +1337,20 @@ func (parent *Inode) findChildMaxTime() time.Time {
 	return maxTime
 }
 
-func (parent *Inode) readDirFromCache(offset fuseops.DirOffset) (en *DirHandleEntry, ok bool) {
-	parent.mu.Lock()
-	defer parent.mu.Unlock()
+func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, ok bool) {
+	dh.inode.mu.Lock()
+	defer dh.inode.mu.Unlock()
 
-	if parent.dir == nil {
-		panic(*parent.FullName())
+	if dh.inode.dir == nil {
+		panic(*dh.inode.FullName())
 	}
-	if !expired(parent.dir.DirTime, parent.fs.flags.TypeCacheTTL) {
+	if !expired(dh.inode.dir.DirTime, dh.inode.fs.flags.TypeCacheTTL) {
 		ok = true
 
-		if int(offset) >= len(parent.dir.Children) {
+		if int(internalOffset) >= len(dh.inode.dir.Children) {
 			return
 		}
-		child := parent.dir.Children[offset]
+		child := dh.inode.dir.Children[internalOffset]
 
 		en = &DirHandleEntry{
 			Name:   *child.Name,

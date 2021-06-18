@@ -792,18 +792,18 @@ func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []DirHandleEntry
 	dh.mu.Lock()
 	defer dh.mu.Unlock()
 
-	en, err := dh.ReadDir(fuseops.DirOffset(0))
+	en, err := dh.ReadDir(0, fuseops.DirOffset(0))
 	t.Assert(err, IsNil)
 	t.Assert(en, NotNil)
 	t.Assert(en.Name, Equals, ".")
 
-	en, err = dh.ReadDir(fuseops.DirOffset(1))
+	en, err = dh.ReadDir(1, fuseops.DirOffset(1))
 	t.Assert(err, IsNil)
 	t.Assert(en, NotNil)
 	t.Assert(en.Name, Equals, "..")
 
-	for i := fuseops.DirOffset(2); ; i++ {
-		en, err = dh.ReadDir(i)
+	for i := 2; ; i++ {
+		en, err = dh.ReadDir(i, fuseops.DirOffset(i))
 		t.Assert(err, IsNil)
 
 		if en == nil {
@@ -925,8 +925,8 @@ func (s *GoofysTest) TestReadFiles(t *C) {
 	var entries []*DirHandleEntry
 
 	dh.mu.Lock()
-	for i := fuseops.DirOffset(0); ; i++ {
-		en, err := dh.ReadDir(i)
+	for i := 0; ; i++ {
+		en, err := dh.ReadDir(i, fuseops.DirOffset(i))
 		t.Assert(err, IsNil)
 
 		if en == nil {
