@@ -314,7 +314,7 @@ func (inode *Inode) DeRef(n uint64) (stale bool) {
 	inode.logFuse("DeRef", n, inode.refcnt)
 
 	if inode.refcnt < n {
-		panic(fmt.Sprintf("deref %v from %v", n, inode.refcnt))
+		panic(fmt.Sprintf("deref inode %v (%v) by %v from %v", inode.Id, *inode.FullName(), n, inode.refcnt))
 	}
 
 	inode.refcnt -= n

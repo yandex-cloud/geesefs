@@ -911,7 +911,6 @@ func (inode *Inode) SendDelete() {
 			inode.mu.Unlock()
 			return
 		}
-		delete(inode.Parent.dir.DeletedChildren, *inode.Name)
 		forget := false
 		if inode.CacheState == ST_DELETED {
 			inode.CacheState = ST_CACHED
@@ -923,11 +922,12 @@ func (inode *Inode) SendDelete() {
 		}
 		inode.fs.flusherCond.Broadcast()
 		inode.mu.Unlock()
+		inode.Parent.mu.Lock()
+		delete(inode.Parent.dir.DeletedChildren, *inode.Name)
 		if forget {
-			inode.Parent.mu.Lock()
-			inode.fs.DeRefInode(inode, 1)
-			inode.Parent.mu.Unlock()
+			inode.fs.DeRefInode(inode, 0)
 		}
+		inode.Parent.mu.Unlock()
 	}()
 }
 
