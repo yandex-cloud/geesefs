@@ -330,6 +330,12 @@ func NewApp() (app *cli.App) {
 				Name:  "f",
 				Usage: "Run goofys in foreground.",
 			},
+
+			cli.StringFlag{
+				Name:  "log-file",
+				Usage: "Redirect logs to file instead of stderr (default for foreground) or syslog (default for background).",
+				Value: "",
+			},
 		},
 	}
 
@@ -435,6 +441,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		DebugFuse:  c.Bool("debug_fuse"),
 		DebugS3:    c.Bool("debug_s3"),
 		Foreground: c.Bool("f"),
+		LogFile:    c.String("log-file"),
 	}
 
 	// S3

@@ -34,8 +34,17 @@ var cloudLogLevel = logrus.InfoLevel
 
 var syslogHook *logrus_syslog.SyslogHook
 
-func InitLoggers(logToSyslog bool) {
-	if logToSyslog {
+func InitLoggers(logToSyslog bool, logFile string) {
+	if logFile != "" {
+		file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			log.Errorf("Couldn't open file %v for writing logs", logFile)
+			return
+		}
+		for _, l := range loggers {
+			l.Out = file
+		}
+	} else if logToSyslog {
 		var err error
 		syslogHook, err = logrus_syslog.NewSyslogHook("", "", syslog.LOG_DEBUG, "")
 		if err != nil {

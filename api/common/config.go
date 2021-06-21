@@ -67,6 +67,7 @@ type FlagStorage struct {
 	DebugFuse  bool
 	DebugS3    bool
 	Foreground bool
+	LogFile    string
 }
 
 func (flags *FlagStorage) GetMimeType(fileName string) (retMime *string) {
