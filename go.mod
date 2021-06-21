@@ -22,11 +22,10 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattn/go-ieproxy v0.0.0-20190805055040-f9202b1cfdeb // indirect
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/satori/go.uuid v1.2.1-0.20181028125025-b2ce2384e17b
 	github.com/sevlyar/go-daemon v0.1.5
 	github.com/shirou/gopsutil v0.0.0-20190731134726-d80c43f9c984
-	github.com/sirupsen/logrus v1.4.3-0.20190807103436-de736cf91b92
+	github.com/sirupsen/logrus v1.8.1
 	github.com/smartystreets/assertions v0.0.0-20160201214316-443d812296a8 // indirect
 	github.com/smartystreets/goconvey v1.6.1-0.20160119221636-995f5b2e021c // indirect
 	github.com/urfave/cli v1.21.1-0.20190807111034-521735b7608a
