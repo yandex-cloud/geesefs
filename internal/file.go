@@ -859,13 +859,17 @@ func (inode *Inode) copyUnmodifiedRange(startPart uint64, endPart uint64) error 
 	cloud, key := inode.cloud()
 	startOffset, _ := inode.fs.partRange(startPart)
 	endOffset, endSize := inode.fs.partRange(endPart-1)
-	log.Debugf("Copying unmodified range %v-%v MB of object %v", startOffset/1024/1024, (endOffset+endSize)/1024/1024, key)
+	endOffset += endSize
+	if endOffset > inode.Attributes.Size {
+		endOffset = inode.Attributes.Size
+	}
+	log.Debugf("Copying unmodified range %v-%v MB of object %v", startOffset/1024/1024, (endOffset+1024*1024-1)/1024/1024, key)
 	resp, err := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
 		Commit:     inode.mpu,
 		PartNumber: uint32(startPart+1),
 		CopySource: key,
 		Offset:     startOffset,
-		Size:       endOffset+endSize-startOffset,
+		Size:       endOffset-startOffset,
 	})
 	if err != nil {
 		log.Errorf("Failed to copy unmodified range %v-%v MB of object %v: %v", startOffset/1024/1024, (endOffset+endSize)/1024/1024, key, err)
