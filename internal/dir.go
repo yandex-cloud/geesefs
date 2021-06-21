@@ -799,6 +799,8 @@ func (parent *Inode) findChildIdxUnlocked(name string) int {
 	return -1
 }
 
+// LOCKS_REQUIRED(parent.mu)
+// LOCKS_EXCLUDED(parent.fs.mu)
 func (parent *Inode) removeChildUnlocked(inode *Inode) {
 	l := len(parent.dir.Children)
 	if l == 0 {
@@ -830,6 +832,7 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 	parent.fs.DeRefInode(inode, 1)
 }
 
+// LOCKS_EXCLUDED(parent.fs.mu)
 func (parent *Inode) removeChild(inode *Inode) {
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
@@ -845,6 +848,7 @@ func (parent *Inode) insertChild(inode *Inode) {
 	parent.insertChildUnlocked(inode)
 }
 
+// LOCKS_REQUIRED(parent.mu)
 func (parent *Inode) insertChildUnlocked(inode *Inode) {
 	inode.Ref()
 
@@ -943,13 +947,12 @@ func (inode *Inode) SendDelete() {
 		forget := false
 		if inode.CacheState == ST_DELETED {
 			inode.CacheState = ST_CACHED
-			// FIXME And if all children are deleted, too!!!
+			// FIXME And if all children are deleted, too (?... not sure in fact)
 			if inode.refcnt == 0 {
 				// Don't call forget with inode locks taken ... :-X
 				forget = true
 			}
 		}
-		inode.fs.flusherCond.Broadcast()
 		inode.mu.Unlock()
 		inode.Parent.mu.Lock()
 		delete(inode.Parent.dir.DeletedChildren, *inode.Name)
@@ -957,6 +960,7 @@ func (inode *Inode) SendDelete() {
 			inode.fs.DeRefInode(inode, 0)
 		}
 		inode.Parent.mu.Unlock()
+		inode.fs.flusherCond.Broadcast()
 	}()
 }
 
@@ -967,11 +971,11 @@ func (parent *Inode) Create(
 
 	fs := parent.fs
 
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
+
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
 
 	now := time.Now()
 	inode = NewInode(fs, parent, &name)
@@ -1002,11 +1006,11 @@ func (parent *Inode) MkDir(
 
 	parent.logFuse("MkDir", name)
 
-	parent.fs.mu.Lock()
-	defer parent.fs.mu.Unlock()
-
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
+
+	parent.fs.mu.Lock()
+	defer parent.fs.mu.Unlock()
 
 	inode = NewInode(parent.fs, parent, &name)
 	inode.ToDir()
@@ -1019,6 +1023,9 @@ func (parent *Inode) MkDir(
 	if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
 		parent.Attributes.Mtime = inode.Attributes.Mtime
 	}
+	// one ref is for lookup
+	inode.Ref()
+	// another ref is for being in Children
 	parent.fs.insertInode(parent, inode)
 	parent.fs.flusherCond.Broadcast()
 

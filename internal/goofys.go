@@ -295,9 +295,21 @@ func (fs *Goofys) getInodeOrDie(id fuseops.InodeID) (inode *Inode) {
 // Try to reclaim some clean buffers
 func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 	fs.mu.RLock()
+	inodes := make([]fuseops.InodeID, 0, len(fs.inodes))
+	for id := range fs.inodes {
+		inodes = append(inodes, id)
+	}
+	fs.mu.RUnlock()
+
 	freed := int64(0)
 	haveDirty := false
-	for _, inode := range fs.inodes {
+	for _, inodeId := range inodes {
+		fs.mu.RLock()
+		inode := fs.inodes[inodeId]
+		fs.mu.RUnlock()
+		if inode == nil {
+			continue
+		}
 		inode.mu.Lock()
 		for i := 0; i < len(inode.buffers); i++ {
 			buf := &inode.buffers[i]
@@ -321,7 +333,6 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 			break
 		}
 	}
-	fs.mu.RUnlock()
 	if haveDirty {
 		fs.flusherCond.Broadcast()
 	}
@@ -344,20 +355,35 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 // 4) Dirty memory limit reached => without on-disk cache we have to flush the whole object.
 //    With on-disk cache we can unload some dirty buffers to disk.
 func (fs *Goofys) Flusher() {
+	var inodes []fuseops.InodeID
 	fs.flusherMu.Lock()
 	for true {
 		fs.flusherCond.Wait()
 		if atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers {
-			fs.mu.RLock()
-			for _, inode := range fs.inodes {
-				inode.mu.Lock()
-				inode.TryFlush()
-				inode.mu.Unlock()
-				if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
-					break
+			if len(inodes) == 0 {
+				fs.mu.RLock()
+				inodes = make([]fuseops.InodeID, 0, len(fs.inodes))
+				for id := range fs.inodes {
+					inodes = append(inodes, id)
+				}
+				fs.mu.RUnlock()
+			}
+			for len(inodes) > 0 {
+				// pop id
+				id := inodes[len(inodes)-1]
+				inodes = inodes[0 : len(inodes)-1]
+				fs.mu.RLock()
+				inode := fs.inodes[id]
+				fs.mu.RUnlock()
+				if inode != nil {
+					inode.mu.Lock()
+					inode.TryFlush()
+					inode.mu.Unlock()
+					if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
+						break
+					}
 				}
 			}
-			fs.mu.RUnlock()
 		}
 	}
 	fs.flusherMu.Unlock()
@@ -736,8 +762,8 @@ func (fs *Goofys) LookUpInode(
 		}
 
 		if inode == nil {
-			fs.mu.Lock()
 			parent.mu.Lock()
+			fs.mu.Lock()
 			// check again if it's there, could have been
 			// added by another lookup or readdir
 			inode = parent.findChildUnlocked(op.Name)
@@ -745,8 +771,8 @@ func (fs *Goofys) LookUpInode(
 				inode = newInode
 				fs.insertInode(parent, inode)
 			}
-			parent.mu.Unlock()
 			fs.mu.Unlock()
+			parent.mu.Unlock()
 		} else {
 			inode.mu.Lock()
 
@@ -832,6 +858,8 @@ func (fs *Goofys) ForgetInode(
 	return
 }
 
+// LOCKS_REQUIRED(inode.parent.mu)
+// LOCKS_EXCLUDED(inode.fs.mu)
 func (fs *Goofys) DeRefInode(inode *Inode, N uint64) {
 	stale := inode.DeRef(N)
 	if stale && inode.CacheState == ST_CACHED {
