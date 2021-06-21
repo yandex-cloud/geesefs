@@ -1148,7 +1148,7 @@ func (s *GoofysTest) TestWriteReallyLargeFile(t *C) {
 	if _, ok := s.cloud.(*S3Backend); ok && s.emulator {
 		t.Skip("seems to be OOM'ing S3proxy 1.8.0")
 	}
-	s.testWriteFile(t, "testLargeFile", 512*1024*1024+1, 128*1024)
+	s.testWriteFile(t, "testLargeFile", 64*1024*1024+1, 128*1024)
 }
 
 func (s *GoofysTest) TestWriteReplicatorThrottle(t *C) {
@@ -1274,14 +1274,7 @@ func (s *GoofysTest) TestRenamePreserveMetadata(t *C) {
 }
 
 func (s *GoofysTest) TestRenameLarge(t *C) {
-	fileSize := int64(2 * 1024 * 1024 * 1024)
-	// AWS S3 can timeout when renaming large file
-	if _, ok := s.cloud.(*S3Backend); ok && s.emulator {
-		// S3proxy runs out of memory on truly large files. We
-		// want to use a large file to test timeout issues
-		// which wouldn't happen on s3proxy anyway
-		fileSize = 21 * 1024 * 1024
-	}
+	fileSize := int64(21 * 1024 * 1024)
 
 	s.testWriteFile(t, "large_file", fileSize, 128*1024)
 
