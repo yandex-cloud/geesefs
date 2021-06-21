@@ -1654,19 +1654,36 @@ func (s *GoofysTest) mount(t *C, mountPoint string) {
 	}
 	t.Assert(err, IsNil)
 
-	server := fuseutil.NewFileSystemServer(s.fs)
+	if !hasEnv("SAME_PROCESS_MOUNT") {
 
-	// Mount the file system.
-	mountCfg := &fuse.MountConfig{
-		FSName:                  s.fs.bucket,
-		Options:                 s.fs.flags.MountOptions,
-		ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
-		DisableWritebackCaching: true,
+		region := ""
+		if os.Getenv("REGION") != "" {
+			region = " --region \""+os.Getenv("REGION")+"\""
+		}
+		c := exec.Command("/bin/bash", "-c",
+			"../goofys --debug_fuse --debug_s3"+
+			" --log-file \"mount_"+t.TestName()+".log\""+
+			" --endpoint \""+s.fs.flags.Endpoint+"\""+
+			region+
+			" "+s.fs.bucket+" "+mountPoint)
+		err = c.Run()
+		t.Assert(err, IsNil)
+
+	} else {
+		server := fuseutil.NewFileSystemServer(s.fs)
+
+		// Mount the file system.
+		mountCfg := &fuse.MountConfig{
+			FSName:                  s.fs.bucket,
+			Options:                 s.fs.flags.MountOptions,
+			ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
+			DisableWritebackCaching: true,
+		}
+		mountCfg.DebugLogger = GetStdLogger(fuseLog, logrus.DebugLevel)
+
+		_, err = fuse.Mount(mountPoint, server, mountCfg)
+		t.Assert(err, IsNil)
 	}
-	mountCfg.DebugLogger = GetStdLogger(fuseLog, logrus.DebugLevel)
-
-	_, err = fuse.Mount(mountPoint, server, mountCfg)
-	t.Assert(err, IsNil)
 }
 
 func (s *GoofysTest) umount(t *C, mountPoint string) {
@@ -3540,7 +3557,6 @@ func (s *GoofysTest) TestMountsError(t *C) {
 		// of NoSuchBucket)
 		flags := *s3.flags
 		config := *s3.config
-		flags.Endpoint = "0.0.0.0:0"
 		var err error
 		cloud, err = NewS3(bucket, &flags, &config)
 		t.Assert(err, IsNil)
