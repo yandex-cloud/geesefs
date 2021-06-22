@@ -2733,6 +2733,46 @@ func (s *GoofysTest) TestReadDirSlurpSubtree(t *C) {
 	s.assertEntries(t, in, []string{"file4"})
 }
 
+func (s *GoofysTest) TestReadDirSlurpContinuation(t *C) {
+	if _, ok := s.cloud.Delegate().(*S3Backend); !ok {
+		t.Skip("only for S3")
+	}
+
+	// Mount
+	mountPoint := "/tmp/mnt" + s.fs.bucket
+	s.mount(t, mountPoint)
+	defer s.umount(t, mountPoint)
+	// First create some directories to trigger slurp when listing
+	for i := 1; i <= 4; i++ {
+		err := os.MkdirAll(mountPoint+"/slurpc/"+fmt.Sprintf("%v", i), 0700)
+		if err == syscall.EEXIST {
+			err = nil
+		}
+		t.Assert(err, IsNil)
+		fh, err := os.OpenFile(mountPoint+"/slurpc/"+fmt.Sprintf("%v/%v", i, i), os.O_WRONLY|os.O_CREATE, 0600)
+		t.Assert(err, IsNil)
+		err = fh.Close()
+		t.Assert(err, IsNil)
+	}
+	// Then create a large number of files (> 1000) in the 4th subdirectory
+	for i := 0; i < 2000; i++ {
+		fh, err := os.OpenFile(mountPoint+"/slurpc/"+fmt.Sprintf("4/%v", i), os.O_WRONLY|os.O_CREATE, 0600)
+		t.Assert(err, IsNil)
+		err = fh.Close()
+		t.Assert(err, IsNil)
+	}
+	// Unmount
+	s.umount(t, mountPoint)
+
+	// Mount again
+	s.mount(t, mountPoint)
+	// Check that `find` returns all files to check that slurp works correctly with the continuation
+	c := exec.Command("/bin/bash", "-c", "find "+mountPoint+"/slurpc -type f | wc -l")
+	out, err := c.CombinedOutput()
+	t.Assert(err, IsNil)
+	t.Assert(string(out), Equals, "2003\n")
+}
+
 func (s *GoofysTest) TestReadDirCached(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	s.fs.flags.TypeCacheTTL = 1 * time.Minute
