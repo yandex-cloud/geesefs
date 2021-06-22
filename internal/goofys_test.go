@@ -1601,8 +1601,7 @@ func (s *GoofysTest) TestConcurrentRefDeref(t *C) {
 
 		var wg sync.WaitGroup
 
-		// FIXME: I suppose the real idea of this test is just that
-		// lookup->forget->lookup shouldn't crash with "Unknown inode: xxx"
+		// The idea of this test is just that lookup->forget->lookup shouldn't crash with "Unknown inode: xxx"
 		wg.Add(2)
 		go func() {
 			// we want to yield to the forget goroutine so that it's run first

@@ -490,7 +490,8 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 				if inode.AttrTime.Before(now) {
 					inode.AttrTime = now
 				}
-			} else {
+			} else if _, deleted := parent.dir.DeletedChildren[dirName]; !deleted {
+				// don't revive deleted items
 				inode := NewInode(fs, parent, &dirName)
 				inode.ToDir()
 				fs.insertInode(parent, inode)
@@ -515,11 +516,20 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 				}
 
 				inode := parent.findChildUnlocked(baseName)
-				if inode == nil {
-					inode = NewInode(fs, parent, &baseName)
-					fs.insertInode(parent, inode)
+				if inode != nil {
+					// don't update modified items
+					if inode.CacheState == ST_CACHED {
+						inode.SetFromBlobItem(&obj)
+					}
+				} else {
+					// don't revive deleted items
+					_, deleted := parent.dir.DeletedChildren[baseName]
+					if !deleted {
+						inode = NewInode(fs, parent, &baseName)
+						fs.insertInode(parent, inode)
+						inode.SetFromBlobItem(&obj)
+					}
 				}
-				inode.SetFromBlobItem(&obj)
 			} else {
 				// this is a slurped up object which
 				// was already cached
@@ -556,6 +566,8 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
 		childTmp := parent.dir.Children[internalOffset]
 		if atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
+			// FIXME: Does CacheState require atomic.LoadInt32 too ?
+			childTmp.CacheState == ST_CACHED &&
 			childTmp.AttrTime.Before(dh.refreshStartTime) {
 			// childTmp.AttrTime < dh.refreshStartTime => the child entry was not
 			// updated from cloud by this dir Handle.
@@ -1250,9 +1262,13 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 	if slash == -1 {
 		inode := parent.findChildUnlocked(path)
 		if inode == nil {
-			inode = NewInode(fs, parent, &path)
-			fs.insertInode(parent, inode)
-			inode.SetFromBlobItem(obj)
+			// don't revive deleted items
+			_, deleted := parent.dir.DeletedChildren[path]
+			if !deleted {
+				inode = NewInode(fs, parent, &path)
+				fs.insertInode(parent, inode)
+				inode.SetFromBlobItem(obj)
+			}
 		} else {
 			// our locking order is most specific lock
 			// first, ie: lock a/b before a/. But here we
@@ -1262,7 +1278,10 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			// that lock anyway
 			fs.mu.Unlock()
 			parent.mu.Unlock()
-			inode.SetFromBlobItem(obj)
+			// don't update modified items
+			if inode.CacheState == ST_CACHED {
+				inode.SetFromBlobItem(obj)
+			}
 			parent.mu.Lock()
 			fs.mu.Lock()
 		}
@@ -1274,50 +1293,70 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 		if len(path) == 0 {
 			inode := parent.findChildUnlocked(dir)
 			if inode == nil {
-				inode = NewInode(fs, parent, &dir)
-				inode.ToDir()
-				fs.insertInode(parent, inode)
-				inode.SetFromBlobItem(obj)
-			} else if !inode.isDir() {
-				inode.ToDir()
-				fs.addDotAndDotDot(inode)
-			} else {
-				fs.mu.Unlock()
-				parent.mu.Unlock()
-				inode.SetFromBlobItem(obj)
-				parent.mu.Lock()
-				fs.mu.Lock()
+				// don't revive deleted items
+				_, deleted := parent.dir.DeletedChildren[path]
+				if !deleted {
+					inode = NewInode(fs, parent, &dir)
+					inode.ToDir()
+					fs.insertInode(parent, inode)
+					inode.SetFromBlobItem(obj)
+				}
+			} else if inode.CacheState == ST_CACHED {
+				// don't update modified items
+				if !inode.isDir() {
+					inode.ToDir()
+					fs.addDotAndDotDot(inode)
+				} else {
+					fs.mu.Unlock()
+					parent.mu.Unlock()
+					inode.SetFromBlobItem(obj)
+					parent.mu.Lock()
+					fs.mu.Lock()
+				}
 			}
 			sealPastDirs(dirs, inode)
 		} else {
 			// ensure that the potentially implicit dir is added
 			inode := parent.findChildUnlocked(dir)
 			if inode == nil {
-				inode = NewInode(fs, parent, &dir)
-				inode.ToDir()
-				fs.insertInode(parent, inode)
-			} else if !inode.isDir() {
-				inode.ToDir()
-				fs.addDotAndDotDot(inode)
-			}
-			now := time.Now()
-			if inode.AttrTime.Before(now) {
-				inode.AttrTime = now
+				// don't revive deleted items
+				_, deleted := parent.dir.DeletedChildren[path]
+				if !deleted {
+					inode = NewInode(fs, parent, &dir)
+					inode.ToDir()
+					fs.insertInode(parent, inode)
+					now := time.Now()
+					if inode.AttrTime.Before(now) {
+						inode.AttrTime = now
+					}
+				}
+			} else if inode.CacheState == ST_CACHED {
+				// don't update modified items
+				if !inode.isDir() {
+					inode.ToDir()
+					fs.addDotAndDotDot(inode)
+				}
+				now := time.Now()
+				if inode.AttrTime.Before(now) {
+					inode.AttrTime = now
+				}
 			}
 
-			// mark this dir but don't seal anything else
-			// until we get to the leaf
-			dirs[inode] = false
+			if inode.isDir() {
+				// mark this dir but don't seal anything else
+				// until we get to the leaf
+				dirs[inode] = false
 
-			fs.mu.Unlock()
-			parent.mu.Unlock()
-			inode.mu.Lock()
-			fs.mu.Lock()
-			inode.insertSubTree(path, obj, dirs)
-			inode.mu.Unlock()
-			fs.mu.Unlock()
-			parent.mu.Lock()
-			fs.mu.Lock()
+				fs.mu.Unlock()
+				parent.mu.Unlock()
+				inode.mu.Lock()
+				fs.mu.Lock()
+				inode.insertSubTree(path, obj, dirs)
+				inode.mu.Unlock()
+				fs.mu.Unlock()
+				parent.mu.Lock()
+				fs.mu.Lock()
+			}
 		}
 	}
 }
