@@ -257,11 +257,7 @@ func (dh *DirHandle) listObjectsSlurp(prefix string) (resp *ListBlobsOutput, err
 	dirs := make(map[*Inode]bool)
 	for _, obj := range resp.Items {
 		baseName := (*obj.Key)[len(reqPrefix):]
-
-		slash := strings.Index(baseName, "/")
-		if slash != -1 {
-			inode.insertSubTree(baseName, &obj, dirs)
-		}
+		inode.insertSubTree(baseName, &obj, dirs)
 	}
 	inode.fs.mu.Unlock()
 	inode.mu.Unlock()
@@ -279,29 +275,24 @@ func (dh *DirHandle) listObjectsSlurp(prefix string) (resp *ListBlobsOutput, err
 		}
 	}
 
-	if resp.IsTruncated {
-		obj := resp.Items[len(resp.Items)-1]
-		// if we are done listing prefix, we are good
-		if strings.HasPrefix(*obj.Key, prefix) {
-			// if we are done with all the slashes, then we are good
-			baseName := (*obj.Key)[len(prefix):]
-
-			for _, c := range baseName {
-				if c <= '/' {
-					// if an entry is ex: a!b, then the
-					// next entry could be a/foo, so we
-					// are not done yet.
-					resp = nil
-					break
-				}
-			}
+	obj := resp.Items[len(resp.Items)-1]
+	if resp.IsTruncated && resp.NextContinuationToken == nil {
+		// NextMarker is not returned when delimiter is empty
+		resp.NextContinuationToken = obj.Key
+	}
+	// if we are done listing prefix, we are good
+	if !strings.HasPrefix(*obj.Key, prefix) {
+		if *obj.Key > prefix {
+			resp = nil
 		}
+	} else if !resp.IsTruncated {
+		resp = nil
 	}
 
-	// we only return this response if we are totally done with listing this dir
 	if resp != nil {
-		resp.IsTruncated = false
-		resp.NextContinuationToken = nil
+		// We only return the response to record the continuation token
+		// All items are already recorded
+		resp.Items = make([]BlobItemOutput, 0)
 	}
 
 	return
