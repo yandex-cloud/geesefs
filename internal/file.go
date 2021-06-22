@@ -855,27 +855,21 @@ func (inode *Inode) FlushSmallObject() {
 	inode.mu.Unlock()
 }
 
-func (inode *Inode) copyUnmodifiedRange(startPart uint64, endPart uint64) error {
+func (inode *Inode) copyUnmodifiedRange(partNum, offset, size uint64) error {
 	cloud, key := inode.cloud()
-	startOffset, _ := inode.fs.partRange(startPart)
-	endOffset, endSize := inode.fs.partRange(endPart-1)
-	endOffset += endSize
-	if endOffset > inode.Attributes.Size {
-		endOffset = inode.Attributes.Size
-	}
-	log.Debugf("Copying unmodified range %v-%v MB of object %v", startOffset/1024/1024, (endOffset+1024*1024-1)/1024/1024, key)
+	log.Debugf("Copying unmodified range %v-%v MB of object %v", offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key)
 	resp, err := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
 		Commit:     inode.mpu,
-		PartNumber: uint32(startPart+1),
+		PartNumber: uint32(partNum+1),
 		CopySource: key,
-		Offset:     startOffset,
-		Size:       endOffset-startOffset,
+		Offset:     offset,
+		Size:       size,
 	})
 	if err != nil {
-		log.Errorf("Failed to copy unmodified range %v-%v MB of object %v: %v", startOffset/1024/1024, (endOffset+endSize)/1024/1024, key, err)
+		log.Errorf("Failed to copy unmodified range %v-%v MB of object %v: %v", offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key, err)
 	} else {
 		inode.mu.Lock()
-		inode.mpu.Parts[startPart] = resp.PartId
+		inode.mpu.Parts[partNum] = resp.PartId
 		inode.mu.Unlock()
 	}
 	return err
@@ -883,45 +877,48 @@ func (inode *Inode) copyUnmodifiedRange(startPart uint64, endPart uint64) error 
 
 func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 	maxMerge := inode.fs.flags.MaxMergeCopyMB * 1024*1024
+
 	// First collect ranges to be unaffected by sudden parallel changes
 	var ranges []uint64
-	var lastStart, lastEnd uint64
-	var startOffset, endOffset, endSize uint64
+	var startPart, endPart uint64
+	var startOffset, endOffset uint64
 	for i := uint64(0); i < numParts; i++ {
+		partOffset, partSize := inode.fs.partRange(i)
+		partEnd := partOffset+partSize
+		if partEnd > inode.Attributes.Size {
+			partEnd = inode.Attributes.Size
+		}
 		if inode.mpu.Parts[i] == nil {
-			if lastEnd == 0 {
-				lastStart = i
-				startOffset, _ = inode.fs.partRange(lastStart)
+			if endPart == 0 {
+				startPart, startOffset = i, partOffset
 			}
-			lastEnd = i+1
-			endOffset, endSize = inode.fs.partRange(lastEnd-1)
-			endOffset += endSize
+			endPart, endOffset = i+1, partEnd
 			if endOffset-startOffset >= maxMerge {
-				ranges = append(ranges, lastStart, lastEnd)
-				lastStart, lastEnd = 0, 0
+				ranges = append(ranges, startPart, startOffset, endOffset-startOffset)
+				startPart, endPart = 0, 0
 			}
-		} else if lastEnd != 0 {
-			ranges = append(ranges, lastStart, lastEnd)
-			lastEnd = 0
+		} else if endPart != 0 {
+			ranges = append(ranges, startPart, startOffset, endOffset-startOffset)
+			endPart = 0
 		}
 	}
-	if lastEnd != 0 {
-		ranges = append(ranges, lastStart, lastEnd)
+	if endPart != 0 {
+		ranges = append(ranges, startPart, startOffset, endOffset-startOffset)
 	}
 	guard := make(chan int, inode.fs.flags.MaxParallelCopy)
 	var wg sync.WaitGroup
 	inode.mu.Unlock()
-	for i := 0; i < len(ranges); i += 2 {
+	for i := 0; i < len(ranges); i += 3 {
 		guard <- i
 		wg.Add(1)
-		go func(start, end uint64) {
-			requestErr := inode.copyUnmodifiedRange(start, end)
+		go func(part, offset, size uint64) {
+			requestErr := inode.copyUnmodifiedRange(part, offset, size)
 			if requestErr != nil {
 				err = requestErr
 			}
 			wg.Done()
 			<- guard
-		}(uint64(ranges[i]), uint64(ranges[i+1]))
+		}(uint64(ranges[i]), uint64(ranges[i+1]), uint64(ranges[i+2]))
 	}
 	wg.Wait()
 	inode.mu.Lock()
