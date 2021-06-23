@@ -333,6 +333,9 @@ if [ "$t" = "" -o "$t" = "io" ]; then
 fi
 
 if [ "$t" = "" -o "$t" = "ls" ]; then
+    rm -rf bench_ls
+    mkdir bench_ls
+    cd bench_ls
     create_files_parallel 2000 2000
     for i in $(seq 1 $iter); do
         run_test ls_files 2000 2000
@@ -340,6 +343,7 @@ if [ "$t" = "" -o "$t" = "ls" ]; then
     if [ "$CLEANUP" = "true" ]; then
 	rm_files 2000 2000
     fi
+    cd ..
 fi
 
 if [ "$t" = "ls_create" ]; then
@@ -358,11 +362,15 @@ if [ "$t" = "ls_rm" ]; then
 fi
 
 if [ "$t" = "" -o "$t" = "find" ]; then
+    rm -rf bench_find
+    mkdir bench_find
+    cd bench_find
     create_tree_parallel
     for i in $(seq 1 $iter); do
         run_test find_files
     done
     rm_tree
+    cd ..
 fi
 
 if [ "$t" = "find_create" ]; then
