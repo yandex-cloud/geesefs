@@ -1110,8 +1110,26 @@ func (parent *Inode) RmDir(name string) (err error) {
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
 
+	// rmdir assumes that <name> was previously looked up
 	inode := parent.findChildUnlocked(name)
 	if inode != nil {
+
+		if !inode.isDir() {
+			return fuse.ENOTDIR
+		}
+
+		dh := NewDirHandle(inode)
+		dh.mu.Lock()
+		en, err := dh.ReadDir(2, 2)
+		dh.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		if en != nil {
+			fuseLog.Debugf("Directory %v not empty: still has entry \"%v\"", *inode.FullName(), en.Name)
+			return fuse.ENOTEMPTY
+		}
+
 		parent.removeChildUnlocked(inode)
 		if inode.ImplicitDir {
 			// FIXME: Make sure that cache remembers that this dir is removed
