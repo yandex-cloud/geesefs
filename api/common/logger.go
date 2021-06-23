@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/sirupsen/logrus"
 	logrus_syslog "github.com/sirupsen/logrus/hooks/syslog"
@@ -43,6 +44,11 @@ func InitLoggers(logToSyslog bool, logFile string) {
 		}
 		for _, l := range loggers {
 			l.Out = file
+		}
+		err = syscall.Dup2(int(file.Fd()), int(os.Stderr.Fd()))
+		if err != nil {
+			log.Errorf("Couldn't redirect STDERR to the log file %v", logFile)
+			return
 		}
 	} else if logToSyslog {
 		var err error
