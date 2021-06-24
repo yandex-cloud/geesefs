@@ -309,7 +309,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 		})
 	}
 	inode.Attributes.Size = newSize
-	if inode.CacheState != ST_CREATED {
+	if inode.CacheState == ST_CACHED {
 		inode.CacheState = ST_MODIFIED
 		inode.fs.flusherCond.Broadcast()
 	}
@@ -333,7 +333,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 	allocated := fh.inode.addBuffer(uint64(offset), data, true, true)
 
 	fh.inode.lastWriteEnd = end
-	if fh.inode.CacheState != ST_CREATED {
+	if fh.inode.CacheState == ST_CACHED {
 		fh.inode.CacheState = ST_MODIFIED
 		// FIXME: Don't activate the flusher immediately for small writes
 		fh.inode.fs.flusherCond.Broadcast()
@@ -436,6 +436,10 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool) (r
 			}
 			// Cache result from the server
 			inode.mu.Lock()
+			if inode.userMetadata == nil {
+				// Cache xattrs
+				inode.fillXattrFromHead(&(*resp).HeadBlobOutput)
+			}
 			allocated := inode.addBuffer(offset, data, false, false)
 			inode.mu.Unlock()
 			// Correct memory usage
@@ -721,6 +725,48 @@ func (inode *Inode) SendUpload() bool {
 		return false
 	}
 
+	if inode.CacheState == ST_MODIFIED && inode.userMetadataDirty && inode.IsFlushing == 0 {
+		hasDirty := false
+		for i := 0; i < len(inode.buffers); i++ {
+			buf := &inode.buffers[i]
+			if buf.dirtyID != 0 {
+				hasDirty = true
+				break
+			}
+		}
+		if !hasDirty {
+			// Update metadata by COPYing into the same object
+			// It results in the optimized implementation in S3
+			inode.CacheState = ST_CACHED
+			inode.userMetadataDirty = false
+			inode.IsFlushing += inode.fs.flags.MaxParallelParts
+			atomic.AddInt64(&inode.fs.activeFlushers, 1)
+			go func() {
+				cloud, key := inode.cloud()
+				_, err := cloud.CopyBlob(&CopyBlobInput{
+					Source:      key,
+					Destination: key,
+					Size:        &inode.Attributes.Size,
+					ETag:        PString(string(inode.s3Metadata["etag"])),
+					Metadata:    convertMetadata(inode.userMetadata),
+				})
+				inode.mu.Lock()
+				inode.recordFlushError(err)
+				if err != nil {
+					if inode.CacheState == ST_CACHED {
+						inode.CacheState = ST_MODIFIED
+					}
+					inode.userMetadataDirty = true
+					log.Errorf("Error flushing metadata using COPY for %v: %v", key, err)
+				}
+				inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+				atomic.AddInt64(&inode.fs.activeFlushers, -1)
+				inode.fs.flusherCond.Broadcast()
+				inode.mu.Unlock()
+			}()
+		}
+	}
+
 	if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 {
 		// Don't flush small files with active file handles (if not under memory pressure)
 		if inode.IsFlushing == 0 && (inode.fileHandles == 0 || inode.forceFlush || inode.fs.bufferPool.wantFree > 0) {
@@ -815,6 +861,9 @@ func (inode *Inode) FlushSmallObject() {
 		Body:        bufReader,
 		Size:        PUInt64(uint64(bufReader.Len())),
 		ContentType: inode.fs.flags.GetMimeType(*inode.FullName()),
+	}
+	if inode.userMetadataDirty {
+		params.Metadata = convertMetadata(inode.userMetadata)
 	}
 
 	inode.mu.Unlock()
@@ -1004,16 +1053,23 @@ func (inode *Inode) FlushPart(part uint64) {
 			if err == nil {
 				// Finalize the upload
 				inode.mpu.NumParts = uint32(numParts)
+				if inode.userMetadataDirty {
+					inode.mpu.Metadata = convertMetadata(inode.userMetadata)
+					inode.userMetadataDirty = false
+				}
 				inode.mu.Unlock()
 				resp, err := cloud.MultipartBlobCommit(inode.mpu)
 				inode.mu.Lock()
 				inode.recordFlushError(err)
 				if err != nil {
 					log.Errorf("Failed to finalize multi-part upload of object %v: %v", key, err)
+					if inode.mpu.Metadata != nil {
+						inode.userMetadataDirty = true
+					}
 				} else {
 					inode.mpu = nil
 					inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
-					stillDirty := false
+					stillDirty := inode.userMetadataDirty
 					for i := 0; i < len(inode.buffers); i++ {
 						if inode.buffers[i].flushed {
 							inode.buffers[i].dirtyID = 0

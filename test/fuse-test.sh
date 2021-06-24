@@ -3,8 +3,6 @@
 set -o xtrace
 set -o errexit
 
-: ${CATFS:="false"}
-
 #COMMON=integration-test-common.sh
 #source $COMMON
 
@@ -384,9 +382,7 @@ function test_extended_attributes {
 
     rm -f $TEST_TEXT_FILE
 
-    # FIXME: make xattrs async too ... O_O
-    #touch $TEST_TEXT_FILE
-    dd if=/dev/zero of=$TEST_TEXT_FILE bs=1 count=0 conv=fsync
+    touch $TEST_TEXT_FILE
 
     # set value
     setfattr -n user.key1 -v value1 $TEST_TEXT_FILE
@@ -475,15 +471,10 @@ function run_all_tests {
 #    test_multipart_copy
     test_special_characters
     #test_symlink
-    if [ "$CATFS" != "true" ]; then
-# FIXME: make xattrs asynchronous
-        #test_extended_attributes
-    fi
+    test_extended_attributes
     #test_mtime_file
     test_rm_rf_dir
-    if [ "$CATFS" == "true" ]; then
-        test_write_after_seek_ahead
-    fi
+    test_write_after_seek_ahead
 }
 
 # Mount the bucket

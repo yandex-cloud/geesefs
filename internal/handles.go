@@ -107,6 +107,7 @@ type Inode struct {
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
 
+	userMetadataDirty bool
 	userMetadata map[string][]byte
 	s3Metadata   map[string][]byte
 
@@ -187,6 +188,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	if inode.AttrTime.Before(now) {
 		inode.AttrTime = now
 	}
+	// FIXME: support xattrs returned from List responses, like in GCS
 }
 
 // LOCKS_REQUIRED(inode.mu)
@@ -357,6 +359,8 @@ func (inode *Inode) fillXattrFromHead(resp *HeadBlobOutput) {
 	}
 }
 
+// FIXME: Move all these xattr-related functions to file.go
+
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) fillXattr() (err error) {
 	if !inode.ImplicitDir && inode.userMetadata == nil {
@@ -432,19 +436,6 @@ func convertMetadata(meta map[string][]byte) (metadata map[string]*string) {
 	return
 }
 
-// LOCKS_REQUIRED(inode.mu)
-func (inode *Inode) updateXattr() (err error) {
-	cloud, key := inode.cloud()
-	_, err = cloud.CopyBlob(&CopyBlobInput{
-		Source:      key,
-		Destination: key,
-		Size:        &inode.Attributes.Size,
-		ETag:        aws.String(string(inode.s3Metadata["etag"])),
-		Metadata:    convertMetadata(inode.userMetadata),
-	})
-	return
-}
-
 func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
 	inode.logFuse("SetXattr", name)
 
@@ -470,8 +461,12 @@ func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
 	}
 
 	meta[name] = Dup(value)
-	err = inode.updateXattr()
-	return err
+	inode.userMetadataDirty = true
+	if inode.CacheState == ST_CACHED {
+		inode.CacheState = ST_MODIFIED
+		inode.fs.flusherCond.Broadcast()
+	}
+	return nil
 }
 
 func (inode *Inode) RemoveXattr(name string) error {
@@ -487,7 +482,11 @@ func (inode *Inode) RemoveXattr(name string) error {
 
 	if _, ok := meta[name]; ok {
 		delete(meta, name)
-		err = inode.updateXattr()
+		inode.userMetadataDirty = true
+		if inode.CacheState == ST_CACHED {
+			inode.CacheState = ST_MODIFIED
+			inode.fs.flusherCond.Broadcast()
+		}
 		return err
 	} else {
 		return syscall.ENODATA

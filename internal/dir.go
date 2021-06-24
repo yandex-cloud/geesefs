@@ -982,6 +982,7 @@ func (parent *Inode) Create(
 
 	now := time.Now()
 	inode = NewInode(fs, parent, &name)
+	inode.userMetadata = make(map[string][]byte)
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 	inode.Attributes = InodeAttributes{
@@ -1016,6 +1017,7 @@ func (parent *Inode) MkDir(
 	defer parent.fs.mu.Unlock()
 
 	inode = NewInode(parent.fs, parent, &name)
+	inode.userMetadata = make(map[string][]byte)
 	inode.ToDir()
 	inode.touch()
 	if !parent.fs.flags.NoDirObject {
