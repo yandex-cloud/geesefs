@@ -410,6 +410,9 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool) (r
 	// send requests
 	var wg sync.WaitGroup
 	cloud, key := inode.cloud()
+	if inode.renamedFrom != nil {
+		key = *inode.renamedFrom
+	}
 	for i := 0; i < len(requests); i += 2 {
 		offset := requests[i]
 		size := requests[i+1]
@@ -725,7 +728,57 @@ func (inode *Inode) SendUpload() bool {
 		return false
 	}
 
-	if inode.CacheState == ST_MODIFIED && inode.userMetadataDirty && inode.IsFlushing == 0 {
+	cloud, key := inode.cloud()
+
+	inode.fs.renamedMapMu.Lock()
+	_, overwritesRenamed := inode.fs.renamedMap[key]
+	inode.fs.renamedMapMu.Unlock()
+	if overwritesRenamed {
+		return false
+	}
+
+	if inode.renamedFrom != nil && inode.IsFlushing == 0 && inode.mpu == nil {
+		inode.IsFlushing += inode.fs.flags.MaxParallelParts
+		atomic.AddInt64(&inode.fs.activeFlushers, 1)
+		from := *inode.renamedFrom
+		go func() {
+			// FIXME: Doesn't need to be a method of Inode
+			err := inode.renameObject(nil, from, key)
+			inode.mu.Lock()
+			inode.recordFlushError(err)
+			inode.fs.renamedMapMu.Lock()
+			if inode.fs.renamedMap[from] != inode {
+				log.Errorf("BUG: renamedMap[%v] != inode", from)
+			} else if err != nil {
+				delete(inode.fs.renamedMap, from)
+			}
+			inode.fs.renamedMapMu.Unlock()
+			_, newKey := inode.cloud()
+			if err != nil {
+				log.Errorf("Error renaming object from %v to %v: %v", from, key, err)
+			} else if newKey != key {
+				// File was renamed again...
+				inode.renamedFrom = &key
+				inode.fs.renamedMapMu.Lock()
+				inode.fs.renamedMap[key] = inode
+				inode.fs.renamedMapMu.Unlock()
+			} else {
+				inode.renamedFrom = nil
+				if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
+					!inode.isStillDirty() {
+					inode.CacheState = ST_CACHED
+				}
+			}
+			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+			atomic.AddInt64(&inode.fs.activeFlushers, -1)
+			inode.fs.flusherCond.Broadcast()
+			inode.mu.Unlock()
+		}()
+		return true
+	}
+
+	if inode.CacheState == ST_MODIFIED && inode.userMetadataDirty &&
+		inode.renamedFrom == nil && inode.IsFlushing == 0 {
 		hasDirty := false
 		for i := 0; i < len(inode.buffers); i++ {
 			buf := &inode.buffers[i]
@@ -742,7 +795,6 @@ func (inode *Inode) SendUpload() bool {
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, 1)
 			go func() {
-				cloud, key := inode.cloud()
 				_, err := cloud.CopyBlob(&CopyBlobInput{
 					Source:      key,
 					Destination: key,
@@ -764,6 +816,7 @@ func (inode *Inode) SendUpload() bool {
 				inode.fs.flusherCond.Broadcast()
 				inode.mu.Unlock()
 			}()
+			return true
 		}
 	}
 
@@ -788,7 +841,6 @@ func (inode *Inode) SendUpload() bool {
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
 		go func() {
-			cloud, key := inode.cloud()
 			resp, err := cloud.MultipartBlobBegin(&MultipartBlobBeginInput{
 				Key: key,
 				ContentType: inode.fs.flags.GetMimeType(key),
@@ -834,6 +886,19 @@ func (inode *Inode) SendUpload() bool {
 	return false
 }
 
+func (inode *Inode) isStillDirty() bool {
+	if inode.userMetadataDirty || inode.renamedFrom != nil {
+		return true
+	}
+	for i := 0; i < len(inode.buffers); i++ {
+		b := &inode.buffers[i]
+		if b.dirtyID != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (inode *Inode) FlushSmallObject() {
 
 	inode.mu.Lock()
@@ -853,7 +918,12 @@ func (inode *Inode) FlushSmallObject() {
 		inode.CheckLoadRange(0, sz)
 	}
 
+	// Key may have been changed in between (if it was moved)
 	cloud, key := inode.cloud()
+	if inode.renamedFrom != nil {
+		// In this case, modify it in the old place and move when we're done with modifications
+		key = *inode.renamedFrom
+	}
 	// File size may have been changed in between
 	bufReader, bufIds := inode.GetMultiReader(0, inode.Attributes.Size)
 	params := &PutBlobInput{
@@ -864,6 +934,7 @@ func (inode *Inode) FlushSmallObject() {
 	}
 	if inode.userMetadataDirty {
 		params.Metadata = convertMetadata(inode.userMetadata)
+		inode.userMetadataDirty = false
 	}
 
 	inode.mu.Unlock()
@@ -873,9 +944,12 @@ func (inode *Inode) FlushSmallObject() {
 	inode.recordFlushError(err)
 	if err != nil {
 		log.Errorf("Failed to flush small file %v: %v", key, err)
+		if params.Metadata != nil {
+			inode.userMetadataDirty = true
+		}
 	} else {
 		log.Debugf("Flushed small file %v", key)
-		stillDirty := false
+		stillDirty := inode.userMetadataDirty || inode.renamedFrom != nil
 		for i := 0; i < len(inode.buffers); i++ {
 			b := &inode.buffers[i]
 			if b.dirtyID != 0 {
@@ -888,7 +962,7 @@ func (inode *Inode) FlushSmallObject() {
 				}
 			}
 		}
-		if !stillDirty {
+		if !stillDirty && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
 			inode.CacheState = ST_CACHED
 			if inode.fs.bufferPool.wantFree > 0 {
 				inode.fs.bufferPool.cond.Broadcast()
@@ -954,23 +1028,25 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 	if endPart != 0 {
 		ranges = append(ranges, startPart, startOffset, endOffset-startOffset)
 	}
-	guard := make(chan int, inode.fs.flags.MaxParallelCopy)
-	var wg sync.WaitGroup
-	inode.mu.Unlock()
-	for i := 0; i < len(ranges); i += 3 {
-		guard <- i
-		wg.Add(1)
-		go func(part, offset, size uint64) {
-			requestErr := inode.copyUnmodifiedRange(part, offset, size)
-			if requestErr != nil {
-				err = requestErr
-			}
-			wg.Done()
-			<- guard
-		}(uint64(ranges[i]), uint64(ranges[i+1]), uint64(ranges[i+2]))
+	if len(ranges) > 0 {
+		guard := make(chan int, inode.fs.flags.MaxParallelCopy)
+		var wg sync.WaitGroup
+		inode.mu.Unlock()
+		for i := 0; i < len(ranges); i += 3 {
+			guard <- i
+			wg.Add(1)
+			go func(part, offset, size uint64) {
+				requestErr := inode.copyUnmodifiedRange(part, offset, size)
+				if requestErr != nil {
+					err = requestErr
+				}
+				wg.Done()
+				<- guard
+			}(uint64(ranges[i]), uint64(ranges[i+1]), uint64(ranges[i+2]))
+		}
+		wg.Wait()
+		inode.mu.Lock()
 	}
-	wg.Wait()
-	inode.mu.Lock()
 	return
 }
 
@@ -989,6 +1065,10 @@ func (inode *Inode) FlushPart(part uint64) {
 	} (partOffset, partSize)
 
 	cloud, key := inode.cloud()
+	if inode.renamedFrom != nil {
+		// Always apply modifications before moving
+		key = *inode.renamedFrom
+	}
 	log.Debugf("Flushing part %v (%v-%v MB) of %v", part, partOffset/1024/1024, (partOffset+partSize)/1024/1024, key)
 
 	// Last part may be shorter
@@ -1000,7 +1080,7 @@ func (inode *Inode) FlushPart(part uint64) {
 	if inode.CacheState == ST_MODIFIED {
 		inode.CheckLoadRange(partOffset, partSize)
 		// File size may have been changed again
-		if inode.Attributes.Size <= partOffset || inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
+		if inode.Attributes.Size <= partOffset || inode.CacheState != ST_MODIFIED {
 			// Abort flush
 			return
 		}
@@ -1050,7 +1130,8 @@ func (inode *Inode) FlushPart(part uint64) {
 				numParts++
 			}
 			err := inode.copyUnmodifiedParts(numParts)
-			if err == nil {
+			inode.recordFlushError(err)
+			if err == nil && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
 				// Finalize the upload
 				inode.mpu.NumParts = uint32(numParts)
 				if inode.userMetadataDirty {
@@ -1060,32 +1141,37 @@ func (inode *Inode) FlushPart(part uint64) {
 				inode.mu.Unlock()
 				resp, err := cloud.MultipartBlobCommit(inode.mpu)
 				inode.mu.Lock()
-				inode.recordFlushError(err)
-				if err != nil {
-					log.Errorf("Failed to finalize multi-part upload of object %v: %v", key, err)
-					if inode.mpu.Metadata != nil {
-						inode.userMetadataDirty = true
-					}
-				} else {
-					inode.mpu = nil
-					inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
-					stillDirty := inode.userMetadataDirty
-					for i := 0; i < len(inode.buffers); i++ {
-						if inode.buffers[i].flushed {
-							inode.buffers[i].dirtyID = 0
-							inode.buffers[i].flushed = false
+				if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
+					inode.recordFlushError(err)
+					if err != nil {
+						log.Errorf("Failed to finalize multi-part upload of object %v: %v", key, err)
+						if inode.mpu.Metadata != nil {
+							inode.userMetadataDirty = true
 						}
-						if inode.buffers[i].dirtyID != 0 {
-							stillDirty = true
+					} else {
+						inode.mpu = nil
+						inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
+						stillDirty := inode.userMetadataDirty || inode.renamedFrom != nil
+						for i := 0; i < len(inode.buffers); i++ {
+							if inode.buffers[i].flushed {
+								inode.buffers[i].dirtyID = 0
+								inode.buffers[i].flushed = false
+							}
+							if inode.buffers[i].dirtyID != 0 {
+								stillDirty = true
+							}
 						}
-					}
-					if !stillDirty && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
-						inode.CacheState = ST_CACHED
-						if inode.fs.bufferPool.wantFree > 0 {
-							inode.fs.bufferPool.cond.Broadcast()
+						if !stillDirty && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
+							inode.CacheState = ST_CACHED
+							if inode.fs.bufferPool.wantFree > 0 {
+								inode.fs.bufferPool.cond.Broadcast()
+							}
 						}
 					}
 				}
+			} else {
+				// FIXME: Abort multipart upload, but not just here
+				// For example, we also should abort it if a partially flushed file is deleted
 			}
 		}
 	}

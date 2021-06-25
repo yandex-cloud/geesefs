@@ -94,6 +94,10 @@ type Goofys struct {
 	flushRetrySet int32
 
 	forgotCnt uint32
+
+	// FIXME This map doesn't support nested mounts. But nested mounts aren't really needed...
+	renamedMap map[string]*Inode
+	renamedMapMu sync.Mutex
 }
 
 var s3Log = GetLogger("s3")
@@ -176,6 +180,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		bucket: bucket,
 		flags:  flags,
 		umask:  0122,
+		renamedMap: make(map[string]*Inode),
 	}
 
 	var prefix string
@@ -862,7 +867,17 @@ func (fs *Goofys) ForgetInode(
 // LOCKS_EXCLUDED(inode.fs.mu)
 func (fs *Goofys) DeRefInode(inode *Inode, N uint64) {
 	stale := inode.DeRef(N)
-	if stale && inode.CacheState == ST_CACHED {
+	if stale && (inode.CacheState == ST_CACHED || inode.CacheState == ST_ABORTED) {
+		// Clear buffers
+		for i := 0; i < len(inode.buffers); i++ {
+			b := &inode.buffers[i]
+			if !b.zero {
+				b.ptr.refs--
+				if b.ptr.refs == 0 {
+					fs.bufferPool.Use(-int64(len(b.ptr.mem)))
+				}
+			}
+		}
 		fs.mu.Lock()
 		delete(fs.inodes, inode.Id)
 		fs.forgotCnt += 1
@@ -1217,6 +1232,7 @@ func (fs *Goofys) Rename(
 	}
 
 	err = parent.Rename(op.OldName, newParent, op.NewName)
+/*
 	if err != nil {
 		if err == fuse.ENOENT {
 			// if the source doesn't exist, it could be
@@ -1252,5 +1268,6 @@ func (fs *Goofys) Rename(
 			newParent.insertChildUnlocked(inode)
 		}
 	}
+*/
 	return
 }

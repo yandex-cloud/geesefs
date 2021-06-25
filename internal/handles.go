@@ -41,6 +41,7 @@ const (
 	ST_CREATED InodeCacheState = 1
 	ST_MODIFIED InodeCacheState = 2
 	ST_DELETED InodeCacheState = 3
+	ST_ABORTED InodeCacheState = 4
 )
 
 type InodeAttributes struct {
@@ -96,13 +97,14 @@ type Inode struct {
 	lastWriteEnd uint64
 
 	// cached/buffered data
-	CacheState  InodeCacheState
+	CacheState InodeCacheState
 	buffers []FileBuffer
 	readRanges []ReadRange
 	IsFlushing int
 	forceFlush bool
 	flushError error
 	flushErrorTime time.Time
+	renamedFrom *string
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput

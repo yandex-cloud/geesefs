@@ -1075,7 +1075,7 @@ func appendChildName(parent, child string) string {
 	return parent + child
 }
 
-func (parent *Inode) isEmptyDir(fs *Goofys, name string) (isDir bool, err error) {
+func (parent *Inode) isEmptyDir0(fs *Goofys, name string) (isDir bool, err error) {
 	cloud, key := parent.cloud()
 	key = appendChildName(key, name) + "/"
 
@@ -1103,6 +1103,14 @@ func (parent *Inode) isEmptyDir(fs *Goofys, name string) (isDir bool, err error)
 	}
 
 	return
+}
+
+func (inode *Inode) isEmptyDir() (bool, error) {
+	dh := NewDirHandle(inode)
+	dh.mu.Lock()
+	en, err := dh.ReadDir(2, 2)
+	dh.mu.Unlock()
+	return en == nil, err
 }
 
 func (parent *Inode) RmDir(name string) (err error) {
@@ -1168,65 +1176,110 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		return
 	}
 
-	fromFullName := appendChildName(fromPath, from)
-	fs := parent.fs
-
-	var size *uint64
-	var fromIsDir bool
-	var toIsDir bool
-	var renameChildren bool
-
-	fromIsDir, err = parent.isEmptyDir(fs, from)
-	if err != nil {
-		if err == fuse.ENOTEMPTY {
-			renameChildren = true
-		} else {
-			return
+	// We rely on lookup() again, cache must be already populated here
+	fromInode := parent.findChildUnlocked(from)
+	toInode := newParent.findChildUnlocked(to)
+	if fromInode == nil {
+		return fuse.ENOENT
+	}
+	fromInode.mu.Lock()
+	defer fromInode.mu.Unlock()
+	if toInode != nil {
+		toInode.mu.Lock()
+		defer toInode.mu.Unlock()
+		if fromInode.isDir() {
+			if !toInode.isDir() {
+				return fuse.ENOTDIR
+			}
+			toEmpty, err := toInode.isEmptyDir()
+			if err != nil {
+				return err
+			}
+			if !toEmpty {
+				return fuse.ENOTEMPTY
+			}
+		} else if toInode.isDir() {
+			return syscall.EISDIR
 		}
 	}
 
+	/*var renameChildren bool
+	if fromInode.isDir() {
+		fromEmpty, err := fromInode.isEmptyDir()
+		if err != nil {
+			return err
+		}
+		renameChildren = !fromEmpty
+	}*/
+
+	fromFullName := appendChildName(fromPath, from)
 	toFullName := appendChildName(toPath, to)
 
-	toIsDir, err = parent.isEmptyDir(fs, to)
-	if err != nil {
-		return
-	}
-
-	if fromIsDir && !toIsDir {
-		_, err = fromCloud.HeadBlob(&HeadBlobInput{
-			Key: toFullName,
-		})
-		if err == nil {
-			return fuse.ENOTDIR
-		} else {
-			err = mapAwsError(err)
-			if err != fuse.ENOENT {
-				return
-			}
-		}
-	} else if !fromIsDir && toIsDir {
-		return syscall.EISDIR
-	}
-
-	if fromIsDir {
+	//var size *uint64
+	if fromInode.isDir() {
 		fromFullName += "/"
 		toFullName += "/"
-		size = PUInt64(0)
+		//size = PUInt64(0)
+		// FIXME: Directories...
+		log.Errorf("Renaming directories is not implemented")
+		return fuse.ENOSYS
 	}
 
-	if renameChildren && !fromCloud.Capabilities().DirBlob {
-		err = parent.renameChildren(fromCloud, fromFullName,
-			newParent, toFullName)
+	if toInode != nil {
+		// this file's been overwritten, it's
+		// been detached but we can't delete
+		// it just yet, because the kernel
+		// will still send forget ops to us
+		// FIXME: Abort/ignore flushing if it's in progress
+		toInode.CacheState = ST_ABORTED
+		newParent.removeChildUnlocked(toInode)
+	}
+
+	// There's a lot of edge cases with the asynchronous rename to handle:
+	// 1) rename a new file => we can just upload it with the new name
+	// 2) rename a new file that's already being flushed => rename after flush
+	// 3) rename a modified file => rename after flush
+	// 4) create a new file in place of a renamed one => don't flush until rename completes
+	// 5) second rename while rename is already in progress => rename again after the first rename finishes
+	// 6) rename then modify then rename => either rename then modify or modify then rename
+	// and etc...
+
+	if (fromInode.CacheState != ST_CREATED || fromInode.IsFlushing > 0 || fromInode.mpu != nil) &&
+		fromInode.renamedFrom == nil {
+		// Remember that the original file is "deleted"
+		// We can skip this step if the file is new
+		if parent.dir.DeletedChildren == nil {
+			parent.dir.DeletedChildren = make(map[string]*Inode)
+		}
+		parent.dir.DeletedChildren[*fromInode.Name] = fromInode
+		_, key := fromInode.cloud()
+		fromInode.renamedFrom = &key
+		parent.fs.renamedMapMu.Lock()
+		parent.fs.renamedMap[key] = fromInode
+		parent.fs.renamedMapMu.Unlock()
+	}
+	parent.removeChildUnlocked(fromInode)
+	if fromInode.CacheState == ST_CACHED {
+		fromInode.CacheState = ST_MODIFIED
+	}
+	fromInode.Name = &to
+	fromInode.Parent = newParent
+	newParent.insertChildUnlocked(fromInode)
+	fromInode.fs.flusherCond.Broadcast()
+
+	/*if renameChildren && !fromCloud.Capabilities().DirBlob {
+		err = parent.renameChildren(fromCloud, fromFullName, newParent, toFullName)
 		if err != nil {
 			return
 		}
 	} else {
-		err = parent.renameObject(fs, size, fromFullName, toFullName)
-	}
+		err = parent.renameObject(size, fromFullName, toFullName)
+	}*/
+
 	return
 }
 
-func (parent *Inode) renameObject(fs *Goofys, size *uint64, fromFullName string, toFullName string) (err error) {
+func (parent *Inode) renameObject(size *uint64, fromFullName string, toFullName string) (err error) {
 	cloud, _ := parent.cloud()
 
 	_, err = cloud.RenameBlob(&RenameBlobInput{
