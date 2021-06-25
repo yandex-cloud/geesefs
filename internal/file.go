@@ -714,8 +714,7 @@ func (inode *Inode) TryFlush() bool {
 		inode.SendDelete()
 		return true
 	} else if inode.IsFlushing == 0 && inode.CacheState == ST_CREATED && inode.isDir() {
-		inode.SendMkDir()
-		return true
+		return inode.SendMkDir()
 	} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
 		return inode.SendUpload()
 	}

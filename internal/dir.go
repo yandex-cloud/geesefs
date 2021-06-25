@@ -915,8 +915,13 @@ func (parent *Inode) Unlink(name string) (err error) {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[name] = inode
-		inode.CacheState = ST_DELETED
-		inode.fs.flusherCond.Broadcast()
+
+		inode.mu.Lock()
+		if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
+			inode.CacheState = ST_DELETED
+			inode.fs.flusherCond.Broadcast()
+		}
+		inode.mu.Unlock()
 	}
 
 	return
@@ -1022,6 +1027,8 @@ func (parent *Inode) MkDir(
 	inode.touch()
 	if !parent.fs.flags.NoDirObject {
 		inode.CacheState = ST_CREATED
+	} else {
+		inode.ImplicitDir = true
 	}
 	// Record dir as actual
 	inode.dir.DirTime = inode.Attributes.Mtime
@@ -1037,9 +1044,15 @@ func (parent *Inode) MkDir(
 	return
 }
 
-func (dir *Inode) SendMkDir() {
+func (dir *Inode) SendMkDir() bool {
 	cloud, key := dir.Parent.cloud()
 	key = appendChildName(key, *dir.Name)
+	dir.fs.renamedMapMu.Lock()
+	_, overwritesRenamed := dir.fs.renamedMap[key]
+	dir.fs.renamedMapMu.Unlock()
+	if overwritesRenamed {
+		return false
+	}
 	if !cloud.Capabilities().DirBlob {
 		key += "/"
 	}
@@ -1066,6 +1079,7 @@ func (dir *Inode) SendMkDir() {
 		}
 		dir.fs.flusherCond.Broadcast()
 	}()
+	return true
 }
 
 func appendChildName(parent, child string) string {
@@ -1073,36 +1087,6 @@ func appendChildName(parent, child string) string {
 		parent += "/"
 	}
 	return parent + child
-}
-
-func (parent *Inode) isEmptyDir0(fs *Goofys, name string) (isDir bool, err error) {
-	cloud, key := parent.cloud()
-	key = appendChildName(key, name) + "/"
-
-	resp, err := cloud.ListBlobs(&ListBlobsInput{
-		Delimiter: aws.String("/"),
-		MaxKeys:   PUInt32(2),
-		Prefix:    &key,
-	})
-	if err != nil {
-		return false, mapAwsError(err)
-	}
-
-	if len(resp.Prefixes) > 0 || len(resp.Items) > 1 {
-		err = fuse.ENOTEMPTY
-		isDir = true
-		return
-	}
-
-	if len(resp.Items) == 1 {
-		isDir = true
-
-		if *resp.Items[0].Key != key {
-			err = fuse.ENOTEMPTY
-		}
-	}
-
-	return
 }
 
 func (inode *Inode) isEmptyDir() (bool, error) {
@@ -1141,17 +1125,17 @@ func (parent *Inode) RmDir(name string) (err error) {
 		}
 
 		parent.removeChildUnlocked(inode)
-		if inode.ImplicitDir {
-			// FIXME: Make sure that cache remembers that this dir is removed
-			inode.Parent = nil
-		} else {
-			if parent.dir.DeletedChildren == nil {
-				parent.dir.DeletedChildren = make(map[string]*Inode)
-			}
-			parent.dir.DeletedChildren[name] = inode
-			inode.CacheState = ST_DELETED
-			parent.fs.flusherCond.Broadcast()
+		if parent.dir.DeletedChildren == nil {
+			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
+		parent.dir.DeletedChildren[name] = inode
+
+		inode.mu.Lock()
+		if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
+			inode.CacheState = ST_DELETED
+			inode.fs.flusherCond.Broadcast()
+		}
+		inode.mu.Unlock()
 	}
 
 	return
