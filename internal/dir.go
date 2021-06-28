@@ -561,6 +561,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 	// `offset`. A stale inode is one that existed before the
 	// first ListBlobs for this dir handle, but is not being
 	// written to (ie: not a new file)
+	// FIXME: Make sure a directory with modified file inside won't be evicted from cache!
 	var child *Inode
 	for int(internalOffset) < len(parent.dir.Children) {
 		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
@@ -1214,7 +1215,6 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		// been detached but we can't delete
 		// it just yet, because the kernel
 		// will still send forget ops to us
-		// FIXME: Abort/ignore flushing if it's in progress
 		toInode.CacheState = ST_ABORTED
 		newParent.removeChildUnlocked(toInode)
 	}

@@ -373,6 +373,9 @@ func (inode *Inode) fillXattr() (err error) {
 		}
 
 		cloud, key := inode.cloud()
+		if inode.renamedFrom != nil {
+			key = *inode.renamedFrom
+		}
 		params := &HeadBlobInput{Key: key}
 		resp, err := cloud.HeadBlob(params)
 		if err != nil {

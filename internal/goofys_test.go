@@ -1327,11 +1327,49 @@ func (s *GoofysTest) TestRenamePreserveMetadata(t *C) {
 	})
 	t.Assert(err, IsNil)
 
+	s.readDirIntoCache(t, root.Id)
+
+	fromInode, err := s.LookUpInode(t, from)
+	t.Assert(err, IsNil)
+
+	if _, ok := s.cloud.(*S3Backend); ok {
+		// In S3 metadata is only fetchable with a separate HEAD request
+		t.Assert(fromInode.userMetadata, IsNil)
+	}
+
+	toInode, err := s.LookUpInode(t, to)
+	if err != nil {
+		t.Assert(err, Equals, fuse.ENOENT)
+	} else {
+		err = root.Unlink(to)
+		t.Assert(err, IsNil)
+		err = toInode.SyncFile()
+		t.Assert(err, IsNil)
+	}
+
+	s.fs.flags.MaxFlushers = 0
+
 	err = root.Rename(from, root, to)
 	t.Assert(err, IsNil)
 
+	toInode, err = s.LookUpInode(t, to)
+	t.Assert(err, IsNil)
+
+	// Check that xattrs are filled correctly from the moved object
+
+	xattrVal, err := toInode.GetXattr("user.foo")
+	t.Assert(xattrVal, DeepEquals, []byte("bar"))
+
+	s.fs.flags.MaxFlushers = 16
+
+	err = toInode.SyncFile()
+	t.Assert(err, IsNil)
+
+	// Check that xattrs are present in the cloud after move
+
 	resp, err := s.cloud.HeadBlob(&HeadBlobInput{Key: to})
 	t.Assert(err, IsNil)
+
 	t.Assert(resp.Metadata["foo"], NotNil)
 	t.Assert(*resp.Metadata["foo"], Equals, "bar")
 }
@@ -1609,15 +1647,33 @@ func (s *GoofysTest) TestRename(t *C) {
 	root := s.getRoot(t)
 
 	from, to := "empty_dir", "file1"
-	err := root.Rename(from, root, to)
+	_, err := s.LookUpInode(t, from)
+	t.Assert(err, IsNil)
+	_, err = s.LookUpInode(t, to)
+	t.Assert(err, IsNil)
+	err = root.Rename(from, root, to)
 	t.Assert(err, Equals, fuse.ENOTDIR)
 
 	from, to = "file1", "empty_dir"
+	_, err = s.LookUpInode(t, from)
+	t.Assert(err, IsNil)
+	_, err = s.LookUpInode(t, to)
+	t.Assert(err, IsNil)
 	err = root.Rename(from, root, to)
 	t.Assert(err, Equals, syscall.EISDIR)
 
 	from, to = "file1", "new_file"
+	_, err = s.LookUpInode(t, from)
+	t.Assert(err, IsNil)
+	_, err = s.LookUpInode(t, to)
+	if err != nil {
+		t.Assert(err, Equals, fuse.ENOENT)
+	}
 	err = root.Rename(from, root, to)
+	t.Assert(err, IsNil)
+	toInode, err := s.LookUpInode(t, to)
+	t.Assert(err, IsNil)
+	err = toInode.SyncFile()
 	t.Assert(err, IsNil)
 
 	_, err = s.cloud.HeadBlob(&HeadBlobInput{Key: to})
@@ -1628,7 +1684,15 @@ func (s *GoofysTest) TestRename(t *C) {
 
 	from, to = "file3", "new_file2"
 	dir, _ := s.LookUpInode(t, "dir1")
+	_, err = s.LookUpInode(t, "dir1/"+from)
+	t.Assert(err, IsNil)
+	_, err = s.LookUpInode(t, to)
+	t.Assert(err, Equals, fuse.ENOENT)
 	err = dir.Rename(from, root, to)
+	t.Assert(err, IsNil)
+	toInode, err = s.LookUpInode(t, to)
+	t.Assert(err, IsNil)
+	err = toInode.SyncFile()
 	t.Assert(err, IsNil)
 
 	_, err = s.cloud.HeadBlob(&HeadBlobInput{Key: to})
@@ -2007,14 +2071,30 @@ func (s *GoofysTest) TestPutMimeType(t *C) {
 	t.Assert(err, IsNil)
 	t.Assert(*resp.ContentType, Equals, "image/jpeg")
 
+	_, err = s.LookUpInode(t, jpg)
+	t.Assert(err, IsNil)
+	_, err = s.LookUpInode(t, file)
+	if err != nil {
+		t.Assert(err, Equals, fuse.ENOENT)
+	}
 	err = root.Rename(jpg, root, file)
+	t.Assert(err, IsNil)
+	toInode, err := s.LookUpInode(t, file)
+	err = toInode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err = s.cloud.HeadBlob(&HeadBlobInput{Key: file})
 	t.Assert(err, IsNil)
 	t.Assert(*resp.ContentType, Equals, "image/jpeg")
 
+	_, err = s.LookUpInode(t, jpg2)
+	if err != nil {
+		t.Assert(err, Equals, fuse.ENOENT)
+	}
 	err = root.Rename(file, root, jpg2)
+	t.Assert(err, IsNil)
+	toInode, err = s.LookUpInode(t, jpg2)
+	err = toInode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err = s.cloud.HeadBlob(&HeadBlobInput{Key: jpg2})
@@ -2231,7 +2311,22 @@ func (s *GoofysTest) TestIssue162(t *C) {
 	dir, err := s.LookUpInode(t, "dir1")
 	t.Assert(err, IsNil)
 
-	err = dir.Rename("l├â┬╢r 006.jpg", dir, "myfile.jpg")
+	_, err = s.LookUpInode(t, "dir1/l├â┬╢r 006.jpg")
+	t.Assert(err, IsNil)
+	toInode, err := s.LookUpInode(t, "dir1/myfile.jpg")
+	if err != nil {
+		t.Assert(err, Equals, fuse.ENOENT)
+	} else {
+		err = s.getRoot(t).Unlink("dir1/myfile.jpg")
+		t.Assert(err, IsNil)
+		err = toInode.SyncFile()
+		t.Assert(err, IsNil)
+	}
+	err = dir.Rename("l├â┬╢r 006.jpg", dir, "dir1/myfile.jpg")
+	t.Assert(err, IsNil)
+	toInode, err = s.LookUpInode(t, "dir1/myfile.jpg")
+	t.Assert(err, IsNil)
+	err = toInode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err := s.cloud.HeadBlob(&HeadBlobInput{Key: "dir1/myfile.jpg"})
@@ -2445,7 +2540,15 @@ func (s *GoofysTest) TestXAttrCopied(t *C) {
 
 	root := s.getRoot(t)
 
-	err := root.Rename("file1", root, "file0")
+	_, err := s.LookUpInode(t, "file1")
+	t.Assert(err, IsNil)
+
+	_, err = s.LookUpInode(t, "file0")
+	if err != nil {
+		t.Assert(err, Equals, fuse.ENOENT)
+	}
+
+	err = root.Rename("file1", root, "file0")
 	t.Assert(err, IsNil)
 
 	in, err := s.LookUpInode(t, "file0")
@@ -3466,6 +3569,8 @@ func (s *GoofysTest) newBackend(t *C, bucket string, createBucket bool) (cloud S
 }
 
 func (s *GoofysTest) TestVFS(t *C) {
+	t.Skip("Test for the strange 'child mount' feature, unusable from cmdline")
+
 	bucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
 	cloud2 := s.newBackend(t, bucket, true)
 
