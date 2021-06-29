@@ -310,8 +310,8 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 	}
 	inode.Attributes.Size = newSize
 	if inode.CacheState == ST_CACHED {
-		inode.CacheState = ST_MODIFIED
-		inode.fs.flusherCond.Broadcast()
+		inode.SetCacheState(ST_MODIFIED)
+		inode.fs.WakeupFlusher()
 	}
 }
 
@@ -334,9 +334,9 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 
 	fh.inode.lastWriteEnd = end
 	if fh.inode.CacheState == ST_CACHED {
-		fh.inode.CacheState = ST_MODIFIED
+		fh.inode.SetCacheState(ST_MODIFIED)
 		// FIXME: Don't activate the flusher immediately for small writes
-		fh.inode.fs.flusherCond.Broadcast()
+		fh.inode.fs.WakeupFlusher()
 	}
 	fh.inode.Attributes.Mtime = time.Now()
 
@@ -410,8 +410,9 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool) (r
 	// send requests
 	var wg sync.WaitGroup
 	cloud, key := inode.cloud()
-	if inode.renamedFrom != nil {
-		key = *inode.renamedFrom
+	if inode.oldParent != nil {
+		_, key = inode.oldParent.cloud()
+		key = appendChildName(key, *inode.oldName)
 	}
 	for i := 0; i < len(requests); i += 2 {
 		offset := requests[i]
@@ -589,7 +590,7 @@ func (fh *FileHandle) Release() {
 		fh.inode.fileHandle = nil
 	}
 
-	fh.inode.fs.flusherCond.Broadcast()
+	fh.inode.fs.WakeupFlusher()
 }
 
 func (inode *Inode) CheckLoadRange(offset uint64, size uint64) {
@@ -701,21 +702,39 @@ func (inode *Inode) recordFlushError(err error) {
 		time.AfterFunc(fs.flags.RetryInterval, func() {
 			atomic.StoreInt32(&fs.flushRetrySet, 0)
 			// Wakeup flusher after retry interval
-			fs.flusherCond.Broadcast()
+			fs.WakeupFlusher()
 		})
 	}
 }
 
 func (inode *Inode) TryFlush() bool {
+	overDeleted := false
+	if inode.Parent != nil {
+		inode.Parent.mu.Lock()
+		if inode.Parent.dir.DeletedChildren != nil {
+			_, overDeleted = inode.Parent.dir.DeletedChildren[*inode.Name]
+		}
+		inode.Parent.mu.Unlock()
+	}
+	inode.mu.Lock()
+	defer inode.mu.Unlock()
 	if inode.flushError != nil && inode.flushErrorTime.Sub(time.Now()) < inode.fs.flags.RetryInterval {
 		return false
 	}
-	if inode.IsFlushing == 0 && inode.CacheState == ST_DELETED {
-		inode.SendDelete()
-		return true
-	} else if inode.IsFlushing == 0 && inode.CacheState == ST_CREATED && inode.isDir() {
-		return inode.SendMkDir()
+	if inode.CacheState == ST_DELETED {
+		if inode.IsFlushing == 0 && (!inode.isDir() || atomic.LoadInt64(&inode.dir.ModifiedChildren) == 0) {
+			inode.SendDelete()
+			return true
+		}
+	} else if inode.CacheState == ST_CREATED && inode.isDir() {
+		if inode.IsFlushing == 0 && !overDeleted {
+			inode.SendMkDir()
+			return true
+		}
 	} else if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
+		if overDeleted {
+			return false
+		}
 		return inode.SendUpload()
 	}
 	return false
@@ -723,61 +742,62 @@ func (inode *Inode) TryFlush() bool {
 
 func (inode *Inode) SendUpload() bool {
 
-	if inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
-		return false
-	}
-
 	cloud, key := inode.cloud()
 
-	inode.fs.renamedMapMu.Lock()
-	_, overwritesRenamed := inode.fs.renamedMap[key]
-	inode.fs.renamedMapMu.Unlock()
-	if overwritesRenamed {
-		return false
-	}
-
-	if inode.renamedFrom != nil && inode.IsFlushing == 0 && inode.mpu == nil {
+	if inode.oldParent != nil && inode.IsFlushing == 0 && inode.mpu == nil {
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
-		from := *inode.renamedFrom
+		_, from := inode.oldParent.cloud()
+		from = appendChildName(from, *inode.oldName)
+		oldParent := inode.oldParent
+		oldName := inode.oldName
+		// Set to nil so another rename will move it again
+		inode.oldParent = nil
+		inode.oldName = nil
 		go func() {
-			// FIXME: Doesn't need to be a method of Inode
-			err := inode.renameObject(nil, from, key)
+			err := RenameObject(cloud, from, key, nil)
+
+			if err == nil {
+				// Remove from DeletedChildren of the old parent
+				oldParent.mu.Lock()
+				delete(oldParent.dir.DeletedChildren, *oldName)
+				oldParent.mu.Unlock()
+				// And track ModifiedChildren because rename is special - it takes two parents
+				atomic.AddInt64(&oldParent.dir.ModifiedChildren, -1)
+			}
+
 			inode.mu.Lock()
 			inode.recordFlushError(err)
-			inode.fs.renamedMapMu.Lock()
-			if inode.fs.renamedMap[from] != inode {
-				log.Errorf("BUG: renamedMap[%v] != inode", from)
-			} else if err != nil {
-				delete(inode.fs.renamedMap, from)
-			}
-			inode.fs.renamedMapMu.Unlock()
-			_, newKey := inode.cloud()
+			var unmoveParent *Inode
+			var unmoveName *string
 			if err != nil {
 				log.Errorf("Error renaming object from %v to %v: %v", from, key, err)
-			} else if newKey != key {
-				// File was renamed again...
-				inode.renamedFrom = &key
-				inode.fs.renamedMapMu.Lock()
-				inode.fs.renamedMap[key] = inode
-				inode.fs.renamedMapMu.Unlock()
-			} else {
-				inode.renamedFrom = nil
-				if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
-					!inode.isStillDirty() {
-					inode.CacheState = ST_CACHED
-				}
+				unmoveParent = inode.oldParent
+				unmoveName = inode.oldName
+				inode.oldParent = oldParent
+				inode.oldName = oldName
+			} else if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
+				!inode.isStillDirty() {
+				inode.SetCacheState(ST_CACHED)
 			}
 			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
-			inode.fs.flusherCond.Broadcast()
+			inode.fs.WakeupFlusher()
 			inode.mu.Unlock()
+
+			// "Undo" the second move
+			if unmoveParent != nil {
+				unmoveParent.mu.Lock()
+				delete(unmoveParent.dir.DeletedChildren, *unmoveName)
+				unmoveParent.mu.Unlock()
+				atomic.AddInt64(&unmoveParent.dir.ModifiedChildren, -1)
+			}
 		}()
 		return true
 	}
 
 	if inode.CacheState == ST_MODIFIED && inode.userMetadataDirty &&
-		inode.renamedFrom == nil && inode.IsFlushing == 0 {
+		inode.oldParent == nil && inode.IsFlushing == 0 {
 		hasDirty := false
 		for i := 0; i < len(inode.buffers); i++ {
 			buf := &inode.buffers[i]
@@ -789,7 +809,6 @@ func (inode *Inode) SendUpload() bool {
 		if !hasDirty {
 			// Update metadata by COPYing into the same object
 			// It results in the optimized implementation in S3
-			inode.CacheState = ST_CACHED
 			inode.userMetadataDirty = false
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, 1)
@@ -804,15 +823,14 @@ func (inode *Inode) SendUpload() bool {
 				inode.mu.Lock()
 				inode.recordFlushError(err)
 				if err != nil {
-					if inode.CacheState == ST_CACHED {
-						inode.CacheState = ST_MODIFIED
-					}
 					inode.userMetadataDirty = true
 					log.Errorf("Error flushing metadata using COPY for %v: %v", key, err)
+				} else if inode.CacheState == ST_MODIFIED && !inode.isStillDirty() {
+					inode.SetCacheState(ST_CACHED)
 				}
 				inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 				atomic.AddInt64(&inode.fs.activeFlushers, -1)
-				inode.fs.flusherCond.Broadcast()
+				inode.fs.WakeupFlusher()
 				inode.mu.Unlock()
 			}()
 			return true
@@ -853,7 +871,7 @@ func (inode *Inode) SendUpload() bool {
 			}
 			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
-			inode.fs.flusherCond.Broadcast()
+			inode.fs.WakeupFlusher()
 			inode.mu.Unlock()
 		}()
 		return true
@@ -886,7 +904,7 @@ func (inode *Inode) SendUpload() bool {
 }
 
 func (inode *Inode) isStillDirty() bool {
-	if inode.userMetadataDirty || inode.renamedFrom != nil {
+	if inode.userMetadataDirty || inode.oldParent != nil {
 		return true
 	}
 	for i := 0; i < len(inode.buffers); i++ {
@@ -905,7 +923,7 @@ func (inode *Inode) FlushSmallObject() {
 	if inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
-		inode.fs.flusherCond.Broadcast()
+		inode.fs.WakeupFlusher()
 		inode.mu.Unlock()
 		return
 	}
@@ -919,9 +937,10 @@ func (inode *Inode) FlushSmallObject() {
 
 	// Key may have been changed in between (if it was moved)
 	cloud, key := inode.cloud()
-	if inode.renamedFrom != nil {
+	if inode.oldParent != nil {
 		// In this case, modify it in the old place and move when we're done with modifications
-		key = *inode.renamedFrom
+		_, key = inode.oldParent.cloud()
+		key = appendChildName(key, *inode.oldName)
 	}
 	// File size may have been changed in between
 	bufReader, bufIds := inode.GetMultiReader(0, inode.Attributes.Size)
@@ -948,7 +967,7 @@ func (inode *Inode) FlushSmallObject() {
 		}
 	} else {
 		log.Debugf("Flushed small file %v", key)
-		stillDirty := inode.userMetadataDirty || inode.renamedFrom != nil
+		stillDirty := inode.userMetadataDirty || inode.oldParent != nil
 		for i := 0; i < len(inode.buffers); i++ {
 			b := &inode.buffers[i]
 			if b.dirtyID != 0 {
@@ -962,7 +981,7 @@ func (inode *Inode) FlushSmallObject() {
 			}
 		}
 		if !stillDirty && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
-			inode.CacheState = ST_CACHED
+			inode.SetCacheState(ST_CACHED)
 			if inode.fs.bufferPool.wantFree > 0 {
 				inode.fs.bufferPool.cond.Broadcast()
 			}
@@ -973,7 +992,7 @@ func (inode *Inode) FlushSmallObject() {
 	inode.UnlockRange(0, sz, true)
 	inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 	atomic.AddInt64(&inode.fs.activeFlushers, -1)
-	inode.fs.flusherCond.Broadcast()
+	inode.fs.WakeupFlusher()
 	inode.mu.Unlock()
 }
 
@@ -1060,13 +1079,14 @@ func (inode *Inode) FlushPart(part uint64) {
 		inode.IsFlushing--
 		inode.mu.Unlock()
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
-		inode.fs.flusherCond.Broadcast()
+		inode.fs.WakeupFlusher()
 	} (partOffset, partSize)
 
 	cloud, key := inode.cloud()
-	if inode.renamedFrom != nil {
+	if inode.oldParent != nil {
 		// Always apply modifications before moving
-		key = *inode.renamedFrom
+		_, key = inode.oldParent.cloud()
+		key = appendChildName(key, *inode.oldName)
 	}
 	log.Debugf("Flushing part %v (%v-%v MB) of %v", part, partOffset/1024/1024, (partOffset+partSize)/1024/1024, key)
 
@@ -1150,7 +1170,7 @@ func (inode *Inode) FlushPart(part uint64) {
 					} else {
 						inode.mpu = nil
 						inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
-						stillDirty := inode.userMetadataDirty || inode.renamedFrom != nil
+						stillDirty := inode.userMetadataDirty || inode.oldParent != nil
 						for i := 0; i < len(inode.buffers); i++ {
 							if inode.buffers[i].flushed {
 								inode.buffers[i].dirtyID = 0
@@ -1161,7 +1181,7 @@ func (inode *Inode) FlushPart(part uint64) {
 							}
 						}
 						if !stillDirty && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
-							inode.CacheState = ST_CACHED
+							inode.SetCacheState(ST_CACHED)
 							if inode.fs.bufferPool.wantFree > 0 {
 								inode.fs.bufferPool.cond.Broadcast()
 							}
@@ -1204,10 +1224,12 @@ func (inode *Inode) SyncFile() (err error) {
 			break
 		}
 		inode.forceFlush = true
-		inode.TryFlush()
 		inode.mu.Unlock()
+		inode.TryFlush()
 		inode.fs.flusherMu.Lock()
-		inode.fs.flusherCond.Wait()
+		if inode.fs.flushPending == 0 {
+			inode.fs.flusherCond.Wait()
+		}
 		inode.fs.flusherMu.Unlock()
 	}
 	inode.logFuse("Done SyncFile")

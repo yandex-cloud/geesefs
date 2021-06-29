@@ -34,14 +34,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type InodeCacheState int
-
 const (
-	ST_CACHED InodeCacheState = 0
-	ST_CREATED InodeCacheState = 1
-	ST_MODIFIED InodeCacheState = 2
-	ST_DELETED InodeCacheState = 3
-	ST_ABORTED InodeCacheState = 4
+	ST_CACHED int32 = 0
+	ST_CREATED int32 = 1
+	ST_MODIFIED int32 = 2
+	ST_DELETED int32 = 3
 )
 
 type InodeAttributes struct {
@@ -97,14 +94,16 @@ type Inode struct {
 	lastWriteEnd uint64
 
 	// cached/buffered data
-	CacheState InodeCacheState
+	CacheState int32
 	buffers []FileBuffer
 	readRanges []ReadRange
 	IsFlushing int
 	forceFlush bool
 	flushError error
 	flushErrorTime time.Time
-	renamedFrom *string
+	// renamed from: parent, name
+	oldParent *Inode
+	oldName *string
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
@@ -373,8 +372,9 @@ func (inode *Inode) fillXattr() (err error) {
 		}
 
 		cloud, key := inode.cloud()
-		if inode.renamedFrom != nil {
-			key = *inode.renamedFrom
+		if inode.oldParent != nil {
+			_, key = inode.oldParent.cloud()
+			key = appendChildName(key, *inode.oldName)
 		}
 		params := &HeadBlobInput{Key: key}
 		resp, err := cloud.HeadBlob(params)
@@ -468,8 +468,8 @@ func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
 	meta[name] = Dup(value)
 	inode.userMetadataDirty = true
 	if inode.CacheState == ST_CACHED {
-		inode.CacheState = ST_MODIFIED
-		inode.fs.flusherCond.Broadcast()
+		inode.SetCacheState(ST_MODIFIED)
+		inode.fs.WakeupFlusher()
 	}
 	return nil
 }
@@ -489,8 +489,8 @@ func (inode *Inode) RemoveXattr(name string) error {
 		delete(meta, name)
 		inode.userMetadataDirty = true
 		if inode.CacheState == ST_CACHED {
-			inode.CacheState = ST_MODIFIED
-			inode.fs.flusherCond.Broadcast()
+			inode.SetCacheState(ST_MODIFIED)
+			inode.fs.WakeupFlusher()
 		}
 		return err
 	} else {

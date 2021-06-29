@@ -1687,7 +1687,9 @@ func (s *GoofysTest) TestRename(t *C) {
 	_, err = s.LookUpInode(t, "dir1/"+from)
 	t.Assert(err, IsNil)
 	_, err = s.LookUpInode(t, to)
-	t.Assert(err, Equals, fuse.ENOENT)
+	if err != nil {
+		t.Assert(err, Equals, fuse.ENOENT)
+	}
 	err = dir.Rename(from, root, to)
 	t.Assert(err, IsNil)
 	toInode, err = s.LookUpInode(t, to)
@@ -2322,7 +2324,7 @@ func (s *GoofysTest) TestIssue162(t *C) {
 		err = toInode.SyncFile()
 		t.Assert(err, IsNil)
 	}
-	err = dir.Rename("l├â┬╢r 006.jpg", dir, "dir1/myfile.jpg")
+	err = dir.Rename("l├â┬╢r 006.jpg", dir, "myfile.jpg")
 	t.Assert(err, IsNil)
 	toInode, err = s.LookUpInode(t, "dir1/myfile.jpg")
 	t.Assert(err, IsNil)

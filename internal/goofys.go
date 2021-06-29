@@ -66,6 +66,7 @@ type Goofys struct {
 
 	flusherMu sync.Mutex
 	flusherCond *sync.Cond
+	flushPending int32
 
 	// The next inode ID to hand out. We assume that this will never overflow,
 	// since even if we were handing out inode IDs at 4 GHz, it would still take
@@ -94,10 +95,6 @@ type Goofys struct {
 	flushRetrySet int32
 
 	forgotCnt uint32
-
-	// FIXME This map doesn't support nested mounts. But nested mounts aren't really needed...
-	renamedMap map[string]*Inode
-	renamedMapMu sync.Mutex
 }
 
 var s3Log = GetLogger("s3")
@@ -180,7 +177,6 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		bucket: bucket,
 		flags:  flags,
 		umask:  0122,
-		renamedMap: make(map[string]*Inode),
 	}
 
 	var prefix string
@@ -339,9 +335,18 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 		}
 	}
 	if haveDirty {
-		fs.flusherCond.Broadcast()
+		fs.WakeupFlusher()
 	}
 	return freed, haveDirty
+}
+
+func (fs *Goofys) WakeupFlusher() {
+	fs.flusherMu.Lock()
+	if fs.flushPending == 0 {
+		fs.flushPending = 1
+		fs.flusherCond.Broadcast()
+	}
+	fs.flusherMu.Unlock()
 }
 
 // Flusher goroutine.
@@ -361,11 +366,21 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 //    With on-disk cache we can unload some dirty buffers to disk.
 func (fs *Goofys) Flusher() {
 	var inodes []fuseops.InodeID
-	fs.flusherMu.Lock()
+	again := false
 	for true {
-		fs.flusherCond.Wait()
+		if !again {
+			fs.flusherMu.Lock()
+			if fs.flushPending == 0 {
+				fs.flusherCond.Wait()
+			}
+			fs.flushPending = 0
+			fs.flusherMu.Unlock()
+			// Repeat one more time after wakeup to scan all inodes
+			again = true
+		}
 		if atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers {
 			if len(inodes) == 0 {
+				again = false
 				fs.mu.RLock()
 				inodes = make([]fuseops.InodeID, 0, len(fs.inodes))
 				for id := range fs.inodes {
@@ -381,9 +396,7 @@ func (fs *Goofys) Flusher() {
 				inode := fs.inodes[id]
 				fs.mu.RUnlock()
 				if inode != nil {
-					inode.mu.Lock()
 					inode.TryFlush()
-					inode.mu.Unlock()
 					if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
 						break
 					}
@@ -391,7 +404,6 @@ func (fs *Goofys) Flusher() {
 			}
 		}
 	}
-	fs.flusherMu.Unlock()
 }
 
 type Mount struct {
@@ -721,7 +733,8 @@ func (fs *Goofys) LookUpInode(
 
 		if expired(inode.AttrTime, fs.flags.StatCacheTTL) {
 			ok = false
-			if atomic.LoadInt32(&inode.fileHandles) != 0 {
+			if inode.CacheState != ST_CACHED ||
+				inode.isDir() && atomic.LoadInt64(&inode.dir.ModifiedChildren) > 0 {
 				// we have an open file handle, object
 				// in S3 may not represent the true
 				// state of the file anyway, so just
@@ -867,7 +880,7 @@ func (fs *Goofys) ForgetInode(
 // LOCKS_EXCLUDED(inode.fs.mu)
 func (fs *Goofys) DeRefInode(inode *Inode, N uint64) {
 	stale := inode.DeRef(N)
-	if stale && (inode.CacheState == ST_CACHED || inode.CacheState == ST_ABORTED) {
+	if stale && inode.CacheState == ST_CACHED {
 		// Clear buffers
 		for i := 0; i < len(inode.buffers); i++ {
 			b := &inode.buffers[i]
@@ -1232,42 +1245,6 @@ func (fs *Goofys) Rename(
 	}
 
 	err = parent.Rename(op.OldName, newParent, op.NewName)
-/*
-	if err != nil {
-		if err == fuse.ENOENT {
-			// if the source doesn't exist, it could be
-			// because this is a new file and we haven't
-			// flushed it yet, pretend that's ok because
-			// when we flush we will handle the rename
-			inode := parent.findChildUnlocked(op.OldName)
-			if inode != nil && atomic.LoadInt32(&inode.fileHandles) != 0 {
-				err = nil
-			}
-		}
-	}
-	if err == nil {
-		inode := parent.findChildUnlocked(op.OldName)
-		if inode != nil {
-			inode.mu.Lock()
-			defer inode.mu.Unlock()
 
-			parent.removeChildUnlocked(inode)
-
-			newNode := newParent.findChildUnlocked(op.NewName)
-			if newNode != nil {
-				// this file's been overwritten, it's
-				// been detached but we can't delete
-				// it just yet, because the kernel
-				// will still send forget ops to us
-				newParent.removeChildUnlocked(newNode)
-				newNode.Parent = nil
-			}
-
-			inode.Name = &op.NewName
-			inode.Parent = newParent
-			newParent.insertChildUnlocked(inode)
-		}
-	}
-*/
 	return
 }

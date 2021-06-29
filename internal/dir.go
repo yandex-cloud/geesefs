@@ -40,6 +40,8 @@ type DirInodeData struct {
 	seqOpenDirScore uint8
 	DirTime         time.Time
 
+	ModifiedChildren int64
+
 	Children []*Inode
 	DeletedChildren map[string]*Inode
 	handles []*DirHandle
@@ -561,14 +563,13 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 	// `offset`. A stale inode is one that existed before the
 	// first ListBlobs for this dir handle, but is not being
 	// written to (ie: not a new file)
-	// FIXME: Make sure a directory with modified file inside won't be evicted from cache!
 	var child *Inode
 	for int(internalOffset) < len(parent.dir.Children) {
 		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
 		childTmp := parent.dir.Children[internalOffset]
 		if atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
-			// FIXME: Does CacheState require atomic.LoadInt32 too ?
-			childTmp.CacheState == ST_CACHED &&
+			atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
+			(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) &&
 			childTmp.AttrTime.Before(dh.refreshStartTime) {
 			// childTmp.AttrTime < dh.refreshStartTime => the child entry was not
 			// updated from cloud by this dir Handle.
@@ -911,18 +912,7 @@ func (parent *Inode) Unlink(name string) (err error) {
 
 	inode := parent.findChildUnlocked(name)
 	if inode != nil {
-		parent.removeChildUnlocked(inode)
-		if parent.dir.DeletedChildren == nil {
-			parent.dir.DeletedChildren = make(map[string]*Inode)
-		}
-		parent.dir.DeletedChildren[name] = inode
-
-		inode.mu.Lock()
-		if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
-			inode.CacheState = ST_DELETED
-			inode.fs.flusherCond.Broadcast()
-		}
-		inode.mu.Unlock()
+		inode.doUnlink()
 	}
 
 	return
@@ -936,10 +926,14 @@ func (inode *Inode) SendDelete() {
 	}
 	atomic.AddInt64(&inode.Parent.fs.activeFlushers, 1)
 	inode.IsFlushing += inode.fs.flags.MaxParallelParts
+	implicit := inode.ImplicitDir
 	go func() {
-		_, err := cloud.DeleteBlob(&DeleteBlobInput{
-			Key: key,
-		})
+		var err error
+		if !implicit {
+			_, err = cloud.DeleteBlob(&DeleteBlobInput{
+				Key: key,
+			})
+		}
 		inode.mu.Lock()
 		atomic.AddInt64(&inode.Parent.fs.activeFlushers, -1)
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
@@ -955,8 +949,10 @@ func (inode *Inode) SendDelete() {
 		}
 		forget := false
 		if inode.CacheState == ST_DELETED {
-			inode.CacheState = ST_CACHED
-			// FIXME And if all children are deleted, too (?... not sure in fact)
+			inode.SetCacheState(ST_CACHED)
+			// We don't remove directories until all children are deleted
+			// So that we don't revive the directory after removing it
+			// by fetching a list of files not all of which are actually deleted
 			if inode.refcnt == 0 {
 				// Don't call forget with inode locks taken ... :-X
 				forget = true
@@ -969,7 +965,7 @@ func (inode *Inode) SendDelete() {
 			inode.fs.DeRefInode(inode, 0)
 		}
 		inode.Parent.mu.Unlock()
-		inode.fs.flusherCond.Broadcast()
+		inode.fs.WakeupFlusher()
 	}()
 }
 
@@ -995,12 +991,12 @@ func (parent *Inode) Create(
 		Size:  0,
 		Mtime: now,
 	}
-	inode.CacheState = ST_CREATED
 	// one ref is for lookup
 	inode.Ref()
 	// another ref is for being in Children
 	fs.insertInode(parent, inode)
-	fs.flusherCond.Broadcast()
+	inode.SetCacheState(ST_CREATED)
+	fs.WakeupFlusher()
 
 	fh = NewFileHandle(inode, metadata)
 	inode.fileHandles = 1
@@ -1026,11 +1022,6 @@ func (parent *Inode) MkDir(
 	inode.userMetadata = make(map[string][]byte)
 	inode.ToDir()
 	inode.touch()
-	if !parent.fs.flags.NoDirObject {
-		inode.CacheState = ST_CREATED
-	} else {
-		inode.ImplicitDir = true
-	}
 	// Record dir as actual
 	inode.dir.DirTime = inode.Attributes.Mtime
 	if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
@@ -1040,20 +1031,19 @@ func (parent *Inode) MkDir(
 	inode.Ref()
 	// another ref is for being in Children
 	parent.fs.insertInode(parent, inode)
-	parent.fs.flusherCond.Broadcast()
+	if !parent.fs.flags.NoDirObject {
+		inode.SetCacheState(ST_CREATED)
+	} else {
+		inode.ImplicitDir = true
+	}
+	parent.fs.WakeupFlusher()
 
 	return
 }
 
-func (dir *Inode) SendMkDir() bool {
+func (dir *Inode) SendMkDir() {
 	cloud, key := dir.Parent.cloud()
 	key = appendChildName(key, *dir.Name)
-	dir.fs.renamedMapMu.Lock()
-	_, overwritesRenamed := dir.fs.renamedMap[key]
-	dir.fs.renamedMapMu.Unlock()
-	if overwritesRenamed {
-		return false
-	}
 	if !cloud.Capabilities().DirBlob {
 		key += "/"
 	}
@@ -1076,11 +1066,10 @@ func (dir *Inode) SendMkDir() bool {
 			return
 		}
 		if dir.CacheState == ST_CREATED {
-			dir.CacheState = ST_CACHED
+			dir.SetCacheState(ST_CACHED)
 		}
-		dir.fs.flusherCond.Broadcast()
+		dir.fs.WakeupFlusher()
 	}()
-	return true
 }
 
 func appendChildName(parent, child string) string {
@@ -1096,6 +1085,26 @@ func (inode *Inode) isEmptyDir() (bool, error) {
 	en, err := dh.ReadDir(2, 2)
 	dh.mu.Unlock()
 	return en == nil, err
+}
+
+// LOCKS_REQUIRED(inode.Parent.mu)
+// LOCKS_EXCLUDED(inode.mu)
+func (inode *Inode) doUnlink() {
+	parent := inode.Parent
+	parent.removeChildUnlocked(inode)
+
+	inode.mu.Lock()
+	if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
+		inode.SetCacheState(ST_DELETED)
+		if parent.dir.DeletedChildren == nil {
+			parent.dir.DeletedChildren = make(map[string]*Inode)
+		}
+		parent.dir.DeletedChildren[*inode.Name] = inode
+		inode.fs.WakeupFlusher()
+	} else {
+		inode.SetCacheState(ST_CACHED)
+	}
+	inode.mu.Unlock()
 }
 
 func (parent *Inode) RmDir(name string) (err error) {
@@ -1125,21 +1134,28 @@ func (parent *Inode) RmDir(name string) (err error) {
 			return fuse.ENOTEMPTY
 		}
 
-		parent.removeChildUnlocked(inode)
-		if parent.dir.DeletedChildren == nil {
-			parent.dir.DeletedChildren = make(map[string]*Inode)
-		}
-		parent.dir.DeletedChildren[name] = inode
-
-		inode.mu.Lock()
-		if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
-			inode.CacheState = ST_DELETED
-			inode.fs.flusherCond.Broadcast()
-		}
-		inode.mu.Unlock()
+		inode.doUnlink()
 	}
 
 	return
+}
+
+// LOCKS_REQUIRED(inode.mu)
+func (inode *Inode) SetCacheState(state int32) {
+	wasModified := inode.CacheState == ST_CREATED || inode.CacheState == ST_DELETED || inode.CacheState == ST_MODIFIED
+	willBeModified := state == ST_CREATED || state == ST_DELETED || state == ST_MODIFIED
+	atomic.StoreInt32(&inode.CacheState, state)
+	if wasModified != willBeModified {
+		inc := int64(1)
+		if wasModified {
+			inc = -1
+		}
+		parent := inode
+		for parent.Parent != nil {
+			parent = parent.Parent
+			atomic.AddInt64(&parent.dir.ModifiedChildren, inc)
+		}
+	}
 }
 
 // semantic of rename:
@@ -1215,7 +1231,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		// been detached but we can't delete
 		// it just yet, because the kernel
 		// will still send forget ops to us
-		toInode.CacheState = ST_ABORTED
+		toInode.SetCacheState(ST_CACHED)
 		newParent.removeChildUnlocked(toInode)
 	}
 
@@ -1229,27 +1245,25 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 	// and etc...
 
 	if (fromInode.CacheState != ST_CREATED || fromInode.IsFlushing > 0 || fromInode.mpu != nil) &&
-		fromInode.renamedFrom == nil {
+		fromInode.oldParent == nil {
 		// Remember that the original file is "deleted"
-		// We can skip this step if the file is new
+		// We can skip this step if the file is new and isn't being flushed yet
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[*fromInode.Name] = fromInode
-		_, key := fromInode.cloud()
-		fromInode.renamedFrom = &key
-		parent.fs.renamedMapMu.Lock()
-		parent.fs.renamedMap[key] = fromInode
-		parent.fs.renamedMapMu.Unlock()
+		atomic.AddInt64(&parent.dir.ModifiedChildren, 1)
+		fromInode.oldParent = parent
+		fromInode.oldName = fromInode.Name
 	}
 	parent.removeChildUnlocked(fromInode)
 	if fromInode.CacheState == ST_CACHED {
-		fromInode.CacheState = ST_MODIFIED
+		fromInode.SetCacheState(ST_MODIFIED)
 	}
 	fromInode.Name = &to
 	fromInode.Parent = newParent
 	newParent.insertChildUnlocked(fromInode)
-	fromInode.fs.flusherCond.Broadcast()
+	fromInode.fs.WakeupFlusher()
 
 	/*if renameChildren && !fromCloud.Capabilities().DirBlob {
 		err = parent.renameChildren(fromCloud, fromFullName, newParent, toFullName)
@@ -1263,9 +1277,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 	return
 }
 
-func (parent *Inode) renameObject(size *uint64, fromFullName string, toFullName string) (err error) {
-	cloud, _ := parent.cloud()
-
+func RenameObject(cloud StorageBackend, fromFullName string, toFullName string, size *uint64) (err error) {
 	_, err = cloud.RenameBlob(&RenameBlobInput{
 		Source:      fromFullName,
 		Destination: toFullName,
