@@ -40,6 +40,11 @@ type DirInodeData struct {
 	seqOpenDirScore uint8
 	DirTime         time.Time
 
+	slurpMarker *string
+	listMarker *string
+	lastFromCloud *string
+	listDone bool
+
 	ModifiedChildren int64
 
 	Children []*Inode
@@ -97,12 +102,6 @@ func shouldFetchNextListBlobsPage(resp *ListBlobsOutput) bool {
 type DirHandle struct {
 	inode *Inode
 	mu sync.Mutex // everything below is protected by mu
-	Marker        *string
-	lastFromCloud *string
-	done          bool
-	// Time at which we started fetching child entries
-	// from cloud for this handle.
-	refreshStartTime time.Time
 	// readdir() is allowed either at zero (restart from the beginning)
 	// or from the previous offset
 	lastExternalOffset fuseops.DirOffset
@@ -208,168 +207,85 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 	dh = NewDirHandle(inode)
 	inode.mu.Lock()
 	inode.dir.handles = append(inode.dir.handles, dh)
+	atomic.AddInt32(&inode.fileHandles, 1)
 	inode.mu.Unlock()
 	return
 }
 
-func (dh *DirHandle) listObjectsSlurp(prefix string) (resp *ListBlobsOutput, err error) {
-	var marker *string
-	reqPrefix := prefix
-	inode := dh.inode
-
+func (inode *Inode) listObjectsSlurp() (err error) {
 	cloud, key := inode.cloud()
-
-	if dh.inode.Parent != nil {
-		inode = dh.inode.Parent
-		var parentCloud StorageBackend
-		parentCloud, reqPrefix = inode.cloud()
-		if parentCloud != cloud {
-			err = fmt.Errorf("cannot slurp across cloud provider")
-			return
-		}
-
-		if len(reqPrefix) != 0 {
-			reqPrefix += "/"
-		}
-		marker = &key
-		if len(*marker) != 0 {
-			*marker += "/"
-		}
+	prefix := key
+	if len(prefix) != 0 {
+		prefix += "/"
 	}
 
 	params := &ListBlobsInput{
-		Prefix:     &reqPrefix,
-		StartAfter: marker,
+		Prefix:     &prefix,
+		StartAfter: inode.dir.slurpMarker,
 	}
 
-	resp, err = cloud.ListBlobs(params)
+	resp, err := cloud.ListBlobs(params)
 	if err != nil {
 		s3Log.Errorf("ListObjects %v = %v", params, err)
 		return
 	}
-
-	num := len(resp.Items)
-	if num == 0 {
-		return
-	}
+	s3Log.Debug(resp)
 
 	inode.mu.Lock()
 	inode.fs.mu.Lock()
-
 	dirs := make(map[*Inode]bool)
 	for _, obj := range resp.Items {
-		baseName := (*obj.Key)[len(reqPrefix):]
-		inode.insertSubTree(baseName, &obj, dirs)
+		baseName := (*obj.Key)[len(prefix):]
+		if baseName != "" {
+			inode.insertSubTree(baseName, &obj, dirs)
+		}
 	}
 	inode.fs.mu.Unlock()
 	inode.mu.Unlock()
 
 	for d, sealed := range dirs {
-		if d == dh.inode {
+		if d == inode {
 			// never seal the current dir because that's
 			// handled at upper layer
 			continue
 		}
 
 		if sealed || !resp.IsTruncated {
+			d.dir.listDone = true
 			d.dir.DirTime = time.Now()
 			d.Attributes.Mtime = d.findChildMaxTime()
 		}
 	}
 
 	obj := resp.Items[len(resp.Items)-1]
-	if resp.IsTruncated && resp.NextContinuationToken == nil {
-		// NextMarker is not returned when delimiter is empty
-		resp.NextContinuationToken = obj.Key
-	}
+	seal := false
 	// if we are done listing prefix, we are good
 	if !strings.HasPrefix(*obj.Key, prefix) {
 		if *obj.Key > prefix {
-			resp = nil
+			seal = true
 		}
 	} else if !resp.IsTruncated {
-		resp = nil
+		seal = true
 	}
 
-	if resp != nil {
-		// We only return the response to record the continuation token
-		// All items are already recorded
-		resp.Items = make([]BlobItemOutput, 0)
+	if seal {
+		inode.dir.slurpMarker = nil
+		inode.dir.listMarker = nil
+		inode.dir.listDone = true
+		inode.dir.lastFromCloud = nil
+		inode.dir.DirTime = time.Now()
+	} else {
+		// NextContinuationToken is not returned when delimiter is empty, so use obj.Key
+		inode.dir.slurpMarker = obj.Key
+		last := (*obj.Key)[len(prefix):]
+		p := strings.Index(last, "/")
+		if p > 0 {
+			last = last[0 : p]
+		}
+		inode.dir.lastFromCloud = &last
 	}
 
 	return
-}
-
-func (dh *DirHandle) listObjects(prefix string) (resp *ListBlobsOutput, err error) {
-	errSlurpChan := make(chan error, 1)
-	slurpChan := make(chan ListBlobsOutput, 1)
-	errListChan := make(chan error, 1)
-	listChan := make(chan ListBlobsOutput, 1)
-
-	fs := dh.inode.fs
-
-	// try to list without delimiter to see if we can slurp up
-	// multiple directories
-	parent := dh.inode.Parent
-
-	if dh.Marker == nil &&
-		fs.flags.TypeCacheTTL != 0 &&
-		(parent != nil && parent.dir.seqOpenDirScore >= 2) {
-		go func() {
-			resp, err := dh.listObjectsSlurp(prefix)
-			if err != nil {
-				errSlurpChan <- err
-			} else if resp != nil {
-				slurpChan <- *resp
-			} else {
-				errSlurpChan <- fuse.EINVAL
-			}
-		}()
-	} else {
-		errSlurpChan <- fuse.EINVAL
-	}
-
-	listObjectsFlat := func() {
-		params := &ListBlobsInput{
-			Delimiter:         aws.String("/"),
-			ContinuationToken: dh.Marker,
-			Prefix:            &prefix,
-		}
-
-		cloud, _ := dh.inode.cloud()
-
-		resp, err := listBlobsSafe(cloud, params)
-		if err != nil {
-			errListChan <- err
-		} else {
-			listChan <- *resp
-		}
-	}
-
-	if !fs.flags.Cheap {
-		// invoke the fallback in parallel if desired
-		go listObjectsFlat()
-	}
-
-	// first see if we get anything from the slurp
-	select {
-	case resp := <-slurpChan:
-		return &resp, nil
-	case err = <-errSlurpChan:
-	}
-
-	if fs.flags.Cheap {
-		listObjectsFlat()
-	}
-
-	// if we got an error (which may mean slurp is not applicable,
-	// wait for regular list
-	select {
-	case resp := <-listChan:
-		return &resp, nil
-	case err = <-errListChan:
-		return
-	}
 }
 
 // Sorting order of entries in directories is slightly inconsistent between goofys
@@ -426,6 +342,147 @@ func listBlobsSafe(cloud StorageBackend, param *ListBlobsInput) (*ListBlobsOutpu
 	return res, nil
 }
 
+func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string) {
+	parent := dh.inode
+	fs := parent.fs
+
+	for _, dir := range resp.Prefixes {
+		// strip trailing /
+		dirName := (*dir.Prefix)[0 : len(*dir.Prefix)-1]
+		// strip previous prefix
+		dirName = dirName[len(prefix):]
+		if len(dirName) == 0 {
+			continue
+		}
+
+		if inode := parent.findChildUnlocked(dirName); inode != nil {
+			now := time.Now()
+			// don't want to update time if this
+			// inode is setup to never expire
+			if inode.AttrTime.Before(now) {
+				inode.AttrTime = now
+			}
+		} else if _, deleted := parent.dir.DeletedChildren[dirName]; !deleted {
+			// don't revive deleted items
+			inode := NewInode(fs, parent, &dirName)
+			inode.ToDir()
+			fs.insertInode(parent, inode)
+		}
+
+		dh.inode.dir.lastFromCloud = &dirName
+	}
+
+	for _, obj := range resp.Items {
+		baseName := (*obj.Key)[len(prefix):]
+
+		slash := strings.Index(baseName, "/")
+		if slash == -1 {
+			if len(baseName) == 0 {
+				// shouldn't happen
+				continue
+			}
+
+			inode := parent.findChildUnlocked(baseName)
+			if inode != nil {
+				// don't update modified items
+				if inode.CacheState == ST_CACHED {
+					inode.SetFromBlobItem(&obj)
+				}
+			} else {
+				// don't revive deleted items
+				_, deleted := parent.dir.DeletedChildren[baseName]
+				if !deleted {
+					inode = NewInode(fs, parent, &baseName)
+					fs.insertInode(parent, inode)
+					inode.SetFromBlobItem(&obj)
+				}
+			}
+		} else {
+			// this is a slurped up object which
+			// was already cached
+			baseName = baseName[:slash]
+		}
+
+		if dh.inode.dir.lastFromCloud == nil ||
+			strings.Compare(*dh.inode.dir.lastFromCloud, baseName) < 0 {
+			dh.inode.dir.lastFromCloud = &baseName
+		}
+	}
+}
+
+func (dh *DirHandle) listObjectsFlat() (err error) {
+	cloud, prefix := dh.inode.cloud()
+	if cloud == nil {
+		// Stale inode
+		return fuse.ENOENT
+	}
+	if len(prefix) != 0 {
+		prefix += "/"
+	}
+
+	params := &ListBlobsInput{
+		Delimiter:         aws.String("/"),
+		ContinuationToken: dh.inode.dir.listMarker,
+		Prefix:            &prefix,
+	}
+	dh.mu.Unlock()
+	resp, err := listBlobsSafe(cloud, params)
+	dh.mu.Lock()
+	if err != nil {
+		return
+	}
+
+	s3Log.Debug(resp)
+
+	if resp.IsTruncated {
+		dh.inode.dir.listMarker = resp.NextContinuationToken
+	} else {
+		dh.inode.dir.listMarker = nil
+		dh.inode.dir.listDone = true
+		dh.inode.dir.DirTime = time.Now()
+	}
+
+	dh.inode.mu.Lock()
+	dh.inode.fs.mu.Lock()
+
+	dh.handleListResult(resp, prefix)
+
+	dh.inode.fs.mu.Unlock()
+	dh.inode.mu.Unlock()
+
+	return
+}
+
+func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, ok bool) {
+	dh.inode.mu.Lock()
+	defer dh.inode.mu.Unlock()
+
+	if dh.inode.dir == nil {
+		panic(*dh.inode.FullName())
+	}
+	if !expired(dh.inode.dir.DirTime, dh.inode.fs.flags.TypeCacheTTL) {
+		ok = true
+
+		if int(internalOffset) >= len(dh.inode.dir.Children) {
+			return
+		}
+		child := dh.inode.dir.Children[internalOffset]
+
+		en = &DirHandleEntry{
+			Name:   *child.Name,
+			Inode:  child.Id,
+			Offset: offset + 1,
+		}
+		if child.isDir() {
+			en.Type = fuseutil.DT_Directory
+		} else {
+			en.Type = fuseutil.DT_File
+		}
+
+	}
+	return
+}
+
 // LOCKS_REQUIRED(dh.mu)
 // LOCKS_EXCLUDED(dh.inode.mu)
 // LOCKS_EXCLUDED(dh.inode.fs)
@@ -438,8 +495,34 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 	parent := dh.inode
 	fs := parent.fs
 
+	parent.mu.Lock()
+
+	// FIXME Allow to use slurp more than 1 directory level above
+
+	useSlurp := fs.flags.TypeCacheTTL != 0 &&
+		(dh.inode.Parent != nil && dh.inode.Parent.dir.seqOpenDirScore >= 2)
+
+	if !useSlurp && dh.inode.dir.listMarker == nil ||
+		useSlurp && dh.inode.Parent.dir.listMarker == nil {
+		// listMarker is nil => We just started refreshing this directory
+		dh.inode.dir.listDone = false
+		dh.inode.dir.lastFromCloud = nil
+		// Remove unmodified stale inodes when we start listing
+		for i := 2; i < len(parent.dir.Children); i++ {
+			// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
+			childTmp := parent.dir.Children[i]
+			// FIXME: Check if the kernel may still access removed inodes by their cached numbers
+			if atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
+				atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
+				(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
+				parent.removeChildUnlocked(childTmp)
+				i--
+			}
+		}
+	}
+
 	// the dir expired, so we need to fetch from the cloud. there
-	// maybe static directories that we want to keep, so cloud
+	// may be static directories that we want to keep, so cloud
 	// listing should not overwrite them. here's what we do:
 	//
 	// 1. list from cloud and add them all to the tree, remember
@@ -450,146 +533,31 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 	// 3. when we serve the entry we added last, signal that next
 	//    time we need to list from cloud again with continuation
 	//    token
-	for dh.lastFromCloud == nil && !dh.done {
-		if dh.Marker == nil {
-			// Marker, lastFromCloud are nil => We just started
-			// refreshing this directory info from cloud.
-			dh.refreshStartTime = time.Now()
-		}
-		dh.mu.Unlock()
-
-		var prefix string
-		_, prefix = dh.inode.cloud()
-		if len(prefix) != 0 {
-			prefix += "/"
-		}
-
-		resp, err := dh.listObjects(prefix)
-		if err != nil {
+	for dh.inode.dir.lastFromCloud == nil && !dh.inode.dir.listDone {
+		// FIXME Maybe allow to skip some objects deep inside the previous directory
+		// by resetting slurp position when it's used after a non-sealed directory
+		parent.mu.Unlock()
+		if useSlurp {
+			dh.mu.Unlock()
+			err = dh.inode.Parent.listObjectsSlurp()
 			dh.mu.Lock()
+		} else {
+			err = dh.listObjectsFlat()
+		}
+		if err != nil {
 			return nil, err
 		}
-
-		s3Log.Debug(resp)
-		dh.mu.Lock()
 		parent.mu.Lock()
-		fs.mu.Lock()
-
-		// this is only returned for non-slurped responses
-		for _, dir := range resp.Prefixes {
-			// strip trailing /
-			dirName := (*dir.Prefix)[0 : len(*dir.Prefix)-1]
-			// strip previous prefix
-			dirName = dirName[len(prefix):]
-			if len(dirName) == 0 {
-				continue
-			}
-
-			if inode := parent.findChildUnlocked(dirName); inode != nil {
-				now := time.Now()
-				// don't want to update time if this
-				// inode is setup to never expire
-				if inode.AttrTime.Before(now) {
-					inode.AttrTime = now
-				}
-			} else if _, deleted := parent.dir.DeletedChildren[dirName]; !deleted {
-				// don't revive deleted items
-				inode := NewInode(fs, parent, &dirName)
-				inode.ToDir()
-				fs.insertInode(parent, inode)
-			}
-
-			dh.lastFromCloud = &dirName
-		}
-
-		for _, obj := range resp.Items {
-			if !strings.HasPrefix(*obj.Key, prefix) {
-				// other slurped objects that we cached
-				continue
-			}
-
-			baseName := (*obj.Key)[len(prefix):]
-
-			slash := strings.Index(baseName, "/")
-			if slash == -1 {
-				if len(baseName) == 0 {
-					// shouldn't happen
-					continue
-				}
-
-				inode := parent.findChildUnlocked(baseName)
-				if inode != nil {
-					// don't update modified items
-					if inode.CacheState == ST_CACHED {
-						inode.SetFromBlobItem(&obj)
-					}
-				} else {
-					// don't revive deleted items
-					_, deleted := parent.dir.DeletedChildren[baseName]
-					if !deleted {
-						inode = NewInode(fs, parent, &baseName)
-						fs.insertInode(parent, inode)
-						inode.SetFromBlobItem(&obj)
-					}
-				}
-			} else {
-				// this is a slurped up object which
-				// was already cached
-				baseName = baseName[:slash]
-			}
-
-			if dh.lastFromCloud == nil ||
-				strings.Compare(*dh.lastFromCloud, baseName) < 0 {
-				dh.lastFromCloud = &baseName
-			}
-		}
-
-		parent.mu.Unlock()
-		fs.mu.Unlock()
-
-		if resp.IsTruncated {
-			dh.Marker = resp.NextContinuationToken
-		} else {
-			dh.Marker = nil
-			dh.done = true
-			break
-		}
 	}
 
-	parent.mu.Lock()
-	defer parent.mu.Unlock()
-
-	// Find the first non-stale child inode with offset >=
-	// `offset`. A stale inode is one that existed before the
-	// first ListBlobs for this dir handle, but is not being
-	// written to (ie: not a new file)
-	var child *Inode
-	for int(internalOffset) < len(parent.dir.Children) {
-		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
-		childTmp := parent.dir.Children[internalOffset]
-		if atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
-			atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
-			(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) &&
-			childTmp.AttrTime.Before(dh.refreshStartTime) {
-			// childTmp.AttrTime < dh.refreshStartTime => the child entry was not
-			// updated from cloud by this dir Handle.
-			// So this is a stale entry that should be removed.
-			childTmp.Parent = nil
-			parent.removeChildUnlocked(childTmp)
-		} else {
-			// Found a non-stale child inode.
-			child = childTmp
-			break
-		}
-	}
-
-	if child == nil {
+	if int(internalOffset) >= len(parent.dir.Children) {
 		// we've reached the end
-		parent.dir.DirTime = time.Now()
 		parent.Attributes.Mtime = parent.findChildMaxTime()
+		parent.mu.Unlock()
 		return nil, nil
 	}
 
+	child := parent.dir.Children[internalOffset]
 	en = &DirHandleEntry{
 		Name:   *child.Name,
 		Inode:  child.Id,
@@ -601,9 +569,11 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		en.Type = fuseutil.DT_File
 	}
 
-	if dh.lastFromCloud != nil && en.Name == *dh.lastFromCloud {
-		dh.lastFromCloud = nil
+	if parent.dir.lastFromCloud != nil && en.Name == *parent.dir.lastFromCloud {
+		parent.dir.lastFromCloud = nil
 	}
+
+	parent.mu.Unlock()
 
 	return en, nil
 }
@@ -615,12 +585,13 @@ func (dh *DirHandle) CloseDir() error {
 	}
 	if i < len(dh.inode.dir.handles) {
 		dh.inode.dir.handles = append(dh.inode.dir.handles[0 : i], dh.inode.dir.handles[i+1 : ]...)
+		atomic.AddInt32(&dh.inode.fileHandles, -1)
 	}
 	dh.inode.mu.Unlock()
 	return nil
 }
 
-// prefix and newPrefix should include the trailing /
+/*// prefix and newPrefix should include the trailing /
 // return all the renamed objects
 func (dir *Inode) renameChildren(cloud StorageBackend, prefix string,
 	newParent *Inode, newPrefix string) (err error) {
@@ -690,7 +661,7 @@ func (dir *Inode) renameChildren(cloud StorageBackend, prefix string,
 	s3Log.Debugf("rename copied %v", copied)
 	_, err = cloud.DeleteBlobs(&DeleteBlobsInput{Items: copied})
 	return err
-}
+}*/
 
 // Recursively resets the DirTime for child directories.
 // ACQUIRES_LOCK(inode.mu)
@@ -700,6 +671,7 @@ func (inode *Inode) resetDirTimeRec() {
 		inode.mu.Unlock()
 		return
 	}
+	inode.dir.listDone = false
 	inode.dir.DirTime = time.Time{}
 	// Make a copy of the child nodes before giving up the lock.
 	// This protects us from any addition/removal of child nodes
@@ -961,10 +933,10 @@ func (inode *Inode) SendDelete() {
 		inode.mu.Unlock()
 		inode.Parent.mu.Lock()
 		delete(inode.Parent.dir.DeletedChildren, *inode.Name)
+		inode.Parent.mu.Unlock()
 		if forget {
 			inode.fs.DeRefInode(inode, 0)
 		}
-		inode.Parent.mu.Unlock()
 		inode.fs.WakeupFlusher()
 	}()
 }
@@ -1112,12 +1084,11 @@ func (parent *Inode) RmDir(name string) (err error) {
 
 	// we know this entry is gone
 	parent.mu.Lock()
-	defer parent.mu.Unlock()
 
 	// rmdir assumes that <name> was previously looked up
 	inode := parent.findChildUnlocked(name)
+	parent.mu.Unlock()
 	if inode != nil {
-
 		if !inode.isDir() {
 			return fuse.ENOTDIR
 		}
@@ -1134,7 +1105,12 @@ func (parent *Inode) RmDir(name string) (err error) {
 			return fuse.ENOTEMPTY
 		}
 
-		inode.doUnlink()
+		parent.mu.Lock()
+		inode := parent.findChildUnlocked(name)
+		if inode != nil {
+			inode.doUnlink()
+		}
+		parent.mu.Unlock()
 	}
 
 	return
@@ -1204,27 +1180,8 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		}
 	}
 
-	/*var renameChildren bool
-	if fromInode.isDir() {
-		fromEmpty, err := fromInode.isEmptyDir()
-		if err != nil {
-			return err
-		}
-		renameChildren = !fromEmpty
-	}*/
-
 	fromFullName := appendChildName(fromPath, from)
 	toFullName := appendChildName(toPath, to)
-
-	//var size *uint64
-	if fromInode.isDir() {
-		fromFullName += "/"
-		toFullName += "/"
-		//size = PUInt64(0)
-		// FIXME: Directories...
-		log.Errorf("Renaming directories is not implemented")
-		return fuse.ENOSYS
-	}
 
 	if toInode != nil {
 		// this file's been overwritten, it's
@@ -1233,6 +1190,19 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		// will still send forget ops to us
 		toInode.SetCacheState(ST_CACHED)
 		newParent.removeChildUnlocked(toInode)
+	}
+
+	if fromInode.isDir() {
+		fromFullName += "/"
+		toFullName += "/"
+		// List all objects and rename them in cache
+		//dh := NewDirHandle(fromInode)
+		//out, err := dh.listObjectsSlurp()
+		//if err != nil {
+		//	return err
+		//}
+		log.Errorf("Renaming directories is not implemented")
+		return fuse.ENOSYS
 	}
 
 	// There's a lot of edge cases with the asynchronous rename to handle:
@@ -1264,15 +1234,6 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 	fromInode.Parent = newParent
 	newParent.insertChildUnlocked(fromInode)
 	fromInode.fs.WakeupFlusher()
-
-	/*if renameChildren && !fromCloud.Capabilities().DirBlob {
-		err = parent.renameChildren(fromCloud, fromFullName, newParent, toFullName)
-		if err != nil {
-			return
-		}
-	} else {
-		err = parent.renameObject(size, fromFullName, toFullName)
-	}*/
 
 	return
 }
@@ -1444,36 +1405,6 @@ func (parent *Inode) findChildMaxTime() time.Time {
 	}
 
 	return maxTime
-}
-
-func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, ok bool) {
-	dh.inode.mu.Lock()
-	defer dh.inode.mu.Unlock()
-
-	if dh.inode.dir == nil {
-		panic(*dh.inode.FullName())
-	}
-	if !expired(dh.inode.dir.DirTime, dh.inode.fs.flags.TypeCacheTTL) {
-		ok = true
-
-		if int(internalOffset) >= len(dh.inode.dir.Children) {
-			return
-		}
-		child := dh.inode.dir.Children[internalOffset]
-
-		en = &DirHandleEntry{
-			Name:   *child.Name,
-			Inode:  child.Id,
-			Offset: offset + 1,
-		}
-		if child.isDir() {
-			en.Type = fuseutil.DT_Directory
-		} else {
-			en.Type = fuseutil.DT_File
-		}
-
-	}
-	return
 }
 
 func (parent *Inode) LookUpInodeNotDir(name string, c chan HeadBlobOutput, errc chan error) {

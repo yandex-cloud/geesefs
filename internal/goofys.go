@@ -729,8 +729,6 @@ func (fs *Goofys) LookUpInode(
 	inode = parent.findChildUnlocked(op.Name)
 	if inode != nil {
 		ok = true
-		inode.Ref()
-
 		if expired(inode.AttrTime, fs.flags.StatCacheTTL) {
 			ok = false
 			if inode.CacheState != ST_CACHED ||
@@ -808,9 +806,9 @@ func (fs *Goofys) LookUpInode(
 
 			inode.mu.Unlock()
 		}
-		inode.Ref()
 	}
 
+	inode.Ref()
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
@@ -869,14 +867,11 @@ func (fs *Goofys) ForgetInode(
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
 
-	inode.Parent.mu.Lock()
 	fs.DeRefInode(inode, op.N)
-	inode.Parent.mu.Unlock()
 
 	return
 }
 
-// LOCKS_REQUIRED(inode.parent.mu)
 // LOCKS_EXCLUDED(inode.fs.mu)
 func (fs *Goofys) DeRefInode(inode *Inode, N uint64) {
 	stale := inode.DeRef(N)

@@ -433,6 +433,13 @@ func (s *GoofysTest) setupBlobs(cloud StorageBackend, t *C, env map[string]*stri
 				defer throttler.P(1)
 				params := &HeadBlobInput{Key: path}
 				res, err := cloud.HeadBlob(params)
+				if err != nil {
+					log.Errorf("Unexpected error: HEAD %v returned %v", path, err)
+					if err == syscall.ENOENT {
+						time.Sleep(3 * time.Second)
+						res, err = cloud.HeadBlob(params)
+					}
+				}
 				t.Assert(err, IsNil)
 				if content != nil {
 					t.Assert(res.Size, Equals, uint64(len(*content)))
@@ -791,7 +798,6 @@ func (s *GoofysTest) TestGetInodeAttributes(t *C) {
 
 func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []DirHandleEntry) {
 	dh.mu.Lock()
-	defer dh.mu.Unlock()
 
 	en, err := dh.ReadDir(0, fuseops.DirOffset(0))
 	t.Assert(err, IsNil)
@@ -808,11 +814,15 @@ func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []DirHandleEntry
 		t.Assert(err, IsNil)
 
 		if en == nil {
+			dh.mu.Unlock()
 			return
 		}
 
 		entries = append(entries, *en)
 	}
+
+	dh.mu.Unlock()
+	return
 }
 
 func nameMap(entries []DirHandleEntry) (names map[string]bool) {
@@ -895,6 +905,8 @@ func (s *GoofysTest) TestReadDirWithExternalChanges(t *C) {
 		"empty_dir2", "file1", "file2", "zero"}
 	s.assertHasEntries(t, s.getRoot(t), defaultEntries)
 	// dir1 has file3.
+	dir1, err = s.LookUpInode(t, "dir1")
+	t.Assert(err, IsNil)
 	s.assertHasEntries(t, dir1, []string{"file3"})
 
 	// Do the following 'external' changes in s3 without involving goofys.
