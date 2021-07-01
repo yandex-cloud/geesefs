@@ -763,7 +763,7 @@ func (inode *Inode) SendUpload() bool {
 				delete(oldParent.dir.DeletedChildren, *oldName)
 				oldParent.mu.Unlock()
 				// And track ModifiedChildren because rename is special - it takes two parents
-				atomic.AddInt64(&oldParent.dir.ModifiedChildren, -1)
+				oldParent.addModified(-1)
 			}
 
 			inode.mu.Lock()
@@ -790,7 +790,7 @@ func (inode *Inode) SendUpload() bool {
 				unmoveParent.mu.Lock()
 				delete(unmoveParent.dir.DeletedChildren, *unmoveName)
 				unmoveParent.mu.Unlock()
-				atomic.AddInt64(&unmoveParent.dir.ModifiedChildren, -1)
+				unmoveParent.addModified(-1)
 			}
 		}()
 		return true

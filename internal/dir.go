@@ -212,7 +212,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 	return
 }
 
-func (inode *Inode) listObjectsSlurp() (err error) {
+func (inode *Inode) listObjectsSlurp(lock bool) (err error) {
 	cloud, key := inode.cloud()
 	prefix := key
 	if len(prefix) != 0 {
@@ -231,7 +231,9 @@ func (inode *Inode) listObjectsSlurp() (err error) {
 	}
 	s3Log.Debug(resp)
 
-	inode.mu.Lock()
+	if lock {
+		inode.mu.Lock()
+	}
 	inode.fs.mu.Lock()
 	dirs := make(map[*Inode]bool)
 	for _, obj := range resp.Items {
@@ -241,7 +243,9 @@ func (inode *Inode) listObjectsSlurp() (err error) {
 		}
 	}
 	inode.fs.mu.Unlock()
-	inode.mu.Unlock()
+	if lock {
+		inode.mu.Unlock()
+	}
 
 	for d, sealed := range dirs {
 		if d == inode {
@@ -539,7 +543,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		parent.mu.Unlock()
 		if useSlurp {
 			dh.mu.Unlock()
-			err = dh.inode.Parent.listObjectsSlurp()
+			err = dh.inode.Parent.listObjectsSlurp(true)
 			dh.mu.Lock()
 		} else {
 			err = dh.listObjectsFlat()
@@ -590,78 +594,6 @@ func (dh *DirHandle) CloseDir() error {
 	dh.inode.mu.Unlock()
 	return nil
 }
-
-/*// prefix and newPrefix should include the trailing /
-// return all the renamed objects
-func (dir *Inode) renameChildren(cloud StorageBackend, prefix string,
-	newParent *Inode, newPrefix string) (err error) {
-
-	var copied []string
-	var res *ListBlobsOutput
-
-	for true {
-		param := ListBlobsInput{
-			Prefix: &prefix,
-		}
-		if res != nil {
-			param.ContinuationToken = res.NextContinuationToken
-		}
-
-		// No need to call listBlobsSafe here because we are reading the results directly
-		// unlike ReadDir which reads the results and stores it in dir object.
-		res, err = cloud.ListBlobs(&param)
-		if err != nil {
-			return
-		}
-
-		if len(res.Items) == 0 {
-			return
-		}
-
-		if copied == nil {
-			copied = make([]string, 0, len(res.Items))
-		}
-
-		// after the server side copy, we want to delete all the files
-		// using multi-delete, which is capped to 1000 on aws. If we
-		// are going to make an arbitrary limit that sounds like a
-		// good one (and we want to have an arbitrary limit because we
-		// don't want to rename a million objects here)
-		total := len(copied) + len(res.Items)
-		if total > 1000 || total == 1000 && res.IsTruncated {
-			return syscall.E2BIG
-		}
-
-		// say dir is "/a/dir" and it has "1", "2", "3", and we are
-		// moving it to "/b/" items will be a/dir/1, a/dir/2, a/dir/3,
-		// and we will copy them to b/1, b/2, b/3 respectively
-		for _, i := range res.Items {
-			key := (*i.Key)[len(prefix):]
-
-			// TODO: coordinate with underlining copy and do this in parallel
-			_, err = cloud.CopyBlob(&CopyBlobInput{
-				Source:       *i.Key,
-				Destination:  newPrefix + key,
-				Size:         &i.Size,
-				ETag:         i.ETag,
-				StorageClass: i.StorageClass,
-			})
-			if err != nil {
-				return err
-			}
-
-			copied = append(copied, *i.Key)
-		}
-
-		if !res.IsTruncated {
-			break
-		}
-	}
-
-	s3Log.Debugf("rename copied %v", copied)
-	_, err = cloud.DeleteBlobs(&DeleteBlobsInput{Items: copied})
-	return err
-}*/
 
 // Recursively resets the DirTime for child directories.
 // ACQUIRES_LOCK(inode.mu)
@@ -884,7 +816,10 @@ func (parent *Inode) Unlink(name string) (err error) {
 
 	inode := parent.findChildUnlocked(name)
 	if inode != nil {
+		inode.mu.Lock()
 		inode.doUnlink()
+		inode.mu.Unlock()
+		inode.fs.WakeupFlusher()
 	}
 
 	return
@@ -990,6 +925,13 @@ func (parent *Inode) MkDir(
 	parent.fs.mu.Lock()
 	defer parent.fs.mu.Unlock()
 
+	inode = parent.doMkDir(name)
+	parent.fs.WakeupFlusher()
+
+	return
+}
+
+func (parent *Inode) doMkDir(name string) (inode *Inode) {
 	inode = NewInode(parent.fs, parent, &name)
 	inode.userMetadata = make(map[string][]byte)
 	inode.ToDir()
@@ -1008,8 +950,6 @@ func (parent *Inode) MkDir(
 	} else {
 		inode.ImplicitDir = true
 	}
-	parent.fs.WakeupFlusher()
-
 	return
 }
 
@@ -1060,23 +1000,21 @@ func (inode *Inode) isEmptyDir() (bool, error) {
 }
 
 // LOCKS_REQUIRED(inode.Parent.mu)
-// LOCKS_EXCLUDED(inode.mu)
+// LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) doUnlink() {
 	parent := inode.Parent
-	parent.removeChildUnlocked(inode)
 
-	inode.mu.Lock()
 	if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
 		inode.SetCacheState(ST_DELETED)
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[*inode.Name] = inode
-		inode.fs.WakeupFlusher()
 	} else {
 		inode.SetCacheState(ST_CACHED)
 	}
-	inode.mu.Unlock()
+
+	parent.removeChildUnlocked(inode)
 }
 
 func (parent *Inode) RmDir(name string) (err error) {
@@ -1108,9 +1046,12 @@ func (parent *Inode) RmDir(name string) (err error) {
 		parent.mu.Lock()
 		inode := parent.findChildUnlocked(name)
 		if inode != nil {
+			inode.mu.Lock()
 			inode.doUnlink()
+			inode.mu.Unlock()
 		}
 		parent.mu.Unlock()
+		inode.fs.WakeupFlusher()
 	}
 
 	return
@@ -1126,11 +1067,14 @@ func (inode *Inode) SetCacheState(state int32) {
 		if wasModified {
 			inc = -1
 		}
-		parent := inode
-		for parent.Parent != nil {
-			parent = parent.Parent
-			atomic.AddInt64(&parent.dir.ModifiedChildren, inc)
-		}
+		inode.Parent.addModified(inc)
+	}
+}
+
+func (parent *Inode) addModified(inc int64) {
+	for parent != nil {
+		atomic.AddInt64(&parent.dir.ModifiedChildren, inc)
+		parent = parent.Parent
 	}
 }
 
@@ -1195,16 +1139,55 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 	if fromInode.isDir() {
 		fromFullName += "/"
 		toFullName += "/"
-		// List all objects and rename them in cache
-		//dh := NewDirHandle(fromInode)
-		//out, err := dh.listObjectsSlurp()
-		//if err != nil {
-		//	return err
-		//}
-		log.Errorf("Renaming directories is not implemented")
-		return fuse.ENOSYS
+		// List all objects and rename them in cache (keeping the lock)
+		fromInode.dir.listDone = false
+		fromInode.dir.slurpMarker = nil
+		for !fromInode.dir.listDone {
+			err := fromInode.listObjectsSlurp(false)
+			if err != nil {
+				return err
+			}
+		}
+		renameRecursive(fromInode, newParent, to)
+	} else {
+		renameInCache(fromInode, newParent, to)
 	}
 
+	fromInode.fs.WakeupFlusher()
+
+	return
+}
+
+func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
+	// FIXME: Rename the old directory object to copy xattrs from it
+	toDir := newParent.doMkDir(to)
+	toDir.mu.Lock()
+	// Trick IDs
+	oldId := fromInode.Id
+	newId := toDir.Id
+	fromInode.Id = newId
+	toDir.Id = oldId
+	fs := fromInode.fs
+	fs.mu.Lock()
+	fs.inodes[newId] = fromInode
+	fs.inodes[oldId] = toDir
+	fs.mu.Unlock()
+	// 2 is to skip . and ..
+	for len(fromInode.dir.Children) > 2 {
+		child := fromInode.dir.Children[2]
+		child.mu.Lock()
+		if child.isDir() {
+			renameRecursive(child, toDir, *child.Name)
+		} else {
+			renameInCache(child, toDir, *child.Name)
+		}
+		child.mu.Unlock()
+	}
+	toDir.mu.Unlock()
+	fromInode.doUnlink()
+}
+
+func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	// There's a lot of edge cases with the asynchronous rename to handle:
 	// 1) rename a new file => we can just upload it with the new name
 	// 2) rename a new file that's already being flushed => rename after flush
@@ -1213,7 +1196,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 	// 5) second rename while rename is already in progress => rename again after the first rename finishes
 	// 6) rename then modify then rename => either rename then modify or modify then rename
 	// and etc...
-
+	parent := fromInode.Parent
 	if (fromInode.CacheState != ST_CREATED || fromInode.IsFlushing > 0 || fromInode.mpu != nil) &&
 		fromInode.oldParent == nil {
 		// Remember that the original file is "deleted"
@@ -1222,20 +1205,21 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[*fromInode.Name] = fromInode
-		atomic.AddInt64(&parent.dir.ModifiedChildren, 1)
+		if fromInode.CacheState == ST_CACHED {
+			parent.addModified(1)
+		}
 		fromInode.oldParent = parent
 		fromInode.oldName = fromInode.Name
 	}
-	parent.removeChildUnlocked(fromInode)
-	if fromInode.CacheState == ST_CACHED {
-		fromInode.SetCacheState(ST_MODIFIED)
-	}
 	fromInode.Name = &to
 	fromInode.Parent = newParent
+	if fromInode.CacheState == ST_CACHED {
+		fromInode.SetCacheState(ST_MODIFIED)
+	} else {
+		newParent.addModified(1)
+	}
 	newParent.insertChildUnlocked(fromInode)
-	fromInode.fs.WakeupFlusher()
-
-	return
+	parent.removeChildUnlocked(fromInode)
 }
 
 func RenameObject(cloud StorageBackend, fromFullName string, toFullName string, size *uint64) (err error) {
