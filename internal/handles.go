@@ -115,9 +115,9 @@ type Inode struct {
 	// last known etag from the cloud
 	knownETag *string
 
-	// the refcnt is an exception, it's protected by the global lock Goofys.mu
+	// the refcnt is an exception, it's protected with atomic access
 	// being part of parent.dir.Children increases refcnt by 1
-	refcnt uint64
+	refcnt int64
 }
 
 func NewInode(fs *Goofys, parent *Inode, name *string) (inode *Inode) {
@@ -302,28 +302,37 @@ func (inode *Inode) ToDir() {
 	}
 }
 
-// LOCKS_REQUIRED(fs.mu)
-// XXX why did I put lock required? This used to return a resurrect bool
-// which no long does anything, need to look into that to see if
-// that was legacy
 func (inode *Inode) Ref() {
-	inode.logFuse("Ref", inode.refcnt)
-
-	inode.refcnt++
+	res := atomic.AddInt64(&inode.refcnt, 1)
+	inode.logFuse("Ref", res)
 	return
 }
 
-func (inode *Inode) DeRef(n uint64) (stale bool) {
-	inode.logFuse("DeRef", n, inode.refcnt)
-
-	if inode.refcnt < n {
-		panic(fmt.Sprintf("deref inode %v (%v) by %v from %v", inode.Id, *inode.FullName(), n, inode.refcnt))
+// LOCKS_REQUIRED(inode.mu)
+// LOCKS_EXCLUDED(fs.mu)
+func (inode *Inode) DeRef(n int64) (stale bool) {
+	res := atomic.AddInt64(&inode.refcnt, -n)
+	if res < 0 {
+		panic(fmt.Sprintf("deref inode %v (%v) by %v from %v", inode.Id, *inode.FullName(), n, res+n))
 	}
-
-	inode.refcnt -= n
-
-	stale = (inode.refcnt == 0)
-	return
+	inode.logFuse("DeRef", n, res)
+	if res == 0 && inode.CacheState == ST_CACHED {
+		// Clear buffers
+		for i := 0; i < len(inode.buffers); i++ {
+			b := &inode.buffers[i]
+			if !b.zero {
+				b.ptr.refs--
+				if b.ptr.refs == 0 {
+					inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)))
+				}
+			}
+		}
+		inode.fs.mu.Lock()
+		delete(inode.fs.inodes, inode.Id)
+		inode.fs.forgotCnt += 1
+		inode.fs.mu.Unlock()
+	}
+	return res == 0
 }
 
 func (inode *Inode) GetAttributes() (*fuseops.InodeAttributes, error) {

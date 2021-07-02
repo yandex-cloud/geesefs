@@ -519,7 +519,9 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 			if atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
 				atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
 				(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
+				childTmp.mu.Lock()
 				parent.removeChildUnlocked(childTmp)
+				childTmp.mu.Unlock()
 				i--
 			}
 		}
@@ -709,6 +711,7 @@ func (parent *Inode) findChildIdxUnlocked(name string) int {
 }
 
 // LOCKS_REQUIRED(parent.mu)
+// LOCKS_REQUIRED(inode.mu)
 // LOCKS_EXCLUDED(parent.fs.mu)
 func (parent *Inode) removeChildUnlocked(inode *Inode) {
 	l := len(parent.dir.Children)
@@ -738,13 +741,16 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 		parent.dir.Children = tmp
 	}
 
-	parent.fs.DeRefInode(inode, 1)
+	inode.DeRef(1)
 }
 
 // LOCKS_EXCLUDED(parent.fs.mu)
 func (parent *Inode) removeChild(inode *Inode) {
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
+
+	inode.mu.Lock()
+	defer inode.mu.Unlock()
 
 	parent.removeChildUnlocked(inode)
 	return
@@ -870,7 +876,9 @@ func (inode *Inode) SendDelete() {
 		delete(inode.Parent.dir.DeletedChildren, *inode.Name)
 		inode.Parent.mu.Unlock()
 		if forget {
-			inode.fs.DeRefInode(inode, 0)
+			inode.mu.Lock()
+			inode.DeRef(0)
+			inode.mu.Unlock()
 		}
 		inode.fs.WakeupFlusher()
 	}()

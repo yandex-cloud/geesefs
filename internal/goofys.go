@@ -867,30 +867,11 @@ func (fs *Goofys) ForgetInode(
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
 
-	fs.DeRefInode(inode, op.N)
+	inode.mu.Lock()
+	inode.DeRef(int64(op.N))
+	inode.mu.Unlock()
 
 	return
-}
-
-// LOCKS_EXCLUDED(inode.fs.mu)
-func (fs *Goofys) DeRefInode(inode *Inode, N uint64) {
-	stale := inode.DeRef(N)
-	if stale && inode.CacheState == ST_CACHED {
-		// Clear buffers
-		for i := 0; i < len(inode.buffers); i++ {
-			b := &inode.buffers[i]
-			if !b.zero {
-				b.ptr.refs--
-				if b.ptr.refs == 0 {
-					fs.bufferPool.Use(-int64(len(b.ptr.mem)))
-				}
-			}
-		}
-		fs.mu.Lock()
-		delete(fs.inodes, inode.Id)
-		fs.forgotCnt += 1
-		fs.mu.Unlock()
-	}
 }
 
 func (fs *Goofys) OpenDir(
