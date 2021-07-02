@@ -951,6 +951,9 @@ func (parent *Inode) MkDir(
 	return
 }
 
+// LOCKS_REQUIRED(parent.mu)
+// LOCKS_REQUIRED(fs.mu)
+// Returns locked inode (!)
 func (parent *Inode) doMkDir(name string) (inode *Inode) {
 	inode = NewInode(parent.fs, parent, &name)
 	inode.mu.Lock()
@@ -1107,6 +1110,8 @@ func (parent *Inode) addModified(inc int64) {
 // rename("nonempty_dir1", "nonempty_dir2") = ENOTEMPTY
 // rename("file", "dir") = EISDIR
 // rename("dir", "file") = ENOTDIR
+// LOCKS_REQUIRED(parent.mu)
+// LOCKS_REQUIRED(newParent.mu)
 func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error) {
 	parent.logFuse("Rename", from, newParent.getChildName(to))
 
@@ -1180,14 +1185,29 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 }
 
 func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
+	newParent.fs.mu.Lock()
 	toDir := newParent.doMkDir(to)
+	newParent.fs.mu.Unlock()
 	isNew := fromInode.CacheState == ST_CREATED && fromInode.IsFlushing == 0
+	toDir.userMetadata = fromInode.userMetadata
+	toDir.ImplicitDir = fromInode.ImplicitDir
 	if isNew {
 		// Brand new directory, not yet on the server, nothing to rename
+	} else if fromInode.oldParent != nil {
+		// Directory moved second time
+		_, oldKey := fromInode.oldParent.cloud()
+		oldKey = appendChildName(oldKey, *fromInode.oldName)
+		_, newKey := newParent.cloud()
+		newKey = appendChildName(newKey, to)
+		if oldKey == newKey {
+			toDir.SetCacheState(ST_CACHED)
+		} else {
+			toDir.SetCacheState(ST_MODIFIED)
+			toDir.oldParent = fromInode.oldParent
+			toDir.oldName = fromInode.oldName
+		}
 	} else {
 		toDir.SetCacheState(ST_MODIFIED)
-		toDir.userMetadata = fromInode.userMetadata
-		toDir.ImplicitDir = fromInode.ImplicitDir
 		toDir.oldParent = fromInode.Parent
 		toDir.oldName = fromInode.Name
 	}

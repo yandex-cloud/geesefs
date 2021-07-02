@@ -22,7 +22,7 @@ import (
 	"io/ioutil"
 	"sync"
 	"sync/atomic"
-//	"syscall"
+	"syscall"
 	"time"
 
 	"github.com/jacobsa/fuse"
@@ -760,13 +760,18 @@ func (inode *Inode) SendUpload() bool {
 		skipRename := false
 		if inode.isDir() {
 			from += "/"
-			// Rename the old directory object to copy xattrs from it if it has them
-			skipRename = inode.ImplicitDir
+			skipRename = true
 		}
 		go func() {
 			var err error
-			if !skipRename {
+			if !inode.fs.flags.NoDirObject {
 				err = RenameObject(cloud, from, key, nil)
+				if err == syscall.ENOENT && skipRename {
+					// Rename the old directory object to copy xattrs from it if it has them
+					// We're almost never sure if the directory is implicit so we always try
+					// to rename the directory object
+					err = nil
+				}
 			}
 
 			if err == nil {
@@ -1233,6 +1238,7 @@ func (inode *Inode) SyncFile() (err error) {
 	inode.logFuse("SyncFile")
 	for true {
 		inode.mu.Lock()
+		inode.forceFlush = false
 		if inode.CacheState == ST_CACHED {
 			inode.mu.Unlock()
 			break
