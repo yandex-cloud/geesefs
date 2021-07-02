@@ -743,6 +743,9 @@ func (inode *Inode) TryFlush() bool {
 func (inode *Inode) SendUpload() bool {
 
 	cloud, key := inode.cloud()
+	if inode.isDir() {
+		key += "/"
+	}
 
 	if inode.oldParent != nil && inode.IsFlushing == 0 && inode.mpu == nil {
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
@@ -754,8 +757,17 @@ func (inode *Inode) SendUpload() bool {
 		// Set to nil so another rename will move it again
 		inode.oldParent = nil
 		inode.oldName = nil
+		skipRename := false
+		if inode.isDir() {
+			from += "/"
+			// Rename the old directory object to copy xattrs from it if it has them
+			skipRename = inode.ImplicitDir
+		}
 		go func() {
-			err := RenameObject(cloud, from, key, nil)
+			var err error
+			if !skipRename {
+				err = RenameObject(cloud, from, key, nil)
+			}
 
 			if err == nil {
 				// Remove from DeletedChildren of the old parent

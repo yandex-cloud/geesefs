@@ -374,16 +374,13 @@ func (inode *Inode) fillXattrFromHead(resp *HeadBlobOutput) {
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) fillXattr() (err error) {
 	if !inode.ImplicitDir && inode.userMetadata == nil {
-
-		fullName := *inode.FullName()
-		if inode.isDir() {
-			fullName += "/"
-		}
-
 		cloud, key := inode.cloud()
 		if inode.oldParent != nil {
 			_, key = inode.oldParent.cloud()
 			key = appendChildName(key, *inode.oldName)
+		}
+		if inode.isDir() {
+			key += "/"
 		}
 		params := &HeadBlobInput{Key: key}
 		resp, err := cloud.HeadBlob(params)

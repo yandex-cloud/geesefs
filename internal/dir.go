@@ -214,6 +214,10 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 
 func (inode *Inode) listObjectsSlurp(lock bool) (err error) {
 	cloud, key := inode.cloud()
+	if inode.oldParent != nil {
+		_, key = inode.oldParent.cloud()
+		key = appendChildName(key, *inode.oldName)
+	}
 	prefix := key
 	if len(prefix) != 0 {
 		prefix += "/"
@@ -419,6 +423,10 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	if cloud == nil {
 		// Stale inode
 		return fuse.ENOENT
+	}
+	if dh.inode.oldParent != nil {
+		_, prefix = dh.inode.oldParent.cloud()
+		prefix = appendChildName(prefix, *dh.inode.oldName)
 	}
 	if len(prefix) != 0 {
 		prefix += "/"
@@ -934,6 +942,7 @@ func (parent *Inode) MkDir(
 	defer parent.fs.mu.Unlock()
 
 	inode = parent.doMkDir(name)
+	inode.mu.Unlock()
 	parent.fs.WakeupFlusher()
 
 	return
@@ -941,6 +950,7 @@ func (parent *Inode) MkDir(
 
 func (parent *Inode) doMkDir(name string) (inode *Inode) {
 	inode = NewInode(parent.fs, parent, &name)
+	inode.mu.Lock()
 	inode.userMetadata = make(map[string][]byte)
 	inode.ToDir()
 	inode.touch()
@@ -1167,9 +1177,17 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 }
 
 func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
-	// FIXME: Rename the old directory object to copy xattrs from it
 	toDir := newParent.doMkDir(to)
-	toDir.mu.Lock()
+	isNew := fromInode.CacheState == ST_CREATED && fromInode.IsFlushing == 0
+	if isNew {
+		// Brand new directory, not yet on the server, nothing to rename
+	} else {
+		toDir.SetCacheState(ST_MODIFIED)
+		toDir.userMetadata = fromInode.userMetadata
+		toDir.ImplicitDir = fromInode.ImplicitDir
+		toDir.oldParent = fromInode.Parent
+		toDir.oldName = fromInode.Name
+	}
 	// Trick IDs
 	oldId := fromInode.Id
 	newId := toDir.Id
@@ -1192,7 +1210,19 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 		child.mu.Unlock()
 	}
 	toDir.mu.Unlock()
-	fromInode.doUnlink()
+	if isNew {
+		// Unlink will be immediate
+		fromInode.doUnlink()
+	} else {
+		// Removing the object will be done during the flush of rename
+		parent := fromInode.Parent
+		parent.removeChildUnlocked(fromInode)
+		if parent.dir.DeletedChildren == nil {
+			parent.dir.DeletedChildren = make(map[string]*Inode)
+		}
+		parent.dir.DeletedChildren[*fromInode.Name] = toDir
+		parent.addModified(1)
+	}
 }
 
 func renameInCache(fromInode *Inode, newParent *Inode, to string) {
