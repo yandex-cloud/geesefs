@@ -992,8 +992,12 @@ func (inode *Inode) FlushSmallObject() {
 				}
 			}
 		}
-		if !stillDirty && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
-			inode.SetCacheState(ST_CACHED)
+		if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
+			if !stillDirty {
+				inode.SetCacheState(ST_CACHED)
+			} else {
+				inode.SetCacheState(ST_MODIFIED)
+			}
 			if inode.fs.bufferPool.wantFree > 0 {
 				inode.fs.bufferPool.cond.Broadcast()
 			}
@@ -1192,8 +1196,12 @@ func (inode *Inode) FlushPart(part uint64) {
 								stillDirty = true
 							}
 						}
-						if !stillDirty && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
-							inode.SetCacheState(ST_CACHED)
+						if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
+							if !stillDirty {
+								inode.SetCacheState(ST_CACHED)
+							} else {
+								inode.SetCacheState(ST_MODIFIED)
+							}
 							if inode.fs.bufferPool.wantFree > 0 {
 								inode.fs.bufferPool.cond.Broadcast()
 							}

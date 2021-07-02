@@ -265,10 +265,13 @@ func (inode *Inode) listObjectsSlurp(lock bool) (err error) {
 		}
 	}
 
-	obj := resp.Items[len(resp.Items)-1]
+	var obj *BlobItemOutput
+	if len(resp.Items) > 0 {
+		obj = &resp.Items[len(resp.Items)-1]
+	}
 	seal := false
 	// if we are done listing prefix, we are good
-	if !strings.HasPrefix(*obj.Key, prefix) {
+	if obj != nil && !strings.HasPrefix(*obj.Key, prefix) {
 		if *obj.Key > prefix {
 			seal = true
 		}
@@ -1124,8 +1127,6 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 	fromInode.mu.Lock()
 	defer fromInode.mu.Unlock()
 	if toInode != nil {
-		toInode.mu.Lock()
-		defer toInode.mu.Unlock()
 		if fromInode.isDir() {
 			if !toInode.isDir() {
 				return fuse.ENOTDIR
@@ -1150,6 +1151,8 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		// been detached but we can't delete
 		// it just yet, because the kernel
 		// will still send forget ops to us
+		toInode.mu.Lock()
+		defer toInode.mu.Unlock()
 		toInode.SetCacheState(ST_CACHED)
 		newParent.removeChildUnlocked(toInode)
 	}
@@ -1249,6 +1252,8 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 		fromInode.oldParent = parent
 		fromInode.oldName = fromInode.Name
 	}
+	fromInode.Ref()
+	parent.removeChildUnlocked(fromInode)
 	fromInode.Name = &to
 	fromInode.Parent = newParent
 	if fromInode.CacheState == ST_CACHED {
@@ -1257,7 +1262,7 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 		newParent.addModified(1)
 	}
 	newParent.insertChildUnlocked(fromInode)
-	parent.removeChildUnlocked(fromInode)
+	fromInode.DeRef(1)
 }
 
 func RenameObject(cloud StorageBackend, fromFullName string, toFullName string, size *uint64) (err error) {

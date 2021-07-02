@@ -990,6 +990,7 @@ func (s *S3Backend) MultipartExpire(param *MultipartExpireInput) (*MultipartExpi
 func (s *S3Backend) RemoveBucket(param *RemoveBucketInput) (*RemoveBucketOutput, error) {
 	_, err := s.DeleteBucket(&s3.DeleteBucketInput{Bucket: &s.bucket})
 	if err != nil {
+		s3Log.Errorf("delete bucket %v: error %v", s.bucket, err)
 		return nil, mapAwsError(err)
 	}
 	return &RemoveBucketOutput{}, nil

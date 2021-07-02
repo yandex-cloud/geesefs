@@ -319,10 +319,13 @@ func (s *GoofysTest) deleteBucket(cloud StorageBackend) error {
 	azureKeysToRemove := make([]string, 0)
 	for {
 		resp, err := cloud.ListBlobs(param)
+		if len(resp.Items) == 0 {
+			// To overcome eventual consistency
+			break
+		}
 		if err != nil {
 			return err
 		}
-
 		keysToRemove := []string{}
 		for _, o := range resp.Items {
 			keysToRemove = append(keysToRemove, *o.Key)
@@ -335,16 +338,11 @@ func (s *GoofysTest) deleteBucket(cloud StorageBackend) error {
 				// DeleteADLBlobs after this for loop.
 				azureKeysToRemove = append(azureKeysToRemove, keysToRemove...)
 			default:
-				_, err = cloud.DeleteBlobs(&DeleteBlobsInput{Items: keysToRemove})
+				_, err := cloud.DeleteBlobs(&DeleteBlobsInput{Items: keysToRemove})
 				if err != nil {
 					return err
 				}
 			}
-		}
-		if resp.IsTruncated {
-			param.ContinuationToken = resp.NextContinuationToken
-		} else {
-			break
 		}
 	}
 
@@ -355,13 +353,17 @@ func (s *GoofysTest) deleteBucket(cloud StorageBackend) error {
 		}
 	}
 
-	_, err := cloud.RemoveBucket(&RemoveBucketInput{})
+	_, err := cloud.MultipartExpire(&MultipartExpireInput{})
+
+	_, err = cloud.RemoveBucket(&RemoveBucketInput{})
 	return err
 }
 
 func (s *GoofysTest) TearDownTest(t *C) {
 	close(s.timeout)
 	s.timeout = nil
+
+	s.fs.SyncFS()
 
 	for _, cloud := range s.removeBucket {
 		err := s.deleteBucket(cloud)
@@ -1599,7 +1601,12 @@ func (s *GoofysTest) TestRenameDir(t *C) {
 
 	root := s.getRoot(t)
 
-	err := root.Rename("empty_dir", root, "dir1")
+	_, err := s.LookUpInode(t, "empty_dir")
+	t.Assert(err, IsNil)
+	_, err = s.LookUpInode(t, "dir1")
+	t.Assert(err, IsNil)
+
+	err = root.Rename("empty_dir", root, "dir1")
 	t.Assert(err, Equals, fuse.ENOTEMPTY)
 
 	err = root.Rename("empty_dir", root, "new_dir")
@@ -1608,6 +1615,7 @@ func (s *GoofysTest) TestRenameDir(t *C) {
 	dir2, err := s.LookUpInode(t, "dir2")
 	t.Assert(err, IsNil)
 	t.Assert(dir2, NotNil)
+	oldId := dir2.Id
 
 	_, err = s.LookUpInode(t, "new_dir2")
 	t.Assert(err, Equals, fuse.ENOENT)
@@ -1626,14 +1634,20 @@ func (s *GoofysTest) TestRenameDir(t *C) {
 	_, err = s.LookUpInode(t, "dir2/dir3/file4")
 	t.Assert(err, Equals, fuse.ENOENT)
 
+	_, err = s.LookUpInode(t, "dir2")
+	t.Assert(err, Equals, fuse.ENOENT)
+
 	new_dir2, err := s.LookUpInode(t, "new_dir2")
 	t.Assert(err, IsNil)
 	t.Assert(new_dir2, NotNil)
-	t.Assert(dir2.Id, Equals, new_dir2.Id)
+	t.Assert(oldId, Equals, new_dir2.Id)
 
 	old, err := s.LookUpInode(t, "new_dir2/dir3/file4")
 	t.Assert(err, IsNil)
 	t.Assert(old, NotNil)
+
+	_, err = s.LookUpInode(t, "new_dir3")
+	t.Assert(err, Equals, fuse.ENOENT)
 
 	err = s.fs.Rename(nil, &fuseops.RenameOp{
 		OldParent: root.Id,

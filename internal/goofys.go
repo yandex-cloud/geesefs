@@ -1224,3 +1224,23 @@ func (fs *Goofys) Rename(
 
 	return
 }
+
+// Not yet hooked anywhere
+func (fs *Goofys) SyncFS() (err error) {
+	fs.mu.RLock()
+	inodes := make([]fuseops.InodeID, 0, len(fs.inodes))
+	for id := range fs.inodes {
+		inodes = append(inodes, id)
+	}
+	fs.mu.RUnlock()
+	for i := 0; i < len(inodes); i++ {
+		id := inodes[i]
+		fs.mu.RLock()
+		inode := fs.inodes[id]
+		fs.mu.RUnlock()
+		if inode != nil {
+			inode.SyncFile()
+		}
+	}
+	return
+}
