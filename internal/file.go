@@ -20,6 +20,7 @@ import (
 //	"fmt"
 	"io"
 	"io/ioutil"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -76,16 +77,9 @@ func (fs *Goofys) partRange(num uint64) (offset uint64, size uint64) {
 }
 
 func locateBuffer(buffers []FileBuffer, offset uint64) int {
-	start := 0
-	for start < len(buffers) {
-		// FIXME binary search?
-		b := &buffers[start]
-		if b.offset + b.length > offset {
-			break
-		}
-		start++
-	}
-	return start
+	return sort.Search(len(buffers), func(i int) bool {
+		return buffers[i].offset + buffers[i].length > offset
+	})
 }
 
 func (inode *Inode) appendBuffer(buf *FileBuffer, data []byte) int64 {
