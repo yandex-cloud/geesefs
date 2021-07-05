@@ -453,12 +453,6 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 
 	s3Log.Debug(resp)
 
-	if resp.IsTruncated {
-		dh.inode.dir.listMarker = resp.NextContinuationToken
-	} else {
-		dh.inode.sealDir()
-	}
-
 	dh.inode.mu.Lock()
 	dh.inode.fs.mu.Lock()
 
@@ -466,6 +460,12 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 
 	dh.inode.fs.mu.Unlock()
 	dh.inode.mu.Unlock()
+
+	if resp.IsTruncated {
+		dh.inode.dir.listMarker = resp.NextContinuationToken
+	} else {
+		dh.inode.sealDir()
+	}
 
 	return
 }
@@ -578,7 +578,6 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 
 	if int(internalOffset) >= len(parent.dir.Children) {
 		// we've reached the end
-		parent.Attributes.Mtime = parent.findChildMaxTime()
 		parent.mu.Unlock()
 		return nil, nil
 	}
