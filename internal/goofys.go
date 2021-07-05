@@ -482,6 +482,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 		prev.AttrTime = TIME_MAX
 
 	}
+	prev.addModified(1)
 	fuseLog.Infof("mounted /%v", *prev.FullName())
 	b.mounted = true
 }
@@ -519,6 +520,7 @@ func (fs *Goofys) Unmount(mountPoint string) {
 		}
 		mp = dirInode
 	}
+	mp.addModified(1)
 	mp.ResetForUnmount()
 	return
 }

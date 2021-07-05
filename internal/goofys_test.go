@@ -3731,6 +3731,8 @@ func (s *GoofysTest) TestMountsList(t *C) {
 	t.Assert(*c1.Name, Equals, "cloud1")
 	t.Assert(c1.dir.cloud == cloud, Equals, true)
 	t.Assert(int(c1.Id), Equals, 3)
+
+	s.fs.Unmount("dir4/cloud1")
 }
 
 func (s *GoofysTest) TestMountsNewDir(t *C) {
@@ -3959,6 +3961,10 @@ func (s *GoofysTest) testMountsNested(t *C, cloud StorageBackend,
 	defer resp.Body.Close()
 
 	s.assertEntries(t, in, []string{"in"})
+
+	for _, m := range mounts {
+		s.fs.Unmount(m.name)
+	}
 }
 
 func verifyFileData(t *C, mountPoint string, path string, content *string) {

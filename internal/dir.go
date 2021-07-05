@@ -212,7 +212,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 	return
 }
 
-func (inode *Inode) listObjectsSlurp(lock bool) (err error) {
+func (inode *Inode) listObjectsSlurp(lock bool) (done bool, err error) {
 	cloud, key := inode.cloud()
 	if inode.oldParent != nil {
 		_, key = inode.oldParent.cloud()
@@ -259,9 +259,7 @@ func (inode *Inode) listObjectsSlurp(lock bool) (err error) {
 		}
 
 		if sealed || !resp.IsTruncated {
-			d.dir.listDone = true
-			d.dir.DirTime = time.Now()
-			d.Attributes.Mtime = d.findChildMaxTime()
+			d.sealDir()
 		}
 	}
 
@@ -280,11 +278,7 @@ func (inode *Inode) listObjectsSlurp(lock bool) (err error) {
 	}
 
 	if seal {
-		inode.dir.slurpMarker = nil
-		inode.dir.listMarker = nil
-		inode.dir.listDone = true
-		inode.dir.lastFromCloud = nil
-		inode.dir.DirTime = time.Now()
+		inode.sealDir()
 	} else {
 		// NextContinuationToken is not returned when delimiter is empty, so use obj.Key
 		inode.dir.slurpMarker = obj.Key
@@ -296,7 +290,17 @@ func (inode *Inode) listObjectsSlurp(lock bool) (err error) {
 		inode.dir.lastFromCloud = &last
 	}
 
+	done = seal
 	return
+}
+
+func (inode *Inode) sealDir() {
+	inode.dir.slurpMarker = nil
+	inode.dir.listMarker = nil
+	inode.dir.listDone = true
+	inode.dir.lastFromCloud = nil
+	inode.dir.DirTime = time.Now()
+	inode.Attributes.Mtime = inode.findChildMaxTime()
 }
 
 // Sorting order of entries in directories is slightly inconsistent between goofys
@@ -452,9 +456,7 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	if resp.IsTruncated {
 		dh.inode.dir.listMarker = resp.NextContinuationToken
 	} else {
-		dh.inode.dir.listMarker = nil
-		dh.inode.dir.listDone = true
-		dh.inode.dir.DirTime = time.Now()
+		dh.inode.sealDir()
 	}
 
 	dh.inode.mu.Lock()
@@ -514,7 +516,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 
 	// FIXME Allow to use slurp more than 1 directory level above
 
-	useSlurp := fs.flags.TypeCacheTTL != 0 &&
+	useSlurp := fs.flags.TypeCacheTTL != 0 && dh.inode.dir.cloud == nil &&
 		(dh.inode.Parent != nil && dh.inode.Parent.dir.seqOpenDirScore >= 2)
 
 	if !useSlurp && dh.inode.dir.listMarker == nil ||
@@ -554,10 +556,17 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		// FIXME Maybe allow to skip some objects deep inside the previous directory
 		// by resetting slurp position when it's used after a non-sealed directory
 		parent.mu.Unlock()
+		var done bool
 		if useSlurp {
 			dh.mu.Unlock()
-			err = dh.inode.Parent.listObjectsSlurp(true)
+			done, err = dh.inode.Parent.listObjectsSlurp(true)
 			dh.mu.Lock()
+			if done && !dh.inode.dir.listDone {
+				// Usually subdirs are sealed by slurp
+				// However, it is possible that sometimes they're not
+				// For example, in case of a nested mount...
+				dh.inode.sealDir()
+			}
 		} else {
 			err = dh.listObjectsFlat()
 		}
@@ -1169,7 +1178,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		fromInode.dir.listDone = false
 		fromInode.dir.slurpMarker = nil
 		for !fromInode.dir.listDone {
-			err := fromInode.listObjectsSlurp(false)
+			_, err := fromInode.listObjectsSlurp(false)
 			if err != nil {
 				return err
 			}
