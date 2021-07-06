@@ -851,8 +851,46 @@ func (b *AZBlob) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobA
 }
 
 func (b *AZBlob) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
-	// FIXME: Implement part copy
-	return nil, syscall.ENOSYS
+	c, err := b.refreshToken()
+	if err != nil {
+		return nil, err
+	}
+
+	blob := c.NewBlockBlobURL(*param.Commit.Key)
+	blockId := fmt.Sprintf(*param.Commit.UploadId, param.PartNumber)
+	base64BlockId := base64.StdEncoding.EncodeToString([]byte(blockId))
+
+	srcBlob := c.NewBlockBlobURL(param.CopySource)
+	srcBlobURL := srcBlob.URL()
+	if b.sasTokenProvider == nil {
+		cred, err := azblob.NewSharedKeyCredential(b.config.AccountName, b.config.AccountKey)
+		if err != nil {
+			return nil, err
+		}
+		srcBlobParts := azblob.NewBlobURLParts(srcBlob.URL())
+		srcBlobParts.SAS, err = azblob.BlobSASSignatureValues{
+			Protocol:      azblob.SASProtocolHTTPS,
+			ExpiryTime:    time.Now().UTC().Add(1 * time.Hour),
+			ContainerName: srcBlobParts.ContainerName,
+			BlobName:      srcBlobParts.BlobName,
+			Permissions:   azblob.BlobSASPermissions{Read: true}.String(),
+		}.NewSASQueryParameters(cred)
+		if err != nil {
+			return nil, err
+		}
+		srcBlobURL = srcBlobParts.URL()
+	}
+
+	_, err = blob.StageBlockFromURL(context.TODO(), base64BlockId,
+		srcBlobURL, int64(param.Offset), int64(param.Size),
+		azblob.LeaseAccessConditions{}, azblob.ModifiedAccessConditions{})
+	if err != nil {
+		return nil, mapAZBError(err)
+	}
+
+	return &MultipartBlobCopyOutput{
+		PartId: &base64BlockId,
+	}, nil
 }
 
 func (b *AZBlob) MultipartBlobAbort(param *MultipartBlobCommitInput) (*MultipartBlobAbortOutput, error) {
@@ -869,7 +907,6 @@ func (b *AZBlob) MultipartBlobCommit(param *MultipartBlobCommitInput) (*Multipar
 	blob := c.NewBlockBlobURL(*param.Key)
 	parts := make([]string, param.NumParts)
 
-	// FIXME Allow to skip some part numbers
 	for i := uint32(0); i < param.NumParts; i++ {
 		parts[i] = *param.Parts[i]
 	}
