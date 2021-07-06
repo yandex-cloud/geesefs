@@ -150,7 +150,7 @@ func NewADLv1(bucket string, flags *FlagStorage, config *ADLv1Config) (*ADLv1, e
 		account: parts[0],
 		bucket:  bucket,
 		cap: Capabilities{
-			NoParallelMultipart: true,
+			//NoParallelMultipart: true,
 			DirBlob:             true,
 			Name:                "adl",
 			// ADLv1 fails with 404 if we upload data
