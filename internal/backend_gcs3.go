@@ -18,6 +18,7 @@ import (
 	. "github.com/kahing/goofys/api/common"
 
 	"sync"
+	"syscall"
 
 	"github.com/jacobsa/fuse"
 )
@@ -65,4 +66,12 @@ func (s *GCS3) DeleteBlobs(param *DeleteBlobsInput) (*DeleteBlobsOutput, error) 
 	}
 
 	return &DeleteBlobsOutput{}, nil
+}
+
+// FIXME GCS doesn't have UploadPartCopy, so optimized modification flushing doesn't work
+// You can either reupload the whole object or use some other way of making multipart objects
+// For example, Composite Objects are even better than multipart uploads but intermediate
+// objects should be filtered out from List responses so they don't appear as separate files then
+func (s *GCS3) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
+	return nil, syscall.ENOSYS
 }
