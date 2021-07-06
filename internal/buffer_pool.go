@@ -211,13 +211,13 @@ func (pool *BufferPool) recomputeBufferLimit() {
 	}
 }
 
-func (pool *BufferPool) Use(size int64) {
+func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-	pool.UseUnlocked(size)
+	pool.UseUnlocked(size, ignoreMemoryLimit)
 }
 
-func (pool *BufferPool) UseUnlocked(size int64) {
+func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) {
 	if size > 0 {
 		pool.requests++
 		if pool.requests >= 16 {
@@ -231,14 +231,14 @@ func (pool *BufferPool) UseUnlocked(size int64) {
 		// Try to free clean buffers, then flush dirty buffers
 		freed, canFreeMoreAsync := pool.FreeSomeCleanBuffers(pool.cur+size - pool.max)
 		bufferLog.Debugf("Freed %v, now: %v %v %v", freed, pool.cur, size, pool.max)
-		for pool.cur+size > pool.max && canFreeMoreAsync {
+		for pool.cur+size > pool.max && canFreeMoreAsync && !ignoreMemoryLimit {
 			pool.wantFree++
 			pool.cond.Wait()
 			pool.wantFree--
 			freed, canFreeMoreAsync = pool.FreeSomeCleanBuffers(pool.cur+size - pool.max)
 			bufferLog.Debugf("Freed %v, now: %v %v %v", freed, pool.cur, size, pool.max)
 		}
-		if pool.cur+size > pool.max {
+		if pool.cur+size > pool.max && !ignoreMemoryLimit {
 			debug.FreeOSMemory()
 			pool.recomputeBufferLimit()
 			if pool.cur+size > pool.max {

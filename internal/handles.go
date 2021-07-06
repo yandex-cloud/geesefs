@@ -323,7 +323,7 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 			if !b.zero {
 				b.ptr.refs--
 				if b.ptr.refs == 0 {
-					inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)))
+					inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
 				}
 			}
 		}

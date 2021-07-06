@@ -320,7 +320,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 					buf.ptr.refs--
 					if buf.ptr.refs == 0 {
 						freed += int64(len(buf.ptr.mem))
-						fs.bufferPool.UseUnlocked(-int64(len(buf.ptr.mem)))
+						fs.bufferPool.UseUnlocked(-int64(len(buf.ptr.mem)), false)
 					}
 					inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)
 					i--

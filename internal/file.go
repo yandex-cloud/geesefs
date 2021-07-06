@@ -279,7 +279,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 			if !b.zero {
 				b.ptr.refs--
 				if b.ptr.refs == 0 {
-					inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)))
+					inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
 				}
 			}
 			end--
@@ -315,7 +315,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 	end := uint64(offset)+uint64(len(data))
 
 	// Try to reserve space without the inode lock
-	fh.inode.fs.bufferPool.Use(int64(len(data)))
+	fh.inode.fs.bufferPool.Use(int64(len(data)), false)
 
 	fh.inode.mu.Lock()
 
@@ -338,7 +338,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 
 	// Correct memory usage
 	if allocated != int64(len(data)) {
-		fh.inode.fs.bufferPool.Use(allocated-int64(len(data)))
+		fh.inode.fs.bufferPool.Use(allocated-int64(len(data)), false)
 	}
 
 	return
@@ -359,7 +359,7 @@ func appendRequest(requests []uint64, offset uint64, size uint64, requestCost ui
 // Load some inode data into memory
 // Must be called with inode.mu taken
 // Loaded range should be guarded against eviction by adding it into inode.readRanges
-func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool) (requestErr error) {
+func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool, ignoreMemoryLimit bool) (requestErr error) {
 
 	end := offset+size
 
@@ -415,20 +415,20 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool) (r
 		go func() {
 			defer wg.Done()
 			// Maybe free some buffers first
-			inode.fs.bufferPool.Use(int64(size))
+			inode.fs.bufferPool.Use(int64(size), ignoreMemoryLimit)
 			resp, err := cloud.GetBlob(&GetBlobInput{
 				Key:   key,
 				Start: offset,
 				Count: size,
 			})
 			if err != nil {
-				inode.fs.bufferPool.Use(-int64(size))
+				inode.fs.bufferPool.Use(-int64(size), false)
 				requestErr = err
 				return
 			}
 			data, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
-				inode.fs.bufferPool.Use(-int64(size))
+				inode.fs.bufferPool.Use(-int64(size), false)
 				requestErr = err
 				return
 			}
@@ -442,7 +442,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool) (r
 			inode.mu.Unlock()
 			// Correct memory usage
 			if allocated < int64(size) {
-				inode.fs.bufferPool.Use(allocated-int64(size))
+				inode.fs.bufferPool.Use(allocated-int64(size), false)
 			}
 		}()
 	}
@@ -513,7 +513,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	// FIXME: Track random reads and temporarily disable readahead, as in the original
 	var requestErr error
 	if fh.inode.CacheState != ST_CREATED {
-		requestErr = fh.inode.LoadRange(offset, end-offset, false)
+		requestErr = fh.inode.LoadRange(offset, end-offset, false, false)
 	}
 
 	// copy cached buffers into the result
@@ -587,7 +587,7 @@ func (fh *FileHandle) Release() {
 	fh.inode.fs.WakeupFlusher()
 }
 
-func (inode *Inode) CheckLoadRange(offset uint64, size uint64) {
+func (inode *Inode) CheckLoadRange(offset uint64, size uint64, ignoreMemoryLimit bool) {
 	loadStart := uint64(0)
 	loadEnd := uint64(0)
 	last := offset
@@ -612,7 +612,7 @@ func (inode *Inode) CheckLoadRange(offset uint64, size uint64) {
 		loadEnd = end
 	}
 	if loadEnd > 0 {
-		inode.LoadRange(loadStart, loadEnd-loadStart, true)
+		inode.LoadRange(loadStart, loadEnd-loadStart, true, ignoreMemoryLimit)
 	}
 }
 
@@ -889,6 +889,7 @@ func (inode *Inode) SendUpload() bool {
 	}
 
 	// Pick part(s) to flush
+	initiated := false
 	for i := 0; i < len(inode.buffers); i++ {
 		buf := &inode.buffers[i]
 		if buf.dirtyID != 0 && !buf.flushed && !inode.IsRangeLocked(buf.offset, buf.length, true) {
@@ -903,6 +904,7 @@ func (inode *Inode) SendUpload() bool {
 				inode.IsFlushing++
 				atomic.AddInt64(&inode.fs.activeFlushers, 1)
 				go inode.FlushPart(part)
+				initiated = true
 				if atomic.LoadInt64(&inode.fs.activeFlushers) >= inode.fs.flags.MaxFlushers ||
 					inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
 					return true
@@ -911,7 +913,7 @@ func (inode *Inode) SendUpload() bool {
 		}
 	}
 
-	return false
+	return initiated
 }
 
 func (inode *Inode) isStillDirty() bool {
@@ -943,7 +945,7 @@ func (inode *Inode) FlushSmallObject() {
 	inode.LockRange(0, sz, true)
 
 	if inode.CacheState == ST_MODIFIED {
-		inode.CheckLoadRange(0, sz)
+		inode.CheckLoadRange(0, sz, true)
 	}
 
 	// Key may have been changed in between (if it was moved)
@@ -1112,7 +1114,10 @@ func (inode *Inode) FlushPart(part uint64) {
 
 	// Load part from the server if we have to read-modify-write it
 	if inode.CacheState == ST_MODIFIED {
-		inode.CheckLoadRange(partOffset, partSize)
+		// Ignore memory limit to not produce a deadlock when we need to free some memory
+		// by flushing objects, but we can't flush a part without allocating more memory
+		// for read-modify-write...
+		inode.CheckLoadRange(partOffset, partSize, true)
 		// File size may have been changed again
 		if inode.Attributes.Size <= partOffset || inode.CacheState != ST_MODIFIED {
 			// Abort flush
