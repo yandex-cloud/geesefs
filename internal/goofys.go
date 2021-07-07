@@ -634,6 +634,30 @@ func (fs *Goofys) SetXattr(ctx context.Context,
 	return
 }
 
+func (fs *Goofys) CreateSymlink(ctx context.Context,
+	op *fuseops.CreateSymlinkOp) (err error) {
+	fs.mu.RLock()
+	parent := fs.getInodeOrDie(op.Parent)
+	fs.mu.RUnlock()
+
+	inode := parent.CreateSymlink(op.Name, op.Target)
+	op.Entry.Child = inode.Id
+	op.Entry.Attributes = inode.InflateAttributes()
+	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+	op.Entry.EntryExpiration = time.Now().Add(fs.flags.TypeCacheTTL)
+	return
+}
+
+func (fs *Goofys) ReadSymlink(ctx context.Context,
+	op *fuseops.ReadSymlinkOp) (err error) {
+	fs.mu.RLock()
+	inode := fs.getInodeOrDie(op.Inode)
+	fs.mu.RUnlock()
+
+	op.Target, err = inode.ReadSymlink()
+	return
+}
+
 func mapHttpError(status int) error {
 	switch status {
 	case 400:

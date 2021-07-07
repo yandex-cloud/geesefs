@@ -985,6 +985,55 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 	return
 }
 
+func (parent *Inode) CreateSymlink(
+	name string, target string) (inode *Inode) {
+
+	parent.logFuse("CreateSymlink", name)
+
+	fs := parent.fs
+
+	parent.mu.Lock()
+	defer parent.mu.Unlock()
+
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	now := time.Now()
+	inode = NewInode(fs, parent, &name)
+	inode.userMetadata = make(map[string][]byte)
+	inode.userMetadata[inode.fs.flags.SymlinkAttr] = []byte(target)
+	inode.userMetadataDirty = true
+	inode.mu.Lock()
+	defer inode.mu.Unlock()
+	inode.Attributes = InodeAttributes{
+		Size:  0,
+		Mtime: now,
+	}
+	// one ref is for lookup
+	inode.Ref()
+	// another ref is for being in Children
+	fs.insertInode(parent, inode)
+	inode.SetCacheState(ST_CREATED)
+	fs.WakeupFlusher()
+
+	parent.touch()
+
+	return inode
+}
+
+func (inode *Inode) ReadSymlink() (target string, err error) {
+	inode.logFuse("ReadSymlink")
+
+	inode.mu.Lock()
+	defer inode.mu.Unlock()
+
+	if inode.userMetadata[inode.fs.flags.SymlinkAttr] == nil {
+		return "", fuse.EIO
+	}
+
+	return string(inode.userMetadata[inode.fs.flags.SymlinkAttr]), nil
+}
+
 func (dir *Inode) SendMkDir() {
 	cloud, key := dir.Parent.cloud()
 	key = appendChildName(key, *dir.Name)

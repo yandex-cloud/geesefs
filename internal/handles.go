@@ -16,7 +16,6 @@ package internal
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -82,7 +81,7 @@ type Inode struct {
 
 	// We are not very consistent about enforcing locks for `Parent` because, the
 	// parent field very very rarely changes and it is generally fine to operate on
-	// stale parent informaiton
+	// stale parent information
 	Parent *Inode
 
 	dir *DirInodeData
@@ -192,12 +191,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	if item.Metadata != nil {
 		inode.userMetadata = make(map[string][]byte)
 		for k, v := range item.Metadata {
-			k = strings.ToLower(k)
-			value, err := url.PathUnescape(*v)
-			if err != nil {
-				value = *v
-			}
-			inode.userMetadata[k] = []byte(value)
+			inode.userMetadata[strings.ToLower(k)] = []byte(*v)
 		}
 	}
 }
@@ -285,6 +279,9 @@ func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 	if inode.dir != nil {
 		attr.Nlink = 2
 		attr.Mode = inode.fs.flags.DirMode | os.ModeDir
+	} else if inode.userMetadata != nil && inode.userMetadata[inode.fs.flags.SymlinkAttr] != nil {
+		attr.Nlink = 1
+		attr.Mode = inode.fs.flags.FileMode | os.ModeSymlink
 	} else {
 		attr.Nlink = 1
 		attr.Mode = inode.fs.flags.FileMode
@@ -370,12 +367,7 @@ func (inode *Inode) fillXattrFromHead(resp *HeadBlobOutput) {
 	}
 
 	for k, v := range resp.Metadata {
-		k = strings.ToLower(k)
-		value, err := url.PathUnescape(*v)
-		if err != nil {
-			value = *v
-		}
-		inode.userMetadata[k] = []byte(value)
+		inode.userMetadata[strings.ToLower(k)] = []byte(*v)
 	}
 }
 
@@ -425,7 +417,7 @@ func (inode *Inode) getXattrMap(name string, userOnly bool) (
 
 		newName = name[len(xattrPrefix):]
 		meta = inode.s3Metadata
-	} else if strings.HasPrefix(name, "user.") {
+	} else if strings.HasPrefix(name, "user.") && name != "user."+inode.fs.flags.SymlinkAttr {
 		err = inode.fillXattr()
 		if err != nil {
 			return nil, "", err

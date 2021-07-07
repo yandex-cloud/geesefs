@@ -61,6 +61,7 @@ type FlagStorage struct {
 	SinglePartMB uint64
 	MaxMergeCopyMB uint64
 	IgnoreFsync bool
+	SymlinkAttr string
 
 	// Debugging
 	DebugMain  bool

@@ -282,6 +282,12 @@ func NewApp() (app *cli.App) {
 				Usage: "Do not wait until changes are persisted to the server on fsync() call (default: off)",
 			},
 
+			cli.StringFlag{
+				Name:  "symlink-attr",
+				Value: "--symlink-target",
+				Usage: "Symbolic link target metadata attribute (default: --symlink-target)",
+			},
+
 			cli.DurationFlag{
 				Name:  "stat-cache-ttl",
 				Value: time.Minute,
@@ -353,7 +359,7 @@ func NewApp() (app *cli.App) {
 	for _, f := range []string{"memory-limit", "cheap", "no-implicit-dir",
 		"no-dir-object", "max-flushers", "max-parallel-parts", "max-parallel-copy",
 		"read-ahead", "read-merge", "single-part", "max-merge-copy", "ignore-fsync",
-		"stat-cache-ttl", "type-cache-ttl", "http-timeout"} {
+		"symlink-attr", "stat-cache-ttl", "type-cache-ttl", "http-timeout"} {
 		flagCategories[f] = "tuning"
 	}
 
@@ -431,6 +437,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		SinglePartMB: uint64(singlePart),
 		MaxMergeCopyMB: uint64(c.Int("max-merge-copy")),
 		IgnoreFsync:  c.Bool("ignore-fsync"),
+		SymlinkAttr:  c.String("symlink-attr"),
 
 		// Common Backend Config
 		Endpoint:       c.String("endpoint"),
