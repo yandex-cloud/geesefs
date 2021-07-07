@@ -16,6 +16,7 @@ package internal
 
 import (
 	"fmt"
+	"strings"
 	"time"
 	"unicode"
 
@@ -122,6 +123,16 @@ func NilStr(v *string) string {
 	} else {
 		return *v
 	}
+}
+
+func PMetadata(m map[string]string) map[string]*string {
+	metadata := make(map[string]*string)
+	for k, _ := range m {
+		k = strings.ToLower(k)
+		v := m[k]
+		metadata[k] = &v
+	}
+	return metadata
 }
 
 func xattrEscape(value []byte) (s string) {

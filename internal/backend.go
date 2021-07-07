@@ -37,18 +37,20 @@ type HeadBlobInput struct {
 }
 
 type BlobItemOutput struct {
+	// FIXME I'd remove these ubiquitous string pointers and convert them to strings :)
 	Key          *string
 	ETag         *string
 	LastModified *time.Time
 	Size         uint64
 	StorageClass *string
+	// may be nil in list responses for backends that don't return metadata in listings
+	Metadata     map[string]*string
 }
 
 type HeadBlobOutput struct {
 	BlobItemOutput
 
 	ContentType *string
-	Metadata    map[string]*string
 	IsDirBlob   bool
 
 	RequestId string

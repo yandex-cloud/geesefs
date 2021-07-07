@@ -343,12 +343,38 @@ func parseADLv2Time(v string) *time.Time {
 	}
 }
 
-func adlv2ToBlobItem(resp *http.Response, key string) BlobItemOutput {
+func adlv2ToBlobItem(res adl2.ReadCloser, objKey string) BlobItemOutput {
+	metadata := make(map[string]*string)
+	for _, p := range res.Header["X-Ms-Properties"] {
+		csv := strings.Split(p, ",")
+		for _, kv := range csv {
+			kv = strings.TrimSpace(kv)
+			if len(kv) == 0 {
+				continue
+			}
+
+			s := strings.SplitN(kv, "=", 2)
+			if len(s) != 2 {
+				adl2Log.Warnf("Dropping property: %v: %v", objKey, kv)
+				continue
+			}
+			key := strings.TrimSpace(s[0])
+			value := strings.TrimSpace(s[1])
+			buf, err := base64.StdEncoding.DecodeString(value)
+			if err != nil {
+				adl2Log.Warnf("Unable to decode property: %v: %v",
+					objKey, key)
+				continue
+			}
+			metadata[key] = PString(string(buf))
+		}
+	}
 	return BlobItemOutput{
-		Key:          &key,
-		ETag:         getHeader(resp, "ETag"),
-		Size:         uint64(resp.ContentLength),
-		LastModified: parseADLv2Time(resp.Header.Get("Last-Modified")),
+		Key:          &objKey,
+		ETag:         getHeader(res.Response.Response, "ETag"),
+		Size:         uint64(res.Response.Response.ContentLength),
+		LastModified: parseADLv2Time(res.Response.Response.Header.Get("Last-Modified")),
+		Metadata:     metadata,
 	}
 }
 
@@ -577,38 +603,11 @@ func (b *ADLv2) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
 		return nil, mapADLv2Error(res.Response.Response, err, false)
 	}
 
-	metadata := make(map[string]*string)
-	for _, p := range res.Header["X-Ms-Properties"] {
-		csv := strings.Split(p, ",")
-		for _, kv := range csv {
-			kv = strings.TrimSpace(kv)
-			if len(kv) == 0 {
-				continue
-			}
-
-			s := strings.SplitN(kv, "=", 2)
-			if len(s) != 2 {
-				adl2Log.Warnf("Dropping property: %v: %v", param.Key, kv)
-				continue
-			}
-			key := strings.TrimSpace(s[0])
-			value := strings.TrimSpace(s[1])
-			buf, err := base64.StdEncoding.DecodeString(value)
-			if err != nil {
-				adl2Log.Warnf("Unable to decode property: %v: %v",
-					param.Key, key)
-				continue
-			}
-			metadata[key] = PString(string(buf))
-		}
-	}
-
 	return &GetBlobOutput{
 		HeadBlobOutput: HeadBlobOutput{
-			BlobItemOutput: adlv2ToBlobItem(res.Response.Response, param.Key),
+			BlobItemOutput: adlv2ToBlobItem(res, param.Key),
 			ContentType:    getHeader(res.Response.Response, "Content-Type"),
 			IsDirBlob:      res.Header.Get("X-Ms-Resource-Type") == string(adl2.Directory),
-			Metadata:       metadata,
 		},
 		Body: *res.Value,
 	}, nil

@@ -405,16 +405,6 @@ func mapAZBError(err error) error {
 	}
 }
 
-func pMetadata(m map[string]string) map[string]*string {
-	metadata := make(map[string]*string)
-	for k, _ := range m {
-		k = strings.ToLower(k)
-		v := m[k]
-		metadata[k] = &v
-	}
-	return metadata
-}
-
 func nilMetadata(m map[string]*string) map[string]string {
 	metadata := make(map[string]string)
 	for k, v := range m {
@@ -462,9 +452,9 @@ func (b *AZBlob) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
 			LastModified: PTime(resp.LastModified()),
 			Size:         uint64(resp.ContentLength()),
 			StorageClass: PString(resp.AccessTier()),
+			Metadata:     PMetadata(metadata),
 		},
 		ContentType: PString(resp.ContentType()),
-		Metadata:    pMetadata(metadata),
 		IsDirBlob:   isDir,
 	}, nil
 }
@@ -593,12 +583,15 @@ func (b *AZBlob) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 			}
 		}
 
+		pmeta := PMetadata(i.Metadata)
+		delete(pmeta, AzureDirBlobMetadataKey)
 		items = append(items, BlobItemOutput{
 			Key:          &i.Name,
 			ETag:         PString(string(p.Etag)),
 			LastModified: PTime(p.LastModified),
 			Size:         uint64(*p.ContentLength),
 			StorageClass: PString(string(p.AccessTier)),
+			Metadata:     pmeta,
 		})
 	}
 
@@ -757,7 +750,7 @@ func (b *AZBlob) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
 		return nil, mapAZBError(err)
 	}
 
-	metadata := pMetadata(resp.NewMetadata())
+	metadata := PMetadata(resp.NewMetadata())
 	delete(metadata, AzureDirBlobMetadataKey)
 
 	return &GetBlobOutput{
@@ -767,9 +760,9 @@ func (b *AZBlob) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
 				ETag:         PString(string(resp.ETag())),
 				LastModified: PTime(resp.LastModified()),
 				Size:         uint64(resp.ContentLength()),
+				Metadata:     metadata,
 			},
 			ContentType: PString(resp.ContentType()),
-			Metadata:    metadata,
 		},
 		Body: resp.Body(azblob.RetryReaderOptions{}),
 	}, nil

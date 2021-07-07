@@ -189,7 +189,17 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	if inode.AttrTime.Before(now) {
 		inode.AttrTime = now
 	}
-	// FIXME: support xattrs returned from List responses, like in GCS
+	if item.Metadata != nil {
+		inode.userMetadata = make(map[string][]byte)
+		for k, v := range item.Metadata {
+			k = strings.ToLower(k)
+			value, err := url.PathUnescape(*v)
+			if err != nil {
+				value = *v
+			}
+			inode.userMetadata[k] = []byte(value)
+		}
+	}
 }
 
 // LOCKS_REQUIRED(inode.mu)
