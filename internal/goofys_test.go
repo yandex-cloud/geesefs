@@ -545,7 +545,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		t.Assert(err, IsNil)
 
 		s.cloud = s3
-		s3.aws = hasEnv("AWS")
+		s3.config.ListV1Ext = hasEnv("YANDEX")
 		if hasEnv("EVENTUAL_CONSISTENCY") {
 			s.cloud = NewS3BucketEventualConsistency(s3)
 		}
@@ -3555,7 +3555,7 @@ func (s *GoofysTest) newBackend(t *C, bucket string, createBucket bool) (cloud S
 		s3, err := NewS3(bucket, s.fs.flags, config)
 		t.Assert(err, IsNil)
 
-		s3.aws = hasEnv("AWS")
+		s3.config.ListV1Ext = hasEnv("YANDEX")
 
 		if s.emulator {
 			s3.Handlers.Sign.Clear()

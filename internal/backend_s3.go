@@ -45,7 +45,6 @@ type S3Backend struct {
 	config    *S3Config
 	sseType   string
 
-	aws      bool
 	gcs      bool
 	v2Signer bool
 }
@@ -238,12 +237,11 @@ func (s *S3Backend) Init(key string) error {
 	var err error
 
 	if !s.config.RegionSet {
-		err, isAws = s.detectBucketLocationByHEAD()
+		err, _ = s.detectBucketLocationByHEAD()
 		if err == nil {
 			// we detected a region header, this is probably AWS S3,
 			// or we can use anonymous access, or both
 			s.newS3()
-			s.aws = isAws
 		} else if err == syscall.ENXIO {
 			return fmt.Errorf("bucket %v does not exist", s.bucket)
 		} else {
@@ -280,7 +278,22 @@ func (s *S3Backend) Init(key string) error {
 }
 
 func (s *S3Backend) ListObjectsV2(params *s3.ListObjectsV2Input) (*s3.ListObjectsV2Output, string, error) {
-	if s.aws {
+	if s.config.ListV1Ext {
+		in := s3.ListObjectsV1ExtInput(*params)
+		req, resp := s.S3.ListObjectsV1ExtRequest(&in)
+		err := req.Send()
+		if err != nil {
+			return nil, "", err
+		}
+		out := s3.ListObjectsV2Output(*resp)
+		for _, obj := range out.Contents {
+			// Make non-nil maps for all objects so that we know metadata is empty
+			if obj.UserMetadata == nil {
+				obj.UserMetadata = make(map[string]*string)
+			}
+		}
+		return &out, s.getRequestId(req), nil
+	} else if s.config.ListV2 {
 		req, resp := s.S3.ListObjectsV2Request(params)
 		err := req.Send()
 		if err != nil {
@@ -411,6 +424,7 @@ func (s *S3Backend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 			LastModified: i.LastModified,
 			Size:         uint64(*i.Size),
 			StorageClass: i.StorageClass,
+			Metadata:     i.UserMetadata,
 		})
 	}
 

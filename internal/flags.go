@@ -193,6 +193,17 @@ func NewApp() (app *cli.App) {
 				Value: "",
 			},
 
+			cli.BoolFlag{
+				Name:  "no-checksum",
+				Usage: "Disable content MD5 and SHA256 checksums for performance (default: off)",
+			},
+
+			cli.StringFlag{
+				Name:  "list-type",
+				Usage: "Listing type to use: ext-v1 (yandex only), 2 or 1 (default: ext-v1 for yandex, 1 for others)",
+				Value: "",
+			},
+
 			/// http://docs.aws.amazon.com/AmazonS3/latest/dev/acl-overview.html#canned-acl
 			cli.StringFlag{
 				Name:  "acl",
@@ -352,7 +363,8 @@ func NewApp() (app *cli.App) {
 
 	flagCategories = map[string]string{}
 
-	for _, f := range []string{"region", "sse", "sse-kms", "sse-c", "storage-class", "acl", "requester-pays"} {
+	for _, f := range []string{"region", "sse", "sse-kms", "sse-c", "storage-class", "acl", "requester-pays",
+		"no-checksum", "list-type"} {
 		flagCategories[f] = "aws"
 	}
 
@@ -451,10 +463,15 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		LogFile:    c.String("log-file"),
 	}
 
+	if strings.Index(flags.Endpoint, "yandexcloud") >= 0 && !c.IsSet("list-type") {
+		c.Set("list-type", "ext-v1")
+	}
+
 	// S3
 	if c.IsSet("region") || c.IsSet("requester-pays") || c.IsSet("storage-class") ||
 		c.IsSet("profile") || c.IsSet("sse") || c.IsSet("sse-kms") ||
-		c.IsSet("sse-c") || c.IsSet("acl") || c.IsSet("subdomain") {
+		c.IsSet("sse-c") || c.IsSet("acl") || c.IsSet("subdomain") ||
+		c.IsSet("no-checksum") || c.IsSet("list-type") {
 
 		if flags.Backend == nil {
 			flags.Backend = (&S3Config{}).Init()
@@ -472,6 +489,12 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.SseC = c.String("sse-c")
 		config.ACL = c.String("acl")
 		config.Subdomain = c.Bool("subdomain")
+		config.NoChecksum = c.Bool("no-checksum")
+		if c.IsSet("list-type") {
+			listType := c.String("list-type")
+			config.ListV1Ext = listType == "ext-v1"
+			config.ListV2 = listType == "2"
+		}
 
 		// KMS implies SSE
 		if config.UseKMS {

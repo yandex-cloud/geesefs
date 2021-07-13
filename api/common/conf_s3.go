@@ -48,6 +48,9 @@ type S3Config struct {
 	SseC       string
 	SseCDigest string
 	ACL        string
+	NoChecksum bool
+	ListV2     bool
+	ListV1Ext  bool
 
 	Subdomain bool
 
@@ -79,6 +82,9 @@ func (c *S3Config) ToAwsConfig(flags *FlagStorage) (*aws.Config, error) {
 	})
 	if flags.DebugS3 {
 		awsConfig.LogLevel = aws.LogLevel(aws.LogDebug | aws.LogDebugWithRequestErrors)
+	}
+	if c.NoChecksum {
+		awsConfig.S3DisableContentMD5Validation = aws.Bool(true)
 	}
 
 	if c.Credentials == nil {
