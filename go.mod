@@ -37,3 +37,5 @@ require (
 )
 
 replace github.com/jacobsa/fuse => github.com/kahing/fusego v0.0.0-20200327063725-ca77844c7bcc
+
+replace github.com/aws/aws-sdk-go => ./s3ext
