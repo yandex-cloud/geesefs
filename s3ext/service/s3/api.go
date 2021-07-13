@@ -6447,6 +6447,83 @@ func (c *S3) ListObjectsPagesWithContext(ctx aws.Context, input *ListObjectsInpu
 	return p.Err()
 }
 
+const opListObjectsV1Ext = "ListObjectsV1Ext"
+
+// ListObjectsV1ExtRequest generates a "aws/request.Request" representing the
+// client's request for the ListObjectsV1Ext operation. The "output" return
+// value will be populated with the request's response once the request completes
+// successfully.
+//
+// Use "Send" method on the returned Request to send the API call to the service.
+// the "output" return value is not valid until after Send returns without error.
+//
+// See ListObjectsV1Ext for more information on using the ListObjectsV1Ext
+// API call, and error handling.
+//
+// This method is useful when you want to inject custom logic or configuration
+// into the SDK's request lifecycle. Such as custom headers, or retry logic.
+//
+//
+//    // Example sending a request using the ListObjectsV1ExtRequest method.
+//    req, resp := client.ListObjectsV1ExtRequest(params)
+//
+//    err := req.Send()
+//    if err == nil { // resp is now filled
+//        fmt.Println(resp)
+//    }
+//
+// See also, https://docs.aws.amazon.com/goto/WebAPI/s3-2006-03-01/ListObjectsV1Ext
+func (c *S3) ListObjectsV1ExtRequest(input *ListObjectsV1ExtInput) (req *request.Request, output *ListObjectsV1ExtOutput) {
+	op := &request.Operation{
+		Name:       opListObjectsV1Ext,
+		HTTPMethod: "GET",
+		HTTPPath:   "/{Bucket}?list-type=ext-v1",
+	}
+
+	if input == nil {
+		input = &ListObjectsV1ExtInput{}
+	}
+
+	output = &ListObjectsV1ExtOutput{}
+	req = c.newRequest(op, input, output)
+	return
+}
+
+// ListObjectsV1Ext API operation for Amazon Simple Storage Service.
+//
+// Returns awserr.Error for service API and SDK errors. Use runtime type assertions
+// with awserr.Error's Code and Message methods to get detailed information about
+// the error.
+//
+// See the AWS API reference guide for Amazon Simple Storage Service's
+// API operation ListObjectsV1Ext for usage and error information.
+//
+// Returned Error Codes:
+//   * ErrCodeNoSuchBucket "NoSuchBucket"
+//   The specified bucket does not exist.
+//
+// See also, https://docs.aws.amazon.com/goto/WebAPI/s3-2006-03-01/ListObjectsV1Ext
+func (c *S3) ListObjectsV1Ext(input *ListObjectsV1ExtInput) (*ListObjectsV1ExtOutput, error) {
+	req, out := c.ListObjectsV1ExtRequest(input)
+	return out, req.Send()
+}
+
+// ListObjectsV1ExtWithContext is the same as ListObjectsV1Ext with the addition of
+// the ability to pass a context and additional request options.
+//
+// See ListObjectsV1Ext for details on how to use this API operation.
+//
+// The context must be non-nil and will be used for request cancellation. If
+// the context is nil a panic will occur. In the future the SDK may create
+// sub-contexts for http.Requests. See https://golang.org/pkg/context/
+// for more information on using Contexts.
+func (c *S3) ListObjectsV1ExtWithContext(ctx aws.Context, input *ListObjectsV1ExtInput, opts ...request.Option) (*ListObjectsV1ExtOutput, error) {
+	req, out := c.ListObjectsV1ExtRequest(input)
+	req.SetContext(ctx)
+	req.ApplyOptions(opts...)
+	return out, req.Send()
+}
+
 const opListObjectsV2 = "ListObjectsV2"
 
 // ListObjectsV2Request generates a "aws/request.Request" representing the
@@ -24912,6 +24989,358 @@ func (s *ListObjectsOutput) SetPrefix(v string) *ListObjectsOutput {
 	return s
 }
 
+type ListObjectsV1ExtInput struct {
+	_ struct{} `locationName:"ListObjectsV2Request" type:"structure"`
+
+	// Bucket name to list.
+	//
+	// When using this action with an access point, you must direct requests to
+	// the access point hostname. The access point hostname takes the form AccessPointName-AccountId.s3-accesspoint.Region.amazonaws.com.
+	// When using this action with an access point through the AWS SDKs, you provide
+	// the access point ARN in place of the bucket name. For more information about
+	// access point ARNs, see Using Access Points (https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-access-points.html)
+	// in the Amazon S3 User Guide.
+	//
+	// When using this action with Amazon S3 on Outposts, you must direct requests
+	// to the S3 on Outposts hostname. The S3 on Outposts hostname takes the form
+	// AccessPointName-AccountId.outpostID.s3-outposts.Region.amazonaws.com. When
+	// using this action using S3 on Outposts through the AWS SDKs, you provide
+	// the Outposts bucket ARN in place of the bucket name. For more information
+	// about S3 on Outposts ARNs, see Using S3 on Outposts (https://docs.aws.amazon.com/AmazonS3/latest/userguide/S3onOutposts.html)
+	// in the Amazon S3 User Guide.
+	//
+	// Bucket is a required field
+	Bucket *string `location:"uri" locationName:"Bucket" type:"string" required:"true"`
+
+	// ContinuationToken indicates Amazon S3 that the list is being continued on
+	// this bucket with a token. ContinuationToken is obfuscated and is not a real
+	// key.
+	ContinuationToken *string `location:"querystring" locationName:"continuation-token" type:"string"`
+
+	// A delimiter is a character you use to group keys.
+	Delimiter *string `location:"querystring" locationName:"delimiter" type:"string"`
+
+	// Encoding type used by Amazon S3 to encode object keys in the response.
+	EncodingType *string `location:"querystring" locationName:"encoding-type" type:"string" enum:"EncodingType"`
+
+	// The account ID of the expected bucket owner. If the bucket is owned by a
+	// different account, the request will fail with an HTTP 403 (Access Denied)
+	// error.
+	ExpectedBucketOwner *string `location:"header" locationName:"x-amz-expected-bucket-owner" type:"string"`
+
+	// The owner field is not present in listV2 by default, if you want to return
+	// owner field with each key in the result then set the fetch owner field to
+	// true.
+	FetchOwner *bool `location:"querystring" locationName:"fetch-owner" type:"boolean"`
+
+	// Sets the maximum number of keys returned in the response. By default the
+	// action returns up to 1,000 key names. The response might contain fewer keys
+	// but will never contain more.
+	MaxKeys *int64 `location:"querystring" locationName:"max-keys" type:"integer"`
+
+	// Limits the response to keys that begin with the specified prefix.
+	Prefix *string `location:"querystring" locationName:"prefix" type:"string"`
+
+	// Confirms that the requester knows that she or he will be charged for the
+	// list objects request in V2 style. Bucket owners need not specify this parameter
+	// in their requests.
+	RequestPayer *string `location:"header" locationName:"x-amz-request-payer" type:"string" enum:"RequestPayer"`
+
+	// StartAfter is where you want Amazon S3 to start listing from. Amazon S3 starts
+	// listing after this specified key. StartAfter can be any key in the bucket.
+	StartAfter *string `location:"querystring" locationName:"start-after" type:"string"`
+}
+
+// String returns the string representation
+func (s ListObjectsV1ExtInput) String() string {
+	return awsutil.Prettify(s)
+}
+
+// GoString returns the string representation
+func (s ListObjectsV1ExtInput) GoString() string {
+	return s.String()
+}
+
+// Validate inspects the fields of the type to determine if they are valid.
+func (s *ListObjectsV1ExtInput) Validate() error {
+	invalidParams := request.ErrInvalidParams{Context: "ListObjectsV1ExtInput"}
+	if s.Bucket == nil {
+		invalidParams.Add(request.NewErrParamRequired("Bucket"))
+	}
+	if s.Bucket != nil && len(*s.Bucket) < 1 {
+		invalidParams.Add(request.NewErrParamMinLen("Bucket", 1))
+	}
+
+	if invalidParams.Len() > 0 {
+		return invalidParams
+	}
+	return nil
+}
+
+// SetBucket sets the Bucket field's value.
+func (s *ListObjectsV1ExtInput) SetBucket(v string) *ListObjectsV1ExtInput {
+	s.Bucket = &v
+	return s
+}
+
+func (s *ListObjectsV1ExtInput) getBucket() (v string) {
+	if s.Bucket == nil {
+		return v
+	}
+	return *s.Bucket
+}
+
+// SetContinuationToken sets the ContinuationToken field's value.
+func (s *ListObjectsV1ExtInput) SetContinuationToken(v string) *ListObjectsV1ExtInput {
+	s.ContinuationToken = &v
+	return s
+}
+
+// SetDelimiter sets the Delimiter field's value.
+func (s *ListObjectsV1ExtInput) SetDelimiter(v string) *ListObjectsV1ExtInput {
+	s.Delimiter = &v
+	return s
+}
+
+// SetEncodingType sets the EncodingType field's value.
+func (s *ListObjectsV1ExtInput) SetEncodingType(v string) *ListObjectsV1ExtInput {
+	s.EncodingType = &v
+	return s
+}
+
+// SetExpectedBucketOwner sets the ExpectedBucketOwner field's value.
+func (s *ListObjectsV1ExtInput) SetExpectedBucketOwner(v string) *ListObjectsV1ExtInput {
+	s.ExpectedBucketOwner = &v
+	return s
+}
+
+// SetFetchOwner sets the FetchOwner field's value.
+func (s *ListObjectsV1ExtInput) SetFetchOwner(v bool) *ListObjectsV1ExtInput {
+	s.FetchOwner = &v
+	return s
+}
+
+// SetMaxKeys sets the MaxKeys field's value.
+func (s *ListObjectsV1ExtInput) SetMaxKeys(v int64) *ListObjectsV1ExtInput {
+	s.MaxKeys = &v
+	return s
+}
+
+// SetPrefix sets the Prefix field's value.
+func (s *ListObjectsV1ExtInput) SetPrefix(v string) *ListObjectsV1ExtInput {
+	s.Prefix = &v
+	return s
+}
+
+// SetRequestPayer sets the RequestPayer field's value.
+func (s *ListObjectsV1ExtInput) SetRequestPayer(v string) *ListObjectsV1ExtInput {
+	s.RequestPayer = &v
+	return s
+}
+
+// SetStartAfter sets the StartAfter field's value.
+func (s *ListObjectsV1ExtInput) SetStartAfter(v string) *ListObjectsV1ExtInput {
+	s.StartAfter = &v
+	return s
+}
+
+func (s *ListObjectsV1ExtInput) getEndpointARN() (arn.Resource, error) {
+	if s.Bucket == nil {
+		return nil, fmt.Errorf("member Bucket is nil")
+	}
+	return parseEndpointARN(*s.Bucket)
+}
+
+func (s *ListObjectsV1ExtInput) hasEndpointARN() bool {
+	if s.Bucket == nil {
+		return false
+	}
+	return arn.IsARN(*s.Bucket)
+}
+
+// updateArnableField updates the value of the input field that
+// takes an ARN as an input. This method is useful to backfill
+// the parsed resource name from ARN into the input member.
+// It returns a pointer to a modified copy of input and an error.
+// Note that original input is not modified.
+func (s ListObjectsV1ExtInput) updateArnableField(v string) (interface{}, error) {
+	if s.Bucket == nil {
+		return nil, fmt.Errorf("member Bucket is nil")
+	}
+	s.Bucket = aws.String(v)
+	return &s, nil
+}
+
+type ListObjectsV1ExtOutput struct {
+	_ struct{} `type:"structure"`
+
+	// All of the keys (up to 1,000) rolled up into a common prefix count as a single
+	// return when calculating the number of returns.
+	//
+	// A response can contain CommonPrefixes only if you specify a delimiter.
+	//
+	// CommonPrefixes contains all (if there are any) keys between Prefix and the
+	// next occurrence of the string specified by a delimiter.
+	//
+	// CommonPrefixes lists keys that act like subdirectories in the directory specified
+	// by Prefix.
+	//
+	// For example, if the prefix is notes/ and the delimiter is a slash (/) as
+	// in notes/summer/july, the common prefix is notes/summer/. All of the keys
+	// that roll up into a common prefix count as a single return when calculating
+	// the number of returns.
+	CommonPrefixes []*CommonPrefix `type:"list" flattened:"true"`
+
+	// Metadata about each object returned.
+	Contents []*Object `type:"list" flattened:"true"`
+
+	// If ContinuationToken was sent with the request, it is included in the response.
+	ContinuationToken *string `type:"string"`
+
+	// Causes keys that contain the same string between the prefix and the first
+	// occurrence of the delimiter to be rolled up into a single result element
+	// in the CommonPrefixes collection. These rolled-up keys are not returned elsewhere
+	// in the response. Each rolled-up result counts as only one return against
+	// the MaxKeys value.
+	Delimiter *string `type:"string"`
+
+	// Encoding type used by Amazon S3 to encode object key names in the XML response.
+	//
+	// If you specify the encoding-type request parameter, Amazon S3 includes this
+	// element in the response, and returns encoded key name values in the following
+	// response elements:
+	//
+	// Delimiter, Prefix, Key, and StartAfter.
+	EncodingType *string `type:"string" enum:"EncodingType"`
+
+	// Set to false if all of the results were returned. Set to true if more keys
+	// are available to return. If the number of results exceeds that specified
+	// by MaxKeys, all of the results might not be returned.
+	IsTruncated *bool `type:"boolean"`
+
+	// KeyCount is the number of keys returned with this request. KeyCount will
+	// always be less than or equals to MaxKeys field. Say you ask for 50 keys,
+	// your result will include less than equals 50 keys
+	KeyCount *int64 `type:"integer"`
+
+	// Sets the maximum number of keys returned in the response. By default the
+	// action returns up to 1,000 key names. The response might contain fewer keys
+	// but will never contain more.
+	MaxKeys *int64 `type:"integer"`
+
+	// The bucket name.
+	//
+	// When using this action with an access point, you must direct requests to
+	// the access point hostname. The access point hostname takes the form AccessPointName-AccountId.s3-accesspoint.Region.amazonaws.com.
+	// When using this action with an access point through the AWS SDKs, you provide
+	// the access point ARN in place of the bucket name. For more information about
+	// access point ARNs, see Using Access Points (https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-access-points.html)
+	// in the Amazon S3 User Guide.
+	//
+	// When using this action with Amazon S3 on Outposts, you must direct requests
+	// to the S3 on Outposts hostname. The S3 on Outposts hostname takes the form
+	// AccessPointName-AccountId.outpostID.s3-outposts.Region.amazonaws.com. When
+	// using this action using S3 on Outposts through the AWS SDKs, you provide
+	// the Outposts bucket ARN in place of the bucket name. For more information
+	// about S3 on Outposts ARNs, see Using S3 on Outposts (https://docs.aws.amazon.com/AmazonS3/latest/userguide/S3onOutposts.html)
+	// in the Amazon S3 User Guide.
+	Name *string `type:"string"`
+
+	// NextContinuationToken is sent when isTruncated is true, which means there
+	// are more keys in the bucket that can be listed. The next list requests to
+	// Amazon S3 can be continued with this NextContinuationToken. NextContinuationToken
+	// is obfuscated and is not a real key
+	NextContinuationToken *string `type:"string"`
+
+	// Keys that begin with the indicated prefix.
+	Prefix *string `type:"string"`
+
+	// If StartAfter was sent with the request, it is included in the response.
+	StartAfter *string `type:"string"`
+}
+
+// String returns the string representation
+func (s ListObjectsV1ExtOutput) String() string {
+	return awsutil.Prettify(s)
+}
+
+// GoString returns the string representation
+func (s ListObjectsV1ExtOutput) GoString() string {
+	return s.String()
+}
+
+// SetCommonPrefixes sets the CommonPrefixes field's value.
+func (s *ListObjectsV1ExtOutput) SetCommonPrefixes(v []*CommonPrefix) *ListObjectsV1ExtOutput {
+	s.CommonPrefixes = v
+	return s
+}
+
+// SetContents sets the Contents field's value.
+func (s *ListObjectsV1ExtOutput) SetContents(v []*Object) *ListObjectsV1ExtOutput {
+	s.Contents = v
+	return s
+}
+
+// SetContinuationToken sets the ContinuationToken field's value.
+func (s *ListObjectsV1ExtOutput) SetContinuationToken(v string) *ListObjectsV1ExtOutput {
+	s.ContinuationToken = &v
+	return s
+}
+
+// SetDelimiter sets the Delimiter field's value.
+func (s *ListObjectsV1ExtOutput) SetDelimiter(v string) *ListObjectsV1ExtOutput {
+	s.Delimiter = &v
+	return s
+}
+
+// SetEncodingType sets the EncodingType field's value.
+func (s *ListObjectsV1ExtOutput) SetEncodingType(v string) *ListObjectsV1ExtOutput {
+	s.EncodingType = &v
+	return s
+}
+
+// SetIsTruncated sets the IsTruncated field's value.
+func (s *ListObjectsV1ExtOutput) SetIsTruncated(v bool) *ListObjectsV1ExtOutput {
+	s.IsTruncated = &v
+	return s
+}
+
+// SetKeyCount sets the KeyCount field's value.
+func (s *ListObjectsV1ExtOutput) SetKeyCount(v int64) *ListObjectsV1ExtOutput {
+	s.KeyCount = &v
+	return s
+}
+
+// SetMaxKeys sets the MaxKeys field's value.
+func (s *ListObjectsV1ExtOutput) SetMaxKeys(v int64) *ListObjectsV1ExtOutput {
+	s.MaxKeys = &v
+	return s
+}
+
+// SetName sets the Name field's value.
+func (s *ListObjectsV1ExtOutput) SetName(v string) *ListObjectsV1ExtOutput {
+	s.Name = &v
+	return s
+}
+
+// SetNextContinuationToken sets the NextContinuationToken field's value.
+func (s *ListObjectsV1ExtOutput) SetNextContinuationToken(v string) *ListObjectsV1ExtOutput {
+	s.NextContinuationToken = &v
+	return s
+}
+
+// SetPrefix sets the Prefix field's value.
+func (s *ListObjectsV1ExtOutput) SetPrefix(v string) *ListObjectsV1ExtOutput {
+	s.Prefix = &v
+	return s
+}
+
+// SetStartAfter sets the StartAfter field's value.
+func (s *ListObjectsV1ExtOutput) SetStartAfter(v string) *ListObjectsV1ExtOutput {
+	s.StartAfter = &v
+	return s
+}
+
 type ListObjectsV2Input struct {
 	_ struct{} `locationName:"ListObjectsV2Request" type:"structure"`
 
@@ -26412,6 +26841,9 @@ type Object struct {
 
 	// The class of storage used to store the object.
 	StorageClass *string `type:"string" enum:"ObjectStorageClass"`
+
+	// User metadata entries stored in S3 with the object.
+	UserMetadata map[string]*string `locationName:"Metadata" locationNameKey:"Name" locationNameValue:"Value" type:"map" flattened:"true"`
 }
 
 // String returns the string representation
@@ -26457,6 +26889,12 @@ func (s *Object) SetSize(v int64) *Object {
 // SetStorageClass sets the StorageClass field's value.
 func (s *Object) SetStorageClass(v string) *Object {
 	s.StorageClass = &v
+	return s
+}
+
+// SetUserMetadata sets the UserMetadata field's value.
+func (s *Object) SetUserMetadata(v map[string]*string) *Object {
+	s.UserMetadata = v
 	return s
 }
 

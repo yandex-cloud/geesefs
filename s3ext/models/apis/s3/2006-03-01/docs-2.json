@@ -3997,6 +3997,12 @@
         "S3Location$UserMetadata": "<p>A list of metadata to store with the restore results in S3.</p>"
       }
     },
+    "UserMetadataMap": {
+      "base": null,
+      "refs": {
+        "Object$UserMetadata": "<p>User metadata entries stored in S3 with the object.</p>"
+      }
+    },
     "Value": {
       "base": null,
       "refs": {

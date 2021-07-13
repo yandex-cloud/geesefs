@@ -653,6 +653,18 @@
         {"shape":"NoSuchBucket"}
       ]
     },
+    "ListObjectsV1Ext":{
+      "name":"ListObjectsV1Ext",
+      "http":{
+        "method":"GET",
+        "requestUri":"/{Bucket}?list-type=ext-v1"
+      },
+      "input":{"shape":"ListObjectsV2Request"},
+      "output":{"shape":"ListObjectsV2Output"},
+      "errors":[
+        {"shape":"NoSuchBucket"}
+      ]
+    },
     "ListParts":{
       "name":"ListParts",
       "http":{
@@ -5073,7 +5085,8 @@
         "ETag":{"shape":"ETag"},
         "Size":{"shape":"Size"},
         "StorageClass":{"shape":"ObjectStorageClass"},
-        "Owner":{"shape":"Owner"}
+        "Owner":{"shape":"Owner"},
+        "UserMetadata":{"shape":"UserMetadataMap","locationName":"Metadata"}
       }
     },
     "ObjectAlreadyInActiveTierError":{
@@ -7549,6 +7562,12 @@
         "shape":"MetadataEntry",
         "locationName":"MetadataEntry"
       }
+    },
+    "UserMetadataMap":{
+      "type":"map",
+      "flattened":true,
+      "key":{"shape":"MetadataKey","locationName":"Name"},
+      "value":{"shape":"MetadataValue","locationName":"Value"}
     },
     "Value":{"type":"string"},
     "VersionIdMarker":{"type":"string"},
