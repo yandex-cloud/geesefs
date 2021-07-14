@@ -471,6 +471,7 @@ func SignSDKRequestWithCurrentTime(req *request.Request, curTimeFn func() time.T
 		// wrapped in a custom io.Closer that we do not want to be stompped
 		// on top of by the signer.
 		v4.DisableRequestBodyOverwrite = true
+		v4.UnsignedPayload = aws.BoolValue(req.Config.S3DisableContentMD5Validation)
 	})
 
 	for _, opt := range opts {
