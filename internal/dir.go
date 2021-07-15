@@ -519,8 +519,8 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 	useSlurp := fs.flags.TypeCacheTTL != 0 && dh.inode.dir.cloud == nil &&
 		(dh.inode.Parent != nil && dh.inode.Parent.dir.seqOpenDirScore >= 2)
 
-	if !useSlurp && dh.inode.dir.listMarker == nil ||
-		useSlurp && dh.inode.Parent.dir.listMarker == nil {
+	if !dh.inode.dir.listDone && (!useSlurp && dh.inode.dir.listMarker == nil ||
+		useSlurp && dh.inode.Parent.dir.slurpMarker == nil) {
 		// listMarker is nil => We just started refreshing this directory
 		dh.inode.dir.listDone = false
 		dh.inode.dir.lastFromCloud = nil
@@ -533,6 +533,9 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 				atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
 				(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
 				childTmp.mu.Lock()
+				if childTmp.isDir() {
+					childTmp.removeAllChildrenUnlocked()
+				}
 				parent.removeChildUnlocked(childTmp)
 				childTmp.mu.Unlock()
 				i--
@@ -578,6 +581,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 
 	if int(internalOffset) >= len(parent.dir.Children) {
 		// we've reached the end
+		parent.dir.listDone = false
 		parent.mu.Unlock()
 		return nil, nil
 	}
@@ -761,6 +765,27 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 	}
 
 	inode.DeRef(1)
+}
+
+// LOCKS_REQUIRED(parent.mu)
+// LOCKS_EXCLUDED(parent.fs.mu)
+func (parent *Inode) removeAllChildrenUnlocked() {
+	for i := 2; i < len(parent.dir.Children); i++ {
+		child := parent.dir.Children[i]
+		child.mu.Lock()
+		if child.isDir() {
+			child.removeAllChildrenUnlocked()
+		}
+		child.DeRef(1)
+		child.mu.Unlock()
+	}
+	// POSIX allows parallel readdir() and modifications,
+	// so reset position of all directory handles
+	for _, dh := range parent.dir.handles {
+		if dh.lastInternalOffset > 2 {
+			dh.lastInternalOffset = 2
+		}
+	}
 }
 
 // LOCKS_EXCLUDED(parent.fs.mu)
@@ -1428,7 +1453,7 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			inode := parent.findChildUnlocked(dir)
 			if inode == nil {
 				// don't revive deleted items
-				_, deleted := parent.dir.DeletedChildren[path]
+				_, deleted := parent.dir.DeletedChildren[dir]
 				if !deleted {
 					inode = NewInode(fs, parent, &dir)
 					inode.ToDir()
@@ -1454,7 +1479,7 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			inode := parent.findChildUnlocked(dir)
 			if inode == nil {
 				// don't revive deleted items
-				_, deleted := parent.dir.DeletedChildren[path]
+				_, deleted := parent.dir.DeletedChildren[dir]
 				if !deleted {
 					inode = NewInode(fs, parent, &dir)
 					inode.ToDir()
