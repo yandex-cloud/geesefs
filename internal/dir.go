@@ -34,8 +34,7 @@ type DirInodeData struct {
 	cloud       StorageBackend
 	mountPrefix string
 
-	// these 2 refer to readdir of the Children
-	lastOpenDir     *DirInodeData
+	// lastOpenDirIdx refers to readdir of the Children
 	lastOpenDirIdx  int
 	seqOpenDirScore uint8
 	DirTime         time.Time
@@ -137,10 +136,10 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 
 		numChildren := len(parent.dir.Children)
 		dirIdx := -1
-		seqMode := false
+		seqMode := -1
 		firstDir := false
 
-		if parent.dir.lastOpenDir == nil {
+		if parent.dir.lastOpenDirIdx < 0 {
 			// check if we are opening the first child
 			// (after . and ..)  cap the search to 1000
 			// peers to bound the time. If the next dir is
@@ -151,34 +150,40 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 				if c.isDir() {
 					if *c.Name == *inode.Name {
 						dirIdx = i
-						seqMode = true
+						seqMode = 1
 						firstDir = true
 					}
 					break
 				}
 			}
+		} else if parent.dir.lastOpenDirIdx < numChildren &&
+			parent.dir.Children[parent.dir.lastOpenDirIdx].isDir() &&
+			*parent.dir.Children[parent.dir.lastOpenDirIdx].Name == *inode.Name {
+			// allow to read the last directory again, don't reset, but don't bump seqOpenDirScore too
+			seqMode = 0
 		} else {
 			// check if we are reading the next one as expected
-			for i := parent.dir.lastOpenDirIdx + 1; i < MinInt(numChildren, 1000); i++ {
+			for i := parent.dir.lastOpenDirIdx + 1; i < MinInt(numChildren, parent.dir.lastOpenDirIdx+1000); i++ {
 				c := parent.dir.Children[i]
 				if c.isDir() {
 					if *c.Name == *inode.Name {
 						dirIdx = i
-						seqMode = true
+						seqMode = 1
 					}
 					break
 				}
 			}
 		}
 
-		if seqMode {
+		if seqMode == 0 {
+			// same directory again
+		} else if seqMode == 1 {
 			if parent.dir.seqOpenDirScore < 255 {
 				parent.dir.seqOpenDirScore++
 			}
 			if parent.dir.seqOpenDirScore == 2 {
 				fuseLog.Debugf("%v in readdir mode", *parent.FullName())
 			}
-			parent.dir.lastOpenDir = dir
 			parent.dir.lastOpenDirIdx = dirIdx
 			if firstDir {
 				// 1) if I open a/, root's score = 1
@@ -194,13 +199,12 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 			}
 		} else {
 			parent.dir.seqOpenDirScore = 0
+			// reset slurp
+			parent.dir.slurpMarker = nil
 			if dirIdx == -1 {
 				dirIdx = parent.findChildIdxUnlocked(*inode.Name)
 			}
-			if dirIdx != -1 {
-				parent.dir.lastOpenDir = dir
-				parent.dir.lastOpenDirIdx = dirIdx
-			}
+			parent.dir.lastOpenDirIdx = dirIdx
 		}
 	}
 
@@ -754,6 +758,10 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 			dh.lastInternalOffset--
 		}
 	}
+	// >= because we use the "last open dir" as the "next" one
+	if parent.dir.lastOpenDirIdx >= i {
+		parent.dir.lastOpenDirIdx--
+	}
 	copy(parent.dir.Children[i:], parent.dir.Children[i+1:])
 	parent.dir.Children[l-1] = nil
 	parent.dir.Children = parent.dir.Children[:l-1]
@@ -832,6 +840,9 @@ func (parent *Inode) insertChildUnlocked(inode *Inode) {
 			if dh.lastInternalOffset > i {
 				dh.lastInternalOffset++
 			}
+		}
+		if parent.dir.lastOpenDirIdx >= i {
+			parent.dir.lastOpenDirIdx++
 		}
 		parent.dir.Children = append(parent.dir.Children, nil)
 		copy(parent.dir.Children[i+1:], parent.dir.Children[i:])
@@ -1473,7 +1484,9 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 					fs.mu.Lock()
 				}
 			}
-			sealPastDirs(dirs, inode)
+			if inode != nil {
+				sealPastDirs(dirs, inode)
+			}
 		} else {
 			// ensure that the potentially implicit dir is added
 			inode := parent.findChildUnlocked(dir)
@@ -1501,7 +1514,7 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 				}
 			}
 
-			if inode.isDir() {
+			if inode != nil && inode.isDir() {
 				// mark this dir but don't seal anything else
 				// until we get to the leaf
 				dirs[inode] = false

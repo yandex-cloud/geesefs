@@ -305,7 +305,9 @@ func (inode *Inode) ToDir() {
 			Size: 4096,
 			// Mtime intentionally not initialized
 		}
-		inode.dir = &DirInodeData{}
+		inode.dir = &DirInodeData{
+			lastOpenDirIdx: -1,
+		}
 	}
 }
 
