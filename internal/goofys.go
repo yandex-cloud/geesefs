@@ -520,7 +520,7 @@ func (fs *Goofys) Unmount(mountPoint string) {
 		}
 		mp = dirInode
 	}
-	mp.addModified(1)
+	mp.addModified(-1)
 	mp.ResetForUnmount()
 	return
 }
@@ -1066,10 +1066,14 @@ func (fs *Goofys) SyncFile(
 
 	if !fs.flags.IgnoreFsync {
 		fs.mu.RLock()
-		fh := fs.fileHandles[op.Handle]
+		in := fs.getInodeOrDie(op.Inode)
 		fs.mu.RUnlock()
 
-		err = fh.inode.SyncFile()
+		if in.Id == fuseops.RootInodeID {
+			err = fs.SyncFS()
+		} else {
+			err = in.SyncFile()
+		}
 	}
 
 	return
@@ -1253,8 +1257,8 @@ func (fs *Goofys) Rename(
 	return
 }
 
-// Not yet hooked anywhere
 func (fs *Goofys) SyncFS() (err error) {
+	log.Infof("Flushing all changes")
 	fs.mu.RLock()
 	inodes := make([]fuseops.InodeID, 0, len(fs.inodes))
 	for id := range fs.inodes {
