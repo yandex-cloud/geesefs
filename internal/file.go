@@ -32,6 +32,8 @@ import (
 
 type FileHandle struct {
 	inode *Inode
+	lastReadEnd uint64
+	seqReadSize uint64
 }
 
 const MAX_BUF = 5 * 1024 * 1024
@@ -359,7 +361,7 @@ func appendRequest(requests []uint64, offset uint64, size uint64, requestCost ui
 // Load some inode data into memory
 // Must be called with inode.mu taken
 // Loaded range should be guarded against eviction by adding it into inode.readRanges
-func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool, ignoreMemoryLimit bool) (requestErr error) {
+func (inode *Inode) LoadRange(offset uint64, size uint64, seqReadSize uint64, ignoreMemoryLimit bool) (requestErr error) {
 
 	end := offset+size
 
@@ -386,16 +388,39 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, skipReadahead bool, ig
 	}
 
 	// add readahead
-	if !skipReadahead {
+	if seqReadSize > 0 {
+		ra := inode.fs.flags.ReadAheadKB
+		if seqReadSize >= inode.fs.flags.ReadAheadCutoffKB*1024 {
+			// use larger readahead
+			ra = inode.fs.flags.ReadAheadLargeKB
+		}
 		nr := len(requests)
-		lastEnd := requests[nr-2]+requests[nr-1] + inode.fs.flags.ReadAheadKB*1024
+		lastEnd := requests[nr-2]+requests[nr-1] + ra*1024
 		if lastEnd > inode.Attributes.Size {
 			lastEnd = inode.Attributes.Size
 		}
 		requests[nr-1] = lastEnd-requests[nr-2]
+		// split very large requests into smaller chunks to read in parallel
+		minPart := inode.fs.flags.ReadAheadParallelKB*1024
+		splitRequests := make([]uint64, 0)
+		for i := 0; i < len(requests); i += 2 {
+			offset := requests[i]
+			size := requests[i+1]
+			if size > minPart {
+				parts := int((size+minPart-1)/minPart)
+				for j := 0; j < parts; j++ {
+					partLen := minPart
+					if j == parts-1 {
+						partLen = size-uint64(parts-1)*minPart
+					}
+					splitRequests = append(splitRequests, offset + minPart*uint64(j), partLen)
+				}
+			} else {
+				splitRequests = append(splitRequests, offset, size)
+			}
+		}
+		requests = splitRequests
 	}
-
-	// FIXME split requests into smaller chunks if we want to read in parallel
 
 	inode.mu.Unlock()
 
@@ -502,6 +527,12 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	if end >= fh.inode.Attributes.Size {
 		end = fh.inode.Attributes.Size
 	}
+	if offset == fh.lastReadEnd {
+		fh.seqReadSize += uint64(len(buf))
+	} else {
+		fh.seqReadSize = uint64(len(buf))
+	}
+	fh.lastReadEnd = end
 
 	// Guard buffers against eviction
 	fh.inode.mu.Lock()
@@ -513,7 +544,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	// FIXME: Track random reads and temporarily disable readahead, as in the original
 	var requestErr error
 	if fh.inode.CacheState != ST_CREATED {
-		requestErr = fh.inode.LoadRange(offset, end-offset, false, false)
+		requestErr = fh.inode.LoadRange(offset, end-offset, fh.seqReadSize, false)
 	}
 
 	// copy cached buffers into the result
@@ -612,7 +643,7 @@ func (inode *Inode) CheckLoadRange(offset uint64, size uint64, ignoreMemoryLimit
 		loadEnd = end
 	}
 	if loadEnd > 0 {
-		inode.LoadRange(loadStart, loadEnd-loadStart, true, ignoreMemoryLimit)
+		inode.LoadRange(loadStart, loadEnd-loadStart, 0, ignoreMemoryLimit)
 	}
 }
 

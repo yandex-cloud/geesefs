@@ -262,8 +262,26 @@ func NewApp() (app *cli.App) {
 
 			cli.IntFlag{
 				Name:  "read-ahead",
-				Value: 4096,
-				Usage: "How much data in KB should be pre-loaded with every HTTP request (default: 4096)",
+				Value: 5*1024,
+				Usage: "How much data in KB should be pre-loaded with every read (default: 5 MB)",
+			},
+
+			cli.IntFlag{
+				Name:  "read-large-cutoff",
+				Value: 5*1024,
+				Usage: "After which amount of linear read in KB the \"large\" readahead should be triggered (default: 10 MB)",
+			},
+
+			cli.IntFlag{
+				Name:  "read-ahead-large",
+				Value: 100*1024,
+				Usage: "Larger readahead size in KB (default: 100 MB)",
+			},
+
+			cli.IntFlag{
+				Name:  "read-ahead-parallel",
+				Value: 20*1024,
+				Usage: "Larger readahead will be triggered in parallel chunks of this size in KB (default: 20 MB)",
 			},
 
 			cli.IntFlag{
@@ -370,7 +388,8 @@ func NewApp() (app *cli.App) {
 
 	for _, f := range []string{"memory-limit", "cheap", "no-implicit-dir",
 		"no-dir-object", "max-flushers", "max-parallel-parts", "max-parallel-copy",
-		"read-ahead", "read-merge", "single-part", "max-merge-copy", "ignore-fsync",
+		"read-ahead", "read-large-cutoff", "read-ahead-large", "read-ahead-parallel",
+		"read-merge", "single-part", "max-merge-copy", "ignore-fsync",
 		"symlink-attr", "stat-cache-ttl", "type-cache-ttl", "http-timeout"} {
 		flagCategories[f] = "tuning"
 	}
@@ -414,11 +433,6 @@ func parseOptions(m map[string]string, s string) {
 // PopulateFlags adds the flags accepted by run to the supplied flag set, returning the
 // variables into which the flags will parse.
 func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
-	readAhead := c.Int("read-ahead")
-	if readAhead < 0 {
-		readAhead = 4096
-	}
-
 	singlePart := c.Int("single-part")
 	if singlePart < 5 {
 		singlePart = 5
@@ -444,7 +458,10 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		TypeCacheTTL: c.Duration("type-cache-ttl"),
 		HTTPTimeout:  c.Duration("http-timeout"),
 		RetryInterval: c.Duration("retry-interval"),
-		ReadAheadKB:  uint64(readAhead),
+		ReadAheadKB:  uint64(c.Int("read-ahead")),
+		ReadAheadCutoffKB:  uint64(c.Int("read-large-cutoff")),
+		ReadAheadLargeKB:  uint64(c.Int("read-ahead-large")),
+		ReadAheadParallelKB:  uint64(c.Int("read-ahead-parallel")),
 		ReadMergeKB:  uint64(c.Int("read-merge")),
 		SinglePartMB: uint64(singlePart),
 		MaxMergeCopyMB: uint64(c.Int("max-merge-copy")),

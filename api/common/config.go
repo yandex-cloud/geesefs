@@ -57,6 +57,9 @@ type FlagStorage struct {
 	HTTPTimeout  time.Duration
 	RetryInterval time.Duration
 	ReadAheadKB  uint64
+	ReadAheadCutoffKB uint64
+	ReadAheadLargeKB uint64
+	ReadAheadParallelKB uint64
 	ReadMergeKB  uint64
 	SinglePartMB uint64
 	MaxMergeCopyMB uint64
