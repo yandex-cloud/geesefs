@@ -1,4 +1,4 @@
-<img src="doc/goofys.png" height="32" width="32" align="middle" />
+<img src="doc/geesefs.png" height="64" width="64" align="middle" />
 GeeseFS is a high-performance, POSIX-ish S3
 ([Yandex](https://cloud.yandex.com/en-ru/services/storage), [Amazon](https://aws.amazon.com/s3/))
 file system written in Go
@@ -95,6 +95,7 @@ There's a lot of tuning you can do. Consult `geesefs -h` to view the list of opt
 # License
 
 Copyright (C) 2015 - 2019 Ka-Hing Cheung
+
 Copyright (C) 2021+ Vitaliy Filippov
 
 Licensed under the Apache License, Version 2.0
