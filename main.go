@@ -16,9 +16,9 @@
 package main
 
 import (
-	goofys "github.com/kahing/goofys/api"
-	. "github.com/kahing/goofys/api/common"
-	. "github.com/kahing/goofys/internal"
+	geesefs "github.com/yandex-cloud/geesefs/api"
+	. "github.com/yandex-cloud/geesefs/api/common"
+	. "github.com/yandex-cloud/geesefs/internal"
 
 	"fmt"
 	"os"
@@ -103,7 +103,7 @@ func mount(
 	bucketName string,
 	flags *FlagStorage) (fs *Goofys, mfs *fuse.MountedFileSystem, err error) {
 
-	return goofys.Mount(ctx, bucketName, flags)
+	return geesefs.Mount(ctx, bucketName, flags)
 }
 
 func massagePath() {

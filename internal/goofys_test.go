@@ -23,7 +23,7 @@ USAGE:
 [ EMULATOR=1 ] \
 [ EVENTUAL_CONSISTENCY=1 ] \
 CLOUD=s3|gcs|azblob|adlv1|adlv2 \
-    go test -v github.com/kahing/goofys/internal \
+    go test -v github.com/yandex-cloud/geesefs/internal \
     [ -check.f TestName ]
 
 NOTES:
@@ -36,7 +36,7 @@ NOTES:
 package internal
 
 import (
-	. "github.com/kahing/goofys/api/common"
+	. "github.com/yandex-cloud/geesefs/api/common"
 
 	"bufio"
 	"bytes"

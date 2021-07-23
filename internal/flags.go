@@ -16,7 +16,7 @@
 package internal
 
 import (
-	. "github.com/kahing/goofys/api/common"
+	. "github.com/yandex-cloud/geesefs/api/common"
 
 	"io"
 	"os"
@@ -82,7 +82,7 @@ func NewApp() (app *cli.App) {
 	s3Default := (&S3Config{}).Init()
 
 	app = &cli.App{
-		Name:     "goofys",
+		Name:     "geesefs",
 		Version:  "0.24.0-" + VersionHash,
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
@@ -363,7 +363,7 @@ func NewApp() (app *cli.App) {
 
 			cli.BoolFlag{
 				Name:  "f",
-				Usage: "Run goofys in foreground.",
+				Usage: "Run geesefs in foreground.",
 			},
 
 			cli.StringFlag{

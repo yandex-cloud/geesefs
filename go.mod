@@ -1,4 +1,4 @@
-module github.com/kahing/goofys
+module github.com/yandex-cloud/geesefs
 
 go 1.14
 

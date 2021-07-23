@@ -15,7 +15,7 @@
 package internal
 
 import (
-	. "github.com/kahing/goofys/api/common"
+	. "github.com/yandex-cloud/geesefs/api/common"
 
 	"fmt"
 	"net/http"
