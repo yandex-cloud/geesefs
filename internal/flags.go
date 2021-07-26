@@ -62,7 +62,7 @@ GLOBAL OPTIONS:
 TUNING OPTIONS:
    {{range category .Flags "tuning"}}{{.}}
    {{end}}
-AWS S3 OPTIONS:
+S3 OPTIONS:
    {{range category .Flags "aws"}}{{.}}
    {{end}}
 MISC OPTIONS:
@@ -138,9 +138,9 @@ func NewApp() (app *cli.App) {
 
 			cli.StringFlag{
 				Name:  "endpoint",
-				Value: "",
-				Usage: "The non-AWS endpoint to connect to." +
-					" Possible values: http://127.0.0.1:8081/",
+				Value: "https://storage.yandexcloud.net",
+				Usage: "The S3 endpoint to connect to." +
+					" Possible values: http://127.0.0.1:8081/, https://s3.amazonaws.com",
 			},
 
 			cli.StringFlag{

@@ -74,7 +74,7 @@ $ cat ~/.aws/credentials
 aws_access_key_id = AKID1234567890
 aws_secret_access_key = MY-SECRET-KEY
 $ $GOPATH/bin/geesefs <bucket> <mountpoint>
-$ $GOPATH/bin/geesefs <bucket:prefix> <mountpoint> # if you only want to mount objects under a prefix
+$ $GOPATH/bin/geesefs [--endpoint https://...] <bucket:prefix> <mountpoint> # if you only want to mount objects under a prefix
 ```
 
 You can also supply credentials via the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables.
@@ -103,7 +103,7 @@ Licensed under the Apache License, Version 2.0
 ## Compatibility with S3
 
 geesefs works with:
-* Yandex Object Storage
+* Yandex Object Storage (default)
 * Amazon S3
 * Ceph (and also Ceph-based Digital Ocean Spaces, DreamObjects, gridscale etc)
 * Minio

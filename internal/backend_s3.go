@@ -184,6 +184,10 @@ func (s *S3Backend) detectBucketLocationByHEAD() (err error, isAws bool) {
 			s.awsConfig.Credentials = credentials.AnonymousCredentials
 			s3Log.Infof("anonymous bucket detected")
 		}
+	case 301:
+		if len(region) != 0 && region[0] != *s.awsConfig.Region {
+			s.awsConfig.Endpoint = aws.String("")
+		}
 	case 400:
 		err = fuse.EINVAL
 	case 403:
