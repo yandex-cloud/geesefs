@@ -1,5 +1,6 @@
 // Copyright 2019 Databricks
 // Copyright (c) Microsoft and contributors for generated code from azure-sdk-for-go
+// Copyright 2021 Yandex LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.

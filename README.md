@@ -94,9 +94,10 @@ There's a lot of tuning you can do. Consult `geesefs -h` to view the list of opt
 
 # License
 
-Copyright (C) 2015 - 2019 Ka-Hing Cheung
-
-Copyright (C) 2021+ Vitaliy Filippov
+* Copyright (C) 2015 - 2017 Google Inc
+* Copyright (C) 2015 - 2019 Ka-Hing Cheung
+* Copyright (C) 2019 Databricks
+* Copyright (C) 2021 Yandex LLC
 
 Licensed under the Apache License, Version 2.0
 
