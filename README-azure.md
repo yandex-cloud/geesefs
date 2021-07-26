@@ -1,60 +1,37 @@
 # Azure Blob Storage
 
+GeeseFS still works with Azure because the support is inherited from Goofys and it
+turns out that Azure Blob Storage supports all basic features required for GeeseFS.
+
+The simplest way to mount AzBlob is by using `AZURE_STORAGE_ACCOUNT` and
+`AZURE_STORAGE_KEY` environment variables:
+
+```ShellSession
+$ AZURE_STORAGE_ACCOUNT=xxx AZURE_STORAGE_KEY=yyy \
+    $GOPATH/bin/geesefs wasb://container[:prefix] <mountpoint>
+```
+
+You can also use ~/.azure/config:
+
 ```ShellSession
 $ cat ~/.azure/config
 [storage]
 account = "myblobstorage"
 key = "MY-STORAGE-KEY"
-$ $GOPATH/bin/goofys wasb://container <mountpoint>
-$ $GOPATH/bin/goofys wasb://container:prefix <mountpoint> # if you only want to mount objects under a prefix
+$ $GOPATH/bin/geesefs wasb://container <mountpoint>
+$ $GOPATH/bin/geesefs wasb://container:prefix <mountpoint> # if you only want to mount objects under a prefix
 ```
 
-Users can also configure credentials via `AZURE_STORAGE_ACCOUNT` and
-`AZURE_STORAGE_KEY` environment variables. See [Azure CLI configuration](https://docs.microsoft.com/en-us/cli/azure/azure-cli-configuration?view=azure-cli-latest#cli-configuration-values-and-environment-variables) for details. Goofys does not support `connection_string` or `sas_token` yet.
-
-Goofys also accepts full `wasb` URIs:
-```ShellSession
-$ $GOPATH/bin/goofys wasb://container@myaccount.blob.core.windows.net <mountpoint>
-$ $GOPATH/bin/goofys wasb://container@myaccount.blob.core.windows.net/prefix <mountpoint>
-```
-
-In this case account configuration in `~/.azure/config` or `AZURE_STORAGE_ACCOUNT` can be omitted. Alternatively, `--endpoint` can also be used to specify storage account:
+GeeseFS also accepts full `wasb` URIs and setting the account via `--endpoint`:
 
 ```ShellSession
-$ $GOPATH/bin/goofys --endpoint https://myaccount.blob.core.windows.net wasb://container <mountpoint>
-$ $GOPATH/bin/goofys --endpoint https://myaccount.blob.core.windows.net wasb://container:prefix <mountpoint>
+$ $GOPATH/bin/geesefs wasb://container@myaccount.blob.core.windows.net/prefix <mountpoint>
+$ $GOPATH/bin/geesefs --endpoint https://myaccount.blob.core.windows.net wasb://container:prefix <mountpoint>
 ```
 
 Note that if full `wasb` URI is not specified, prefix separator is `:`.
 
-Finally, insteading of specifying storage account access key, goofys
-can also use [Azure
-CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest)
-access tokens:
+# Azure Data Lake Storage Gen1 and Gen2
 
-```ShellSession
-$ az login
-# list all subscribtions and select the needed one
-$ az account list
-# select current subscription (get its id from previous step)
-$ az account set --subscription <name or id>
-$ $GOPATH/bin/goofys wasb://container@myaccount.blob.core.windows.net <mountpoint>
-```
-
-# Azure Data Lake Storage Gen1
-
-Follow the Azure CLI login sequence from above, and then:
-
-```ShellSession
-$ $GOPATH/bin/goofys adl://servicename.azuredatalakestore.net <mountpoint>
-$ $GOPATH/bin/goofys adl://servicename.azuredatalakestore.net:prefix <mountpoint>
-```
-
-# Azure Data Lake Storage Gen2
-
-Configure your credentials the same way as [Azure Blob Storage](https://github.com/kahing/goofys/blob/master/README-azure.md#azure-blob-storage) above, and then:
-
-```ShellSession
-$ $GOPATH/bin/goofys abfs://container <mountpoint>
-$ $GOPATH/bin/goofys abfs://container:prefix <mountpoint>
-```
+ADL v1 and v2 differ from Azure Blob so their support in GeeseFS is broken.
+Patches are welcome if you really want to fix it.
