@@ -483,6 +483,7 @@ func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffs
 		ok = true
 
 		if int(internalOffset) >= len(dh.inode.dir.Children) {
+			dh.inode.dir.listDone = false
 			return
 		}
 		child := dh.inode.dir.Children[internalOffset]
@@ -846,17 +847,6 @@ func (parent *Inode) insertChildUnlocked(inode *Inode) {
 		copy(parent.dir.Children[i+1:], parent.dir.Children[i:])
 		parent.dir.Children[i] = inode
 	}
-}
-
-func (parent *Inode) LookUp(name string) (inode *Inode, err error) {
-	parent.logFuse("Inode.LookUp", name)
-
-	inode, err = parent.LookUpInodeMaybeDir(name, parent.getChildName(name))
-	if err != nil {
-		return nil, err
-	}
-
-	return
 }
 
 func (parent *Inode) getChildName(name string) string {
@@ -1546,152 +1536,119 @@ func (parent *Inode) findChildMaxTime() time.Time {
 	return maxTime
 }
 
-func (parent *Inode) LookUpInodeNotDir(name string, c chan HeadBlobOutput, errc chan error) {
-	cloud, key := parent.cloud()
-	key = appendChildName(key, name)
-	params := &HeadBlobInput{Key: key}
-	resp, err := cloud.HeadBlob(params)
+func (parent *Inode) LookUp(name string) (*Inode, error) {
+	blob, err := parent.LookUpInodeMaybeDir(name)
 	if err != nil {
-		errc <- mapAwsError(err)
-		return
+		return nil, err
 	}
-
-	s3Log.Debug(resp)
-	c <- *resp
+	dirs := make(map[*Inode]bool)
+	_, parentKey := parent.cloud()
+	prefixLen := len(parentKey)
+	if prefixLen > 0 {
+		prefixLen++
+	}
+	parent.mu.Lock()
+	parent.fs.mu.Lock()
+	parent.insertSubTree((*blob.Key)[prefixLen : ], blob, dirs)
+	parent.fs.mu.Unlock()
+	inode := parent.findChildUnlocked(name)
+	parent.mu.Unlock()
+	return inode, nil
 }
 
-func (parent *Inode) LookUpInodeDir(name string, c chan ListBlobsOutput, errc chan error) {
-	cloud, key := parent.cloud()
-	key = appendChildName(key, name) + "/"
-
-	resp, err := cloud.ListBlobs(&ListBlobsInput{
-		Delimiter: aws.String("/"),
-		MaxKeys:   PUInt32(1),
-		Prefix:    &key,
-	})
-
-	if err != nil {
-		errc <- err
-		return
-	}
-
-	s3Log.Debug(resp)
-	c <- *resp
-}
-
-// returned inode has nil Id
-func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *Inode, err error) {
-	errObjectChan := make(chan error, 1)
-	objectChan := make(chan HeadBlobOutput, 2)
-	errDirBlobChan := make(chan error, 1)
-	var errDirChan chan error
-	var dirChan chan ListBlobsOutput
-
-	checking := 3
-	var checkErr [3]error
-
-	cloud, _ := parent.cloud()
+func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
+	cloud, parentKey := parent.cloud()
 	if cloud == nil {
 		panic("s3 disabled")
 	}
+	key := appendChildName(parentKey, name)
+	parent.logFuse("Inode.LookUp", key)
 
-	go parent.LookUpInodeNotDir(name, objectChan, errObjectChan)
-	if !cloud.Capabilities().DirBlob && !parent.fs.flags.Cheap {
-		go parent.LookUpInodeNotDir(name+"/", objectChan, errDirBlobChan)
-		if !parent.fs.flags.ExplicitDir {
-			errDirChan = make(chan error, 1)
-			dirChan = make(chan ListBlobsOutput, 1)
-			go parent.LookUpInodeDir(name, dirChan, errDirChan)
-		}
-	}
+	var object, dirObject *HeadBlobOutput
+	var prefixList *ListBlobsOutput
+	var objectError, dirError, prefixError error
+	results := make(chan int, 3)
+	n := 0
 
 	for {
-		select {
-		case resp := <-objectChan:
-			err = nil
-			inode = NewInode(parent.fs, parent, &name)
-			if !resp.IsDirBlob {
-				// FIXME if both object and object/ exists, return dir
-				inode.SetFromBlobItem(&resp.BlobItemOutput)
-			} else {
-				inode.ToDir()
-				if resp.LastModified != nil {
-					inode.Attributes.Mtime = *resp.LastModified
-				}
-			}
-			inode.fillXattrFromHead(&resp)
-			return
-		case err = <-errObjectChan:
-			checking--
-			checkErr[0] = err
-			s3Log.Debugf("HEAD %v = %v", fullName, err)
-		case resp := <-dirChan:
-			err = nil
-			if len(resp.Prefixes) != 0 || len(resp.Items) != 0 {
-				inode = NewInode(parent.fs, parent, &name)
-				inode.ToDir()
-				if len(resp.Items) != 0 && *resp.Items[0].Key == name+"/" {
-					// it's actually a dir blob
-					entry := resp.Items[0]
-					if entry.ETag != nil {
-						inode.s3Metadata["etag"] = []byte(*entry.ETag)
-					}
-					if entry.StorageClass != nil {
-						inode.s3Metadata["storage-class"] = []byte(*entry.StorageClass)
-					}
-
-				}
-				// if cheap is not on, the dir blob
-				// could exist but this returned first
-				if inode.fs.flags.Cheap {
-					inode.ImplicitDir = true
-				}
-				return
-			} else {
-				checkErr[2] = fuse.ENOENT
-				checking--
-			}
-		case err = <-errDirChan:
-			checking--
-			checkErr[2] = err
-			s3Log.Debugf("LIST %v/ = %v", fullName, err)
-		case err = <-errDirBlobChan:
-			checking--
-			checkErr[1] = err
-			s3Log.Debugf("HEAD %v/ = %v", fullName, err)
-		}
-
+		n++
+		go func() {
+			object, objectError = cloud.HeadBlob(&HeadBlobInput{Key: key})
+			results <- 1
+		}()
 		if cloud.Capabilities().DirBlob {
-			return
+			<- results
+			break
+		}
+		if parent.fs.flags.Cheap {
+			<- results
+			if objectError != fuse.ENOENT {
+				break
+			}
 		}
 
-		switch checking {
-		case 2:
+		if !parent.fs.flags.NoDirObject {
+			n++
+			go func() {
+				dirObject, dirError = cloud.HeadBlob(&HeadBlobInput{Key: key+"/"})
+				results <- 2
+			}()
 			if parent.fs.flags.Cheap {
-				go parent.LookUpInodeNotDir(name+"/", objectChan, errDirBlobChan)
-			}
-		case 1:
-			if parent.fs.flags.ExplicitDir {
-				checkErr[2] = fuse.ENOENT
-				goto doneCase
-			} else if parent.fs.flags.Cheap {
-				errDirChan = make(chan error, 1)
-				dirChan = make(chan ListBlobsOutput, 1)
-				go parent.LookUpInodeDir(name, dirChan, errDirChan)
-			}
-			break
-		doneCase:
-			fallthrough
-		case 0:
-			for _, e := range checkErr {
-				if e != fuse.ENOENT {
-					err = e
-					return
+				<- results
+				if dirError != fuse.ENOENT {
+					break
 				}
 			}
+		}
 
-			err = fuse.ENOENT
-			return
+		if !parent.fs.flags.ExplicitDir {
+			n++
+			go func() {
+				prefixList, prefixError = cloud.ListBlobs(&ListBlobsInput{
+					Delimiter: aws.String("/"),
+					MaxKeys:   PUInt32(1),
+					Prefix:    aws.String(key+"/"),
+				})
+				results <- 3
+			}()
+			if parent.fs.flags.Cheap {
+				<- results
+			}
+		}
+
+		break
+	}
+
+	for n > 0 {
+		n--
+		if !cloud.Capabilities().DirBlob && !parent.fs.flags.Cheap {
+			<- results
+		}
+		if object != nil {
+			return &object.BlobItemOutput, nil
+		}
+		if dirObject != nil {
+			return &dirObject.BlobItemOutput, nil
+		}
+		if prefixList != nil && (len(prefixList.Prefixes) != 0 || len(prefixList.Items) != 0) {
+			if len(prefixList.Items) != 0 && (*prefixList.Items[0].Key == key ||
+				(*prefixList.Items[0].Key)[0 : len(key)+1] == key+"/") {
+				return &prefixList.Items[0], nil
+			}
+			return &BlobItemOutput{
+				Key: aws.String(key+"/"),
+			}, nil
 		}
 	}
+
+	if objectError != nil && objectError != fuse.ENOENT {
+		return nil, objectError
+	}
+	if dirError != nil && dirError != fuse.ENOENT {
+		return nil, dirError
+	}
+	if prefixError != nil && prefixError != fuse.ENOENT {
+		return nil, prefixError
+	}
+	return nil, fuse.ENOENT
 }

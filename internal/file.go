@@ -987,6 +987,8 @@ func (inode *Inode) resetCache() {
 		inode.mpu = nil
 	}
 	inode.CacheState = ST_CACHED
+	// Invalidate metadata entry
+	inode.AttrTime = time.Time{}
 }
 
 func (inode *Inode) FlushSmallObject() {

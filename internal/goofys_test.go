@@ -899,6 +899,7 @@ func (s *GoofysTest) TestReadDirCacheLookup(t *C) {
 
 func (s *GoofysTest) TestReadDirWithExternalChanges(t *C) {
 	s.fs.flags.TypeCacheTTL = time.Second
+	s.fs.flags.StatCacheTTL = time.Second
 
 	dir1, err := s.LookUpInode(t, "dir1")
 	t.Assert(err, IsNil)
@@ -4321,6 +4322,7 @@ func (s *GoofysTest) TestIssue474(t *C) {
 
 func (s *GoofysTest) TestReadExternalChangesFuse(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Second
+	s.fs.flags.TypeCacheTTL = 1 * time.Second
 
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 
@@ -4342,9 +4344,7 @@ func (s *GoofysTest) TestReadExternalChangesFuse(t *C) {
 	})
 	t.Assert(err, IsNil)
 
-	time.Sleep(1 * time.Second)
-
-	// FIXME: Refreshing doesn't work because kernel doesn't forget and lookup the inode again
+	time.Sleep(s.fs.flags.TypeCacheTTL)
 
 	buf, err = ioutil.ReadFile(filePath)
 	t.Assert(err, IsNil)

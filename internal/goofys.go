@@ -791,50 +791,9 @@ func (fs *Goofys) LookUpInode(
 	parent.mu.Unlock()
 
 	if !ok {
-		var newInode *Inode
-
-		newInode, err = parent.LookUp(op.Name)
-		if err == fuse.ENOENT && inode != nil && inode.isDir() {
-			// we may not be able to look up an implicit
-			// dir if all the children are removed, so we
-			// just pretend this dir is still around
-			err = nil
-		} else if err != nil {
-			if inode != nil {
-				// just kidding! pretend we didn't up the ref
-				parent.removeChild(inode)
-			}
-			return err
-		}
-
-		if inode == nil {
-			parent.mu.Lock()
-			fs.mu.Lock()
-			// check again if it's there, could have been
-			// added by another lookup or readdir
-			inode = parent.findChildUnlocked(op.Name)
-			if inode == nil {
-				inode = newInode
-				fs.insertInode(parent, inode)
-			}
-			fs.mu.Unlock()
-			parent.mu.Unlock()
-		} else {
-			inode.mu.Lock()
-
-			if newInode != nil {
-				if newInode.Attributes.Mtime.IsZero() {
-					// this can happen if it's an
-					// implicit dir, use the last
-					// known value
-					newInode.Attributes.Mtime = inode.Attributes.Mtime
-				}
-				inode.Attributes = newInode.Attributes
-				inode.knownETag = newInode.knownETag
-			}
-			inode.AttrTime = time.Now()
-
-			inode.mu.Unlock()
+		inode, err = fs.recheckInode(parent, inode, op.Name)
+		if err != nil {
+			return
 		}
 	}
 
@@ -845,6 +804,17 @@ func (fs *Goofys) LookUpInode(
 	op.Entry.EntryExpiration = time.Now().Add(fs.flags.TypeCacheTTL)
 
 	return
+}
+
+func (fs *Goofys) recheckInode(parent *Inode, inode *Inode, name string) (*Inode, error) {
+	newInode, err := parent.LookUp(name)
+	if err != nil {
+		if inode != nil {
+			parent.removeChild(inode)
+		}
+		return nil, err
+	}
+	return newInode, nil
 }
 
 // LOCKS_REQUIRED(fs.mu)
