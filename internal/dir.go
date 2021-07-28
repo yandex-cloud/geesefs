@@ -404,10 +404,7 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string) {
 
 			inode := parent.findChildUnlocked(baseName)
 			if inode != nil {
-				// don't update modified items
-				if inode.CacheState == ST_CACHED {
-					inode.SetFromBlobItem(&obj)
-				}
+				inode.SetFromBlobItem(&obj)
 			} else {
 				// don't revive deleted items
 				_, deleted := parent.dir.DeletedChildren[baseName]
@@ -1122,14 +1119,14 @@ func (inode *Inode) isEmptyDir() (bool, error) {
 func (inode *Inode) doUnlink() {
 	parent := inode.Parent
 
+	// resetCache will clear all buffers and abort the multipart upload
+	inode.resetCache()
 	if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
 		inode.SetCacheState(ST_DELETED)
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[*inode.Name] = inode
-	} else {
-		inode.SetCacheState(ST_CACHED)
 	}
 
 	parent.removeChildUnlocked(inode)
@@ -1449,10 +1446,7 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			// that lock anyway
 			fs.mu.Unlock()
 			parent.mu.Unlock()
-			// don't update modified items
-			if inode.CacheState == ST_CACHED {
-				inode.SetFromBlobItem(obj)
-			}
+			inode.SetFromBlobItem(obj)
 			parent.mu.Lock()
 			fs.mu.Lock()
 		}
@@ -1472,11 +1466,13 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 					fs.insertInode(parent, inode)
 					inode.SetFromBlobItem(obj)
 				}
-			} else if inode.CacheState == ST_CACHED {
-				// don't update modified items
+			} else {
 				if !inode.isDir() {
-					inode.ToDir()
-					fs.addDotAndDotDot(inode)
+					if inode.CacheState == ST_CACHED {
+						inode.ToDir()
+						fs.addDotAndDotDot(inode)
+					}
+					// don't change modified file item to directory
 				} else {
 					fs.mu.Unlock()
 					parent.mu.Unlock()
@@ -1615,7 +1611,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *I
 			err = nil
 			inode = NewInode(parent.fs, parent, &name)
 			if !resp.IsDirBlob {
-				// XXX/TODO if both object and object/ exists, return dir
+				// FIXME if both object and object/ exists, return dir
 				inode.SetFromBlobItem(&resp.BlobItemOutput)
 			} else {
 				inode.ToDir()

@@ -295,6 +295,7 @@ func (fs *Goofys) getInodeOrDie(id fuseops.InodeID) (inode *Inode) {
 }
 
 // Try to reclaim some clean buffers
+// FIXME: Add data cache TTL
 func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 	fs.mu.RLock()
 	inodes := make([]fuseops.InodeID, 0, len(fs.inodes))
@@ -673,6 +674,8 @@ func mapHttpError(status int) error {
 		return syscall.ENOTSUP
 	case http.StatusConflict:
 		return syscall.EINTR
+	case http.StatusRequestedRangeNotSatisfiable:
+		return syscall.ERANGE
 	case 429:
 		return syscall.EAGAIN
 	case 500:
@@ -912,7 +915,6 @@ func (fs *Goofys) OpenDir(
 	in := fs.getInodeOrDie(op.Inode)
 	fs.mu.Unlock()
 
-	// XXX/is this a dir?
 	dh := in.OpenDir()
 
 	fs.mu.Lock()
@@ -1185,6 +1187,10 @@ func (fs *Goofys) SetInodeAttributes(
 	if op.Size != nil {
 		inode.mu.Lock()
 		inode.ResizeUnlocked(*op.Size)
+		if inode.CacheState == ST_CACHED {
+			inode.SetCacheState(ST_MODIFIED)
+			inode.fs.WakeupFlusher()
+		}
 		inode.mu.Unlock()
 	}
 
@@ -1236,7 +1242,6 @@ func (fs *Goofys) Rename(
 	newParent := fs.getInodeOrDie(op.NewParent)
 	fs.mu.RUnlock()
 
-	// XXX don't hold the lock the entire time
 	if op.OldParent == op.NewParent {
 		parent.mu.Lock()
 		defer parent.mu.Unlock()

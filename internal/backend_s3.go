@@ -648,6 +648,8 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 
 	COPY_LIMIT := uint64(5 * 1024 * 1024 * 1024)
 
+	// FIXME Remove additional HEAD query
+
 	if param.Size == nil || param.ETag == nil || (*param.Size > COPY_LIMIT &&
 		(param.Metadata == nil || param.StorageClass == nil)) {
 

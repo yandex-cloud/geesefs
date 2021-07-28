@@ -305,10 +305,6 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 		})
 	}
 	inode.Attributes.Size = newSize
-	if inode.CacheState == ST_CACHED {
-		inode.SetCacheState(ST_MODIFIED)
-		inode.fs.WakeupFlusher()
-	}
 }
 
 func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
@@ -545,6 +541,12 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	var requestErr error
 	if fh.inode.CacheState != ST_CREATED {
 		requestErr = fh.inode.LoadRange(offset, end-offset, fh.seqReadSize, false)
+		if requestErr == fuse.ENOENT || requestErr == syscall.ERANGE {
+			// Object is deleted or resized remotely (416). Discard local version
+			fh.inode.resetCache()
+			err = requestErr
+			return
+		}
 	}
 
 	// copy cached buffers into the result
@@ -618,7 +620,7 @@ func (fh *FileHandle) Release() {
 	fh.inode.fs.WakeupFlusher()
 }
 
-func (inode *Inode) CheckLoadRange(offset uint64, size uint64, ignoreMemoryLimit bool) {
+func (inode *Inode) CheckLoadRange(offset uint64, size uint64, ignoreMemoryLimit bool) error {
 	loadStart := uint64(0)
 	loadEnd := uint64(0)
 	last := offset
@@ -643,8 +645,9 @@ func (inode *Inode) CheckLoadRange(offset uint64, size uint64, ignoreMemoryLimit
 		loadEnd = end
 	}
 	if loadEnd > 0 {
-		inode.LoadRange(loadStart, loadEnd-loadStart, 0, ignoreMemoryLimit)
+		return inode.LoadRange(loadStart, loadEnd-loadStart, 0, ignoreMemoryLimit)
 	}
+	return nil
 }
 
 func (inode *Inode) splitBuffer(i int, size uint64) {
@@ -859,12 +862,16 @@ func (inode *Inode) SendUpload() bool {
 					Source:      key,
 					Destination: key,
 					Size:        &inode.Attributes.Size,
-					ETag:        PString(string(inode.s3Metadata["etag"])),
+					ETag:        PString(inode.knownETag),
 					Metadata:    convertMetadata(inode.userMetadata),
 				})
 				inode.mu.Lock()
 				inode.recordFlushError(err)
 				if err != nil {
+					if err == fuse.ENOENT {
+						// Object is deleted remotely. Forget it locally
+						// By the way, what if size changes remotely?
+					}
 					inode.userMetadataDirty = true
 					log.Errorf("Error flushing metadata using COPY for %v: %v", key, err)
 				} else if inode.CacheState == ST_MODIFIED && !inode.isStillDirty() {
@@ -960,6 +967,28 @@ func (inode *Inode) isStillDirty() bool {
 	return false
 }
 
+func (inode *Inode) resetCache() {
+	// Drop all buffers including dirty ones
+	for _, b := range inode.buffers {
+		if !b.zero {
+			b.ptr.refs--
+			if b.ptr.refs == 0 {
+				inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
+			}
+		}
+	}
+	inode.buffers = nil
+	if inode.mpu != nil {
+		cloud, key := inode.cloud()
+		_, abortErr := cloud.MultipartBlobAbort(inode.mpu)
+		if abortErr != nil {
+			log.Errorf("Failed to abort multi-part upload of object %v: %v", key, abortErr)
+		}
+		inode.mpu = nil
+	}
+	inode.CacheState = ST_CACHED
+}
+
 func (inode *Inode) FlushSmallObject() {
 
 	inode.mu.Lock()
@@ -976,7 +1005,16 @@ func (inode *Inode) FlushSmallObject() {
 	inode.LockRange(0, sz, true)
 
 	if inode.CacheState == ST_MODIFIED {
-		inode.CheckLoadRange(0, sz, true)
+		err := inode.CheckLoadRange(0, sz, true)
+		if err == fuse.ENOENT || err == syscall.ERANGE {
+			// Object is deleted or resized remotely (416). Discard local version
+			inode.resetCache()
+			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+			atomic.AddInt64(&inode.fs.activeFlushers, -1)
+			inode.fs.WakeupFlusher()
+			inode.mu.Unlock()
+			return
+		}
 	}
 
 	// Key may have been changed in between (if it was moved)
@@ -1034,7 +1072,7 @@ func (inode *Inode) FlushSmallObject() {
 				inode.fs.bufferPool.cond.Broadcast()
 			}
 		}
-		inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
+		inode.updateFromFlush(sz, resp.ETag, resp.LastModified, resp.StorageClass)
 	}
 
 	inode.UnlockRange(0, sz, true)
@@ -1148,7 +1186,12 @@ func (inode *Inode) FlushPart(part uint64) {
 		// Ignore memory limit to not produce a deadlock when we need to free some memory
 		// by flushing objects, but we can't flush a part without allocating more memory
 		// for read-modify-write...
-		inode.CheckLoadRange(partOffset, partSize, true)
+		err := inode.CheckLoadRange(partOffset, partSize, true)
+		if err == fuse.ENOENT || err == syscall.ERANGE {
+			// Object is deleted or resized remotely (416). Discard local version
+			inode.resetCache()
+			return
+		}
 		// File size may have been changed again
 		if inode.Attributes.Size <= partOffset || inode.CacheState != ST_MODIFIED {
 			// Abort flush
@@ -1176,9 +1219,12 @@ func (inode *Inode) FlushPart(part uint64) {
 	if err != nil {
 		log.Errorf("Failed to flush part %v of object %v: %v", part, key, err)
 	} else {
-		inode.mpu.Parts[part] = resp.PartId
-		log.Debugf("Flushed part %v of object %v", part, key)
 		stillDirty := false
+		if inode.mpu != nil {
+			// It could become nil if the file was deleted remotely in the meantime
+			inode.mpu.Parts[part] = resp.PartId
+		}
+		log.Debugf("Flushed part %v of object %v", part, key)
 		for i := 0; i < len(inode.buffers); i++ {
 			b := &inode.buffers[i]
 			if b.dirtyID != 0 {
@@ -1200,6 +1246,11 @@ func (inode *Inode) FlushPart(part uint64) {
 				numParts++
 			}
 			err := inode.copyUnmodifiedParts(numParts)
+			if err == fuse.ENOENT || err == syscall.ERANGE {
+				// Object is deleted or resized remotely (416). Discard local version
+				inode.resetCache()
+				return
+			}
 			inode.recordFlushError(err)
 			if err == nil && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
 				// Finalize the upload
@@ -1220,7 +1271,7 @@ func (inode *Inode) FlushPart(part uint64) {
 						}
 					} else {
 						inode.mpu = nil
-						inode.updateFromFlush(resp.ETag, resp.LastModified, resp.StorageClass)
+						inode.updateFromFlush(inode.Attributes.Size, resp.ETag, resp.LastModified, resp.StorageClass)
 						stillDirty := inode.userMetadataDirty || inode.oldParent != nil
 						for i := 0; i < len(inode.buffers); i++ {
 							if inode.buffers[i].flushed {
@@ -1251,7 +1302,7 @@ func (inode *Inode) FlushPart(part uint64) {
 	}
 }
 
-func (inode *Inode) updateFromFlush(etag *string, lastModified *time.Time, storageClass *string) {
+func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *time.Time, storageClass *string) {
 	if etag != nil {
 		inode.s3Metadata["etag"] = []byte(*etag)
 	}
@@ -1261,7 +1312,8 @@ func (inode *Inode) updateFromFlush(etag *string, lastModified *time.Time, stora
 	if lastModified != nil {
 		inode.Attributes.Mtime = *lastModified
 	}
-	inode.knownETag = etag
+	inode.knownSize = size
+	inode.knownETag = *etag
 }
 
 func (inode *Inode) SyncFile() (err error) {
