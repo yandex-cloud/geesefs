@@ -2970,7 +2970,13 @@ func (s *GoofysTest) TestReadDirSlurpContinuation(t *C) {
 		err = fh.Close()
 		t.Assert(err, IsNil)
 	}
-	// FIXME: Sync the whole filesystem here
+	// Sync the whole filesystem
+	fh, err := os.Open(mountPoint)
+	t.Assert(err, IsNil)
+	err = fh.Sync()
+	t.Assert(err, IsNil)
+	err = fh.Close()
+	t.Assert(err, IsNil)
 	// Unmount
 	s.umount(t, mountPoint)
 
