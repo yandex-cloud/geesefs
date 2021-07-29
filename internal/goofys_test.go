@@ -2391,7 +2391,10 @@ func (s *GoofysTest) TestXAttrGet(t *C) {
 		xattrPrefix + "storage-class",
 		"user.name",
 	}
-	sort.Strings(expectedXattrs)
+	if len(names) == 2 {
+		// STANDARD storage-class may be present or not
+		expectedXattrs = []string{ xattrPrefix + "etag", "user.name" }
+	}
 	t.Assert(names, DeepEquals, expectedXattrs)
 
 	_, err = file1.GetXattr("user.foobar")
@@ -2629,17 +2632,13 @@ func (s *GoofysTest) TestXAttrFuse(t *C) {
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
 
-	expectedXattrs := []string{
-		xattrPrefix + "etag",
-		xattrPrefix + "storage-class",
-		"user.name",
-	}
-	sort.Strings(expectedXattrs)
+	// STANDARD storage-class may be present or not
+	expectedXattrs1 := xattrPrefix + "etag\x00" +
+		xattrPrefix + "storage-class\x00" +
+		"user.name\x00"
+	expectedXattrs2 := xattrPrefix + "etag\x00" +
+		"user.name\x00"
 
-	var expectedXattrsStr string
-	for _, x := range expectedXattrs {
-		expectedXattrsStr += x + "\x00"
-	}
 	var buf [1024]byte
 
 	// error if size is too small (but not zero)
@@ -2649,12 +2648,17 @@ func (s *GoofysTest) TestXAttrFuse(t *C) {
 	// 0 len buffer means interogate the size of buffer
 	nbytes, err := unix.Listxattr(mountPoint+"/file1", nil)
 	t.Assert(err, Equals, nil)
-	t.Assert(nbytes, Equals, len(expectedXattrsStr))
+	if nbytes != len(expectedXattrs2) {
+		t.Assert(nbytes, Equals, len(expectedXattrs1))
+	}
 
 	nbytes, err = unix.Listxattr(mountPoint+"/file1", buf[:nbytes])
 	t.Assert(err, IsNil)
-	t.Assert(nbytes, Equals, len(expectedXattrsStr))
-	t.Assert(string(buf[:nbytes]), Equals, expectedXattrsStr)
+	if nbytes == len(expectedXattrs2) {
+		t.Assert(string(buf[:nbytes]), Equals, expectedXattrs2)
+	} else {
+		t.Assert(string(buf[:nbytes]), Equals, expectedXattrs1)
+	}
 
 	_, err = unix.Getxattr(mountPoint+"/file1", "user.name", buf[:1])
 	t.Assert(err, Equals, unix.ERANGE)
