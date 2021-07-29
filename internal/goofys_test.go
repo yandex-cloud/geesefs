@@ -17,6 +17,7 @@
 
 USAGE:
 
+[ DEBUG=1 ] \
 [ BUCKET=.. ] \
 [ AWS_ACCESS_KEY_ID=.. ] \
 [ AWS_SECRET_ACCESS_KEY=.. ] \
@@ -531,6 +532,15 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		SinglePartMB: 5,
 		MaxMergeCopyMB: 0,
 		IgnoreFsync: false,
+	}
+	if hasEnv("DEBUG") {
+		flags.DebugS3 = true
+		flags.DebugFuse = true
+		SetCloudLogLevel(logrus.DebugLevel)
+		l := GetLogger("fuse")
+		l.Level = logrus.DebugLevel
+		l = GetLogger("s3")
+		l.Level = logrus.DebugLevel
 	}
 
 	cloud := os.Getenv("CLOUD")
