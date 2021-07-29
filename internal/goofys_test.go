@@ -527,11 +527,15 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		TypeCacheTTL: 30 * time.Second,
 		HTTPTimeout: 30 * time.Second,
 		RetryInterval: 30 * time.Second,
-		ReadAheadKB: 4096,
+		ReadAheadKB: 5*1024,
+		ReadAheadCutoffKB: 5*1024,
+		ReadAheadLargeKB: 100*1024,
+		ReadAheadParallelKB: 20*1024,
 		ReadMergeKB: 512,
 		SinglePartMB: 5,
 		MaxMergeCopyMB: 0,
 		IgnoreFsync: false,
+		SymlinkAttr: "--symlink-target",
 	}
 	if hasEnv("DEBUG") {
 		flags.DebugS3 = true
