@@ -144,6 +144,17 @@ func NewApp() (app *cli.App) {
 					" Possible values: http://127.0.0.1:8081/, https://s3.amazonaws.com",
 			},
 
+			cli.BoolFlag{
+				Name:  "iam",
+				Usage: "Try to authenticate automatically using VM metadata service (Yandex Cloud / IMDSv1)",
+			},
+
+			cli.StringFlag{
+				Name:  "iam-header",
+				Value: "X-YaCloud-SubjectToken",
+				Usage: "The header to use for authenticating with IAM token",
+			},
+
 			cli.StringFlag{
 				Name:  "region",
 				Value: s3Default.Region,
@@ -382,7 +393,7 @@ func NewApp() (app *cli.App) {
 
 	flagCategories = map[string]string{}
 
-	for _, f := range []string{"region", "sse", "sse-kms", "sse-c", "storage-class", "acl", "requester-pays",
+	for _, f := range []string{"iam", "iam-header", "region", "sse", "sse-kms", "sse-c", "storage-class", "acl", "requester-pays",
 		"no-checksum", "list-type"} {
 		flagCategories[f] = "aws"
 	}
@@ -489,7 +500,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 	if c.IsSet("region") || c.IsSet("requester-pays") || c.IsSet("storage-class") ||
 		c.IsSet("profile") || c.IsSet("sse") || c.IsSet("sse-kms") ||
 		c.IsSet("sse-c") || c.IsSet("acl") || c.IsSet("subdomain") ||
-		c.IsSet("no-checksum") || c.IsSet("list-type") {
+		c.IsSet("no-checksum") || c.IsSet("list-type") ||
+		c.IsSet("iam") || c.IsSet("iam-header") {
 
 		if flags.Backend == nil {
 			flags.Backend = (&S3Config{}).Init()
@@ -508,6 +520,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.ACL = c.String("acl")
 		config.Subdomain = c.Bool("subdomain")
 		config.NoChecksum = c.Bool("no-checksum")
+		config.UseIAM = c.Bool("iam")
+		config.IAMHeader = c.String("iam-header")
 		if c.IsSet("list-type") {
 			listType := c.String("list-type")
 			config.ListV1Ext = listType == "ext-v1"

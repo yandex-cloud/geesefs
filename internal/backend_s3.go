@@ -18,11 +18,15 @@ package internal
 import (
 	. "github.com/yandex-cloud/geesefs/api/common"
 
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -48,6 +52,11 @@ type S3Backend struct {
 
 	gcs      bool
 	v2Signer bool
+
+	iam bool
+	iamToken atomic.Value
+	iamTokenExpiration time.Time
+	iamRefreshTimer *time.Timer
 }
 
 func NewS3(bucket string, flags *FlagStorage, config *S3Config) (*S3Backend, error) {
@@ -69,6 +78,9 @@ func NewS3(bucket string, flags *FlagStorage, config *S3Config) (*S3Backend, err
 	if flags.DebugS3 {
 		awsConfig.LogLevel = aws.LogLevel(aws.LogDebug | aws.LogDebugWithRequestErrors)
 	}
+	if config.UseIAM {
+		s.TryIAM()
+	}
 
 	if config.UseKMS {
 		//SSE header string for KMS server-side encryption (SSE-KMS)
@@ -80,6 +92,73 @@ func NewS3(bucket string, flags *FlagStorage, config *S3Config) (*S3Backend, err
 
 	s.newS3()
 	return s, nil
+}
+
+type IAMCredResponse struct {
+	Code string
+	Token string
+	Expiration time.Time
+}
+
+func (s *S3Backend) TryIAM() error {
+	credUrl := "http://169.254.169.254/latest/meta-data/iam/security-credentials/default"
+	resp, err := http.Get(credUrl)
+	if err != nil {
+		s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
+		return err
+	}
+	var creds IAMCredResponse
+	err = json.Unmarshal(body, &creds)
+	if err != nil {
+		s3Log.Infof("Bad response while trying to get IAM token from %v: %v", credUrl, err)
+		return err
+	}
+	if creds.Code == "Success" {
+		s.iam = true
+		s.iamToken.Store(creds.Token)
+		s.iamTokenExpiration = creds.Expiration
+		ttl := s.iamTokenExpiration.Sub(time.Now().Add(5*time.Minute))
+		if ttl < 0 {
+			ttl = s.iamTokenExpiration.Sub(time.Now())
+			if ttl >= 30*time.Second {
+				ttl = 30*time.Second
+			}
+		}
+		s.iamRefreshTimer = time.AfterFunc(ttl, func() {
+			s.RefreshIAM()
+		})
+		s3Log.Infof("Successfully acquired IAM Token")
+		return nil
+	} else {
+		s3Log.Infof("Failed to get IAM Token, code is %v", creds.Code)
+		return errors.New(creds.Code)
+	}
+}
+
+func (s *S3Backend) RefreshIAM() {
+	err := s.TryIAM()
+	if err != nil {
+		s.iamRefreshTimer = time.AfterFunc(10*time.Second, func() {
+			s.RefreshIAM()
+		})
+	}
+}
+
+func (s *S3Backend) setIAMSigner(handlers *request.Handlers) {
+	handlers.Sign.Clear()
+	handlers.Sign.PushBack(func(req *request.Request) {
+		if req.Config.Credentials == credentials.AnonymousCredentials {
+			return
+		}
+		req.HTTPRequest.Header.Set(s.config.IAMHeader, s.iamToken.Load().(string))
+	})
+	handlers.Sign.PushBackNamed(corehandlers.BuildContentLengthHandler)
 }
 
 func (s *S3Backend) Bucket() string {
@@ -119,7 +198,9 @@ func (s *S3Backend) newS3() {
 	if s.config.RequesterPays {
 		s.S3.Handlers.Build.PushBack(addRequestPayer)
 	}
-	if s.v2Signer {
+	if s.iam {
+		s.setIAMSigner(&s.S3.Handlers)
+	} else if s.v2Signer {
 		s.setV2Signer(&s.S3.Handlers)
 	}
 	s.S3.Handlers.Sign.PushBack(addAcceptEncoding)

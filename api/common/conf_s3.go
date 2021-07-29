@@ -55,6 +55,9 @@ type S3Config struct {
 
 	Subdomain bool
 
+	UseIAM bool
+	IAMHeader string
+
 	Credentials *credentials.Credentials
 	Session     *session.Session
 
