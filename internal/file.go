@@ -863,7 +863,7 @@ func (inode *Inode) SendUpload() bool {
 					Destination: key,
 					Size:        &inode.Attributes.Size,
 					ETag:        PString(inode.knownETag),
-					Metadata:    convertMetadata(inode.userMetadata),
+					Metadata:    escapeMetadata(inode.userMetadata),
 				})
 				inode.mu.Lock()
 				inode.recordFlushError(err)
@@ -1035,7 +1035,7 @@ func (inode *Inode) FlushSmallObject() {
 		ContentType: inode.fs.flags.GetMimeType(*inode.FullName()),
 	}
 	if inode.userMetadataDirty {
-		params.Metadata = convertMetadata(inode.userMetadata)
+		params.Metadata = escapeMetadata(inode.userMetadata)
 		inode.userMetadataDirty = false
 	}
 
@@ -1258,7 +1258,7 @@ func (inode *Inode) FlushPart(part uint64) {
 				// Finalize the upload
 				inode.mpu.NumParts = uint32(numParts)
 				if inode.userMetadataDirty {
-					inode.mpu.Metadata = convertMetadata(inode.userMetadata)
+					inode.mpu.Metadata = escapeMetadata(inode.userMetadata)
 					inode.userMetadataDirty = false
 				}
 				inode.mu.Unlock()

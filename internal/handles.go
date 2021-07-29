@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"net/url"
 
 	"github.com/aws/aws-sdk-go/aws"
 
@@ -176,10 +177,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 		inode.AttrTime = now
 	}
 	if item.Metadata != nil {
-		inode.userMetadata = make(map[string][]byte)
-		for k, v := range item.Metadata {
-			inode.userMetadata[strings.ToLower(k)] = []byte(*v)
-		}
+		inode.userMetadata = unescapeMetadata(item.Metadata)
 	}
 }
 
@@ -343,8 +341,6 @@ func (inode *Inode) isDir() bool {
 
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) fillXattrFromHead(resp *HeadBlobOutput) {
-	inode.userMetadata = make(map[string][]byte)
-
 	if resp.ETag != nil {
 		inode.s3Metadata["etag"] = []byte(*resp.ETag)
 	}
@@ -354,9 +350,7 @@ func (inode *Inode) fillXattrFromHead(resp *HeadBlobOutput) {
 		inode.s3Metadata["storage-class"] = []byte("STANDARD")
 	}
 
-	for k, v := range resp.Metadata {
-		inode.userMetadata[strings.ToLower(k)] = []byte(*v)
-	}
+	inode.userMetadata = unescapeMetadata(resp.Metadata)
 }
 
 // FIXME: Move all these xattr-related functions to file.go
@@ -428,13 +422,27 @@ func (inode *Inode) getXattrMap(name string, userOnly bool) (
 	return
 }
 
-func convertMetadata(meta map[string][]byte) (metadata map[string]*string) {
+func escapeMetadata(meta map[string][]byte) (metadata map[string]*string) {
 	metadata = make(map[string]*string)
 	for k, v := range meta {
-		k = strings.ToLower(k)
-		metadata[k] = aws.String(xattrEscape(v))
+		k = strings.ToLower(xattrEscape(k))
+		metadata[k] = aws.String(xattrEscape(string(v)))
 	}
 	return
+}
+
+func unescapeMetadata(meta map[string]*string) map[string][]byte {
+	unescaped := make(map[string][]byte)
+	for k, v := range meta {
+		uk, err := url.PathUnescape(strings.ToLower(k))
+		if err == nil {
+			uv, err := url.PathUnescape(strings.ToLower(*v))
+			if err == nil {
+				unescaped[uk] = []byte(uv)
+			}
+		}
+	}
+	return unescaped
 }
 
 func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {

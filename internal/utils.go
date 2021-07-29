@@ -135,11 +135,11 @@ func PMetadata(m map[string]string) map[string]*string {
 	return metadata
 }
 
-func xattrEscape(value []byte) (s string) {
+func xattrEscape(value string) (s string) {
 	for _, c := range value {
 		if c == '%' {
 			s += "%25"
-		} else if unicode.IsPrint(rune(c)) {
+		} else if unicode.IsPrint(c) {
 			s += string(c)
 		} else {
 			s += "%" + fmt.Sprintf("%02X", c)
