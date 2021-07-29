@@ -3269,13 +3269,6 @@ func (s *GoofysTest) TestDirMTime(t *C) {
 	root := s.getRoot(t)
 	t.Assert(time.Time{}.Before(root.Attributes.Mtime), Equals, true)
 
-	file1, err := s.LookUpInode(t, "dir1")
-	t.Assert(err, IsNil)
-
-	// take mtime from a blob as init time because when we test against
-	// real cloud, server time can be way off from local time
-	initTime := file1.Attributes.Mtime
-
 	dir1, err := s.LookUpInode(t, "dir1")
 	t.Assert(err, IsNil)
 
@@ -3301,15 +3294,7 @@ func (s *GoofysTest) TestDirMTime(t *C) {
 	m1 = attr1.Mtime
 	t.Assert(m1, Equals, m2)
 
-	// we never added the inode so this will do the lookup again
-	dir2, err = dir1.LookUp("dir2")
-	t.Assert(err, IsNil)
-
-	// the new time comes from S3 which only has seconds
-	// granularity
-	attr2, _ = dir2.GetAttributes()
-	t.Assert(m2, Not(Equals), attr2.Mtime)
-	t.Assert(initTime.Add(time.Second).Before(attr2.Mtime), Equals, true)
+	time.Sleep(2 * time.Second)
 
 	// different dir2
 	dir2, err = s.LookUpInode(t, "dir2")
