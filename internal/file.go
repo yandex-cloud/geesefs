@@ -34,6 +34,10 @@ type FileHandle struct {
 	inode *Inode
 	lastReadEnd uint64
 	seqReadSize uint64
+	lastReadCount uint64
+	lastReadTotal uint64
+	lastReadSizes []uint64
+	lastReadIdx int
 }
 
 const MAX_BUF = 5 * 1024 * 1024
@@ -42,6 +46,9 @@ const MAX_BUF = 5 * 1024 * 1024
 // operation with the given `opMetadata`
 func NewFileHandle(inode *Inode, opMetadata fuseops.OpMetadata) *FileHandle {
 	fh := &FileHandle{inode: inode}
+	if inode.fs.flags.SmallReadCount > 1 {
+		fh.lastReadSizes = make([]uint64, inode.fs.flags.SmallReadCount-1)
+	}
 	return fh
 }
 
@@ -357,7 +364,7 @@ func appendRequest(requests []uint64, offset uint64, size uint64, requestCost ui
 // Load some inode data into memory
 // Must be called with inode.mu taken
 // Loaded range should be guarded against eviction by adding it into inode.readRanges
-func (inode *Inode) LoadRange(offset uint64, size uint64, seqReadSize uint64, ignoreMemoryLimit bool) (requestErr error) {
+func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, ignoreMemoryLimit bool) (requestErr error) {
 
 	end := offset+size
 
@@ -384,14 +391,9 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, seqReadSize uint64, ig
 	}
 
 	// add readahead
-	if seqReadSize > 0 {
-		ra := inode.fs.flags.ReadAheadKB
-		if seqReadSize >= inode.fs.flags.ReadAheadCutoffKB*1024 {
-			// use larger readahead
-			ra = inode.fs.flags.ReadAheadLargeKB
-		}
+	if readAheadSize > 0 {
 		nr := len(requests)
-		lastEnd := requests[nr-2]+requests[nr-1] + ra*1024
+		lastEnd := requests[nr-2]+requests[nr-1] + readAheadSize
 		if lastEnd > inode.Attributes.Size {
 			lastEnd = inode.Attributes.Size
 		}
@@ -526,6 +528,17 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	if offset == fh.lastReadEnd {
 		fh.seqReadSize += uint64(len(buf))
 	} else {
+		// Track sizes of last N read requests
+		if len(fh.lastReadSizes) > 0 {
+			if fh.lastReadSizes[fh.lastReadIdx] != 0 {
+				fh.lastReadTotal -= fh.lastReadSizes[fh.lastReadIdx]
+				fh.lastReadCount--
+			}
+			fh.lastReadSizes[fh.lastReadIdx] = fh.seqReadSize
+			fh.lastReadTotal += fh.lastReadSizes[fh.lastReadIdx]
+			fh.lastReadCount++
+			fh.lastReadIdx = (fh.lastReadIdx+1) % len(fh.lastReadSizes)
+		}
 		fh.seqReadSize = uint64(len(buf))
 	}
 	fh.lastReadEnd = end
@@ -537,10 +550,21 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	defer fh.inode.UnlockRange(offset, end-offset, false)
 
 	// Don't read anything from the server if the file is just created
-	// FIXME: Track random reads and temporarily disable readahead, as in the original
 	var requestErr error
 	if fh.inode.CacheState != ST_CREATED {
-		requestErr = fh.inode.LoadRange(offset, end-offset, fh.seqReadSize, false)
+		ra := fh.inode.fs.flags.ReadAheadKB*1024
+		if fh.seqReadSize >= fh.inode.fs.flags.LargeReadCutoffKB*1024 {
+			// Use larger readahead
+			ra = fh.inode.fs.flags.ReadAheadLargeKB*1024
+		} else {
+			// Disable readahead if last N read requests are smaller than X on average
+			avg := (fh.seqReadSize + fh.lastReadTotal) / (1 + fh.lastReadCount)
+			if avg <= fh.inode.fs.flags.SmallReadCutoffKB*1024 {
+				// Use smaller readahead
+				ra = fh.inode.fs.flags.ReadAheadSmallKB*1024
+			}
+		}
+		requestErr = fh.inode.LoadRange(offset, end-offset, ra, false)
 		if requestErr == fuse.ENOENT || requestErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			fh.inode.resetCache()
@@ -612,9 +636,6 @@ func (fh *FileHandle) Release() {
 	n := atomic.AddInt32(&fh.inode.fileHandles, -1)
 	if n == -1 {
 		panic(fh.inode.fileHandles)
-	} else if n == 0 {
-		// delete fh
-		fh.inode.fileHandle = nil
 	}
 
 	fh.inode.fs.WakeupFlusher()

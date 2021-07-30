@@ -92,7 +92,6 @@ type Inode struct {
 	ImplicitDir bool
 
 	fileHandles int32
-	fileHandle *FileHandle
 	lastWriteEnd uint64
 
 	// cached/buffered data
@@ -556,10 +555,8 @@ func (inode *Inode) OpenFile(metadata fuseops.OpMetadata) (fh *FileHandle, err e
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 
-	if atomic.AddInt32(&inode.fileHandles, 1) == 1 {
-		inode.fileHandle = NewFileHandle(inode, metadata)
-	}
-	fh = inode.fileHandle
+	fh = NewFileHandle(inode, metadata)
 
+	atomic.AddInt32(&inode.fileHandles, 1)
 	return
 }

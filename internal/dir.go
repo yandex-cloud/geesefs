@@ -958,7 +958,6 @@ func (parent *Inode) Create(
 
 	fh = NewFileHandle(inode, metadata)
 	inode.fileHandles = 1
-	inode.fileHandle = fh
 
 	parent.touch()
 

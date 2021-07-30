@@ -275,19 +275,37 @@ func NewApp() (app *cli.App) {
 			cli.IntFlag{
 				Name:  "read-ahead",
 				Value: 5*1024,
-				Usage: "How much data in KB should be pre-loaded with every read (default: 5 MB)",
+				Usage: "How much data in KB should be pre-loaded with every read by default (default: 5 MB)",
 			},
 
 			cli.IntFlag{
-				Name:  "read-large-cutoff",
-				Value: 5*1024,
-				Usage: "After which amount of linear read in KB the \"large\" readahead should be triggered (default: 10 MB)",
+				Name:  "small-read-count",
+				Value: 4,
+				Usage: "Number of last reads within a single file handle to be checked for being random",
+			},
+
+			cli.IntFlag{
+				Name:  "small-read-cutoff",
+				Value: 128,
+				Usage: "Maximum average size of last reads in KB to trigger \"small\" readahead (default: 128 KB)",
+			},
+
+			cli.IntFlag{
+				Name:  "read-ahead-small",
+				Value: 128,
+				Usage: "Smaller readahead size in KB to be used when small random reads are detected (default: 128 KB)",
+			},
+
+			cli.IntFlag{
+				Name:  "large-read-cutoff",
+				Value: 20*1024,
+				Usage: "Amount of linear read in KB after which the \"large\" readahead should be triggered (default: 20 MB)",
 			},
 
 			cli.IntFlag{
 				Name:  "read-ahead-large",
 				Value: 100*1024,
-				Usage: "Larger readahead size in KB (default: 100 MB)",
+				Usage: "Larger readahead size in KB to be used when long linear reads are detected (default: 100 MB)",
 			},
 
 			cli.IntFlag{
@@ -400,7 +418,8 @@ func NewApp() (app *cli.App) {
 
 	for _, f := range []string{"memory-limit", "cheap", "no-implicit-dir",
 		"no-dir-object", "max-flushers", "max-parallel-parts", "max-parallel-copy",
-		"read-ahead", "read-large-cutoff", "read-ahead-large", "read-ahead-parallel",
+		"read-ahead", "small-read-count", "small-read-cutoff", "read-ahead-small",
+		"large-read-cutoff", "read-ahead-large", "read-ahead-parallel",
 		"read-merge", "single-part", "max-merge-copy", "ignore-fsync",
 		"symlink-attr", "stat-cache-ttl", "type-cache-ttl", "http-timeout"} {
 		flagCategories[f] = "tuning"
@@ -470,10 +489,13 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		TypeCacheTTL: c.Duration("type-cache-ttl"),
 		HTTPTimeout:  c.Duration("http-timeout"),
 		RetryInterval: c.Duration("retry-interval"),
-		ReadAheadKB:  uint64(c.Int("read-ahead")),
-		ReadAheadCutoffKB:  uint64(c.Int("read-large-cutoff")),
-		ReadAheadLargeKB:  uint64(c.Int("read-ahead-large")),
-		ReadAheadParallelKB:  uint64(c.Int("read-ahead-parallel")),
+		ReadAheadKB:         uint64(c.Int("read-ahead")),
+		SmallReadCount:      uint64(c.Int("small-read-count")),
+		SmallReadCutoffKB:   uint64(c.Int("small-read-cutoff")),
+		ReadAheadSmallKB:    uint64(c.Int("read-ahead-small")),
+		LargeReadCutoffKB:   uint64(c.Int("large-read-cutoff")),
+		ReadAheadLargeKB:    uint64(c.Int("read-ahead-large")),
+		ReadAheadParallelKB: uint64(c.Int("read-ahead-parallel")),
 		ReadMergeKB:  uint64(c.Int("read-merge")),
 		SinglePartMB: uint64(singlePart),
 		MaxMergeCopyMB: uint64(c.Int("max-merge-copy")),

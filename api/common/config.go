@@ -57,9 +57,12 @@ type FlagStorage struct {
 	TypeCacheTTL time.Duration
 	HTTPTimeout  time.Duration
 	RetryInterval time.Duration
-	ReadAheadKB  uint64
-	ReadAheadCutoffKB uint64
-	ReadAheadLargeKB uint64
+	ReadAheadKB         uint64
+	SmallReadCount      uint64
+	SmallReadCutoffKB   uint64
+	ReadAheadSmallKB    uint64
+	LargeReadCutoffKB   uint64
+	ReadAheadLargeKB    uint64
 	ReadAheadParallelKB uint64
 	ReadMergeKB  uint64
 	SinglePartMB uint64
