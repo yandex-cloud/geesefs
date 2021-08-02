@@ -350,14 +350,7 @@ func NewApp() (app *cli.App) {
 			cli.DurationFlag{
 				Name:  "stat-cache-ttl",
 				Value: time.Minute,
-				Usage: "How long to cache StatObject results and inode attributes.",
-			},
-
-			cli.DurationFlag{
-				Name:  "type-cache-ttl",
-				Value: time.Minute,
-				Usage: "How long to cache name -> file/dir mappings in directory " +
-					"inodes.",
+				Usage: "How long to cache file metadata.",
 			},
 
 			cli.DurationFlag{
@@ -421,7 +414,7 @@ func NewApp() (app *cli.App) {
 		"read-ahead", "small-read-count", "small-read-cutoff", "read-ahead-small",
 		"large-read-cutoff", "read-ahead-large", "read-ahead-parallel",
 		"read-merge", "single-part", "max-merge-copy", "ignore-fsync",
-		"symlink-attr", "stat-cache-ttl", "type-cache-ttl", "http-timeout"} {
+		"symlink-attr", "stat-cache-ttl", "http-timeout"} {
 		flagCategories[f] = "tuning"
 	}
 
@@ -486,7 +479,6 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		MaxParallelParts: c.Int("max-parallel-parts"),
 		MaxParallelCopy: c.Int("max-parallel-copy"),
 		StatCacheTTL: c.Duration("stat-cache-ttl"),
-		TypeCacheTTL: c.Duration("type-cache-ttl"),
 		HTTPTimeout:  c.Duration("http-timeout"),
 		RetryInterval: c.Duration("retry-interval"),
 		ReadAheadKB:         uint64(c.Int("read-ahead")),

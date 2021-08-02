@@ -524,7 +524,6 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		MaxParallelParts: 8,
 		MaxParallelCopy: 16,
 		StatCacheTTL: 30 * time.Second,
-		TypeCacheTTL: 30 * time.Second,
 		HTTPTimeout: 30 * time.Second,
 		RetryInterval: 30 * time.Second,
 		ReadAheadKB:         5*1024,
@@ -898,7 +897,6 @@ func (s *GoofysTest) readDirIntoCache(t *C, inode fuseops.InodeID) {
 
 func (s *GoofysTest) TestReadDirCacheLookup(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 
 	s.readDirIntoCache(t, fuseops.RootInodeID)
 	s.disableS3()
@@ -915,7 +913,6 @@ func (s *GoofysTest) TestReadDirCacheLookup(t *C) {
 }
 
 func (s *GoofysTest) TestReadDirWithExternalChanges(t *C) {
-	s.fs.flags.TypeCacheTTL = time.Second
 	s.fs.flags.StatCacheTTL = time.Second
 
 	dir1, err := s.LookUpInode(t, "dir1")
@@ -938,7 +935,7 @@ func (s *GoofysTest) TestReadDirWithExternalChanges(t *C) {
 	s.setupBlobs(s.cloud, t, map[string]*string{"file3": nil})
 	s.removeBlob(s.cloud, t, "dir1/file3")
 
-	time.Sleep(s.fs.flags.TypeCacheTTL)
+	time.Sleep(s.fs.flags.StatCacheTTL)
 	// newEntries = `defaultEntries` - dir1 - file1 + file3.
 	newEntries := []string{
 		"dir2", "dir4", "empty_dir", "empty_dir2",
@@ -1835,7 +1832,6 @@ func (s *GoofysTest) mountSame(t *C, mountPoint string, sameProc bool) {
 		c := exec.Command("/bin/bash", "-c",
 			"../geesefs --debug_fuse --debug_s3"+
 			" --stat-cache-ttl "+s.fs.flags.StatCacheTTL.String()+
-			" --type-cache-ttl "+s.fs.flags.TypeCacheTTL.String()+
 			" --log-file \"mount_"+t.TestName()+".log\""+
 			" --endpoint \""+s.fs.flags.Endpoint+"\""+
 			region+
@@ -1970,7 +1966,6 @@ func (s *GoofysTest) testExplicitDir(t *C) {
 }
 
 func (s *GoofysTest) TestBenchLs(t *C) {
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 	s.setUpTestTimeout(t, 20*time.Minute)
@@ -1978,28 +1973,24 @@ func (s *GoofysTest) TestBenchLs(t *C) {
 }
 
 func (s *GoofysTest) TestBenchCreate(t *C) {
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", "cat", mountPoint, "create")
 }
 
 func (s *GoofysTest) TestBenchCreateParallel(t *C) {
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", "cat", mountPoint, "create_parallel")
 }
 
 func (s *GoofysTest) TestBenchIO(t *C) {
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", "cat", mountPoint, "io")
 }
 
 func (s *GoofysTest) TestBenchFindTree(t *C) {
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 
@@ -2248,7 +2239,6 @@ func (s *GoofysTest) disableS3() {
 func (s *GoofysTest) TestWriteAnonymous(t *C) {
 	s.anonymous(t)
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 
 	fileName := "test"
 
@@ -2273,7 +2263,6 @@ func (s *GoofysTest) TestWriteAnonymous(t *C) {
 func (s *GoofysTest) TestWriteAnonymousFuse(t *C) {
 	s.anonymous(t)
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 
@@ -2571,7 +2560,6 @@ func (s *GoofysTest) TestXAttrGetCached(t *C) {
 	xattrPrefix := s.cloud.Capabilities().Name + "."
 
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 	s.readDirIntoCache(t, fuseops.RootInodeID)
 	s.disableS3()
 
@@ -2910,7 +2898,7 @@ func (s *GoofysTest) TestReadDirSlurpHeuristic(t *C) {
 	if _, ok := s.cloud.Delegate().(*S3Backend); !ok {
 		t.Skip("only for S3")
 	}
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
+	s.fs.flags.StatCacheTTL = 1 * time.Minute
 
 	s.setupBlobs(s.cloud, t, map[string]*string{"dir2isafile": nil})
 
@@ -2943,7 +2931,6 @@ func (s *GoofysTest) TestReadDirSlurpSubtree(t *C) {
 	if _, ok := s.cloud.Delegate().(*S3Backend); !ok {
 		t.Skip("only for S3")
 	}
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 
 	s.getRoot(t).dir.seqOpenDirScore = 2
@@ -3013,7 +3000,6 @@ func (s *GoofysTest) TestReadDirSlurpContinuation(t *C) {
 
 func (s *GoofysTest) TestReadDirCached(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 
 	s.getRoot(t).dir.seqOpenDirScore = 2
 	dh := s.getRoot(t).OpenDir()
@@ -3176,7 +3162,6 @@ func (s *GoofysTest) TestRead403(t *C) {
 	}
 
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 
 	// cache the inode first so we don't get 403 when we lookup
 	in, err := s.LookUpInode(t, "file1")
@@ -3210,7 +3195,6 @@ func (s *GoofysTest) TestRmdirWithDiropen(t *C) {
 
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
@@ -3283,7 +3267,6 @@ func (s *GoofysTest) TestRmdirWithDiropen(t *C) {
 
 func (s *GoofysTest) TestDirMTime(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 	// enable cheap to ensure GET dir/ will come back before LIST dir/
 	s.fs.flags.Cheap = true
 
@@ -3418,7 +3401,6 @@ func (s *GoofysTest) TestSlurpFileAndDir(t *C) {
 		t.Assert(err, IsNil)
 	}
 
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 
 	in, err := s.LookUpInode(t, prefix[0:len(prefix)-1])
@@ -3700,7 +3682,6 @@ func (s *GoofysTest) TestVFS(t *C) {
 }
 
 func (s *GoofysTest) TestMountsList(t *C) {
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 
 	bucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
@@ -3731,7 +3712,6 @@ func (s *GoofysTest) TestMountsList(t *C) {
 	t.Assert(int(c1.Id), Equals, 3)
 
 	// pretend we've passed the normal cache ttl
-	s.fs.flags.TypeCacheTTL = 0
 	s.fs.flags.StatCacheTTL = 0
 
 	// listing root again should not overwrite the mounts
@@ -3869,7 +3849,7 @@ func (s *GoofysTest) TestMountsError(t *C) {
 }
 
 func (s *GoofysTest) TestMountsMultiLevel(t *C) {
-	s.fs.flags.TypeCacheTTL = 1 * time.Minute
+	s.fs.flags.StatCacheTTL = 1 * time.Minute
 
 	bucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
 	cloud := s.newBackend(t, bucket, true)
@@ -4291,7 +4271,7 @@ func (s *GoofysTest) TestWriteUnlinkFlush(t *C) {
 }
 
 func (s *GoofysTest) TestIssue474(t *C) {
-	s.fs.flags.TypeCacheTTL = 1 * time.Second
+	s.fs.flags.StatCacheTTL = 1 * time.Second
 	s.fs.flags.Cheap = true
 
 	p := "this_test/"
@@ -4328,7 +4308,6 @@ func (s *GoofysTest) TestIssue474(t *C) {
 
 func (s *GoofysTest) TestReadExternalChangesFuse(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Second
-	s.fs.flags.TypeCacheTTL = 1 * time.Second
 
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 
@@ -4350,7 +4329,7 @@ func (s *GoofysTest) TestReadExternalChangesFuse(t *C) {
 	})
 	t.Assert(err, IsNil)
 
-	time.Sleep(s.fs.flags.TypeCacheTTL)
+	time.Sleep(s.fs.flags.StatCacheTTL)
 
 	buf, err = ioutil.ReadFile(filePath)
 	t.Assert(err, IsNil)
@@ -4462,7 +4441,6 @@ func (s *GoofysTest) testReadMyOwnWriteFuse(t *C, externalUpdate bool) {
 
 func (s *GoofysTest) TestReadMyOwnNewFileFuse(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Second
-	s.fs.flags.TypeCacheTTL = 1 * time.Second
 
 	mountPoint := "/tmp/mnt" + s.fs.bucket
 

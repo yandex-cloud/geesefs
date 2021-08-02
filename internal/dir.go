@@ -131,7 +131,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 		panic(fmt.Sprintf("%v is not a directory", inode.FullName()))
 	}
 
-	if isS3 && parent != nil && inode.fs.flags.TypeCacheTTL != 0 {
+	if isS3 && parent != nil && inode.fs.flags.StatCacheTTL != 0 {
 		parent.mu.Lock()
 		defer parent.mu.Unlock()
 
@@ -479,7 +479,7 @@ func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffs
 	if dh.inode.dir == nil {
 		panic(dh.inode.FullName())
 	}
-	if !expired(dh.inode.dir.DirTime, dh.inode.fs.flags.TypeCacheTTL) {
+	if !expired(dh.inode.dir.DirTime, dh.inode.fs.flags.StatCacheTTL) {
 		ok = true
 
 		if int(internalOffset) >= len(dh.inode.dir.Children) {
@@ -519,7 +519,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 
 	// FIXME Allow to use slurp more than 1 directory level above
 
-	useSlurp := fs.flags.TypeCacheTTL != 0 && dh.inode.dir.cloud == nil &&
+	useSlurp := fs.flags.StatCacheTTL != 0 && dh.inode.dir.cloud == nil &&
 		(dh.inode.Parent != nil && dh.inode.Parent.dir.seqOpenDirScore >= 2)
 
 	if !dh.inode.dir.listDone && (!useSlurp && dh.inode.dir.listMarker == nil ||

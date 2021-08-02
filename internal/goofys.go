@@ -646,7 +646,7 @@ func (fs *Goofys) CreateSymlink(ctx context.Context,
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.TypeCacheTTL)
+	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 	return
 }
 
@@ -801,7 +801,7 @@ func (fs *Goofys) LookUpInode(
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.TypeCacheTTL)
+	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 
 	return
 }
@@ -1096,7 +1096,7 @@ func (fs *Goofys) CreateFile(
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.TypeCacheTTL)
+	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 
 	// Allocate a handle.
 	handleID := fs.nextHandleID
@@ -1128,7 +1128,7 @@ func (fs *Goofys) MkDir(
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.TypeCacheTTL)
+	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 
 	return
 }

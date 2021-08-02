@@ -57,7 +57,7 @@ export BUCKET
 export ENDPOINT
 
 S3FS="s3fs -f -ostat_cache_expire=1 ${S3FS_CACHE} ${S3FS_ENDPOINT} $BUCKET bench-mnt"
-GOOFYS="goofys -f --stat-cache-ttl 1s --type-cache-ttl 1s ${GOOFYS_CACHE} ${GOOFYS_ENDPOINT} ${GOOFYS_BUCKET} bench-mnt"
+GOOFYS="goofys -f --stat-cache-ttl 1s ${GOOFYS_CACHE} ${GOOFYS_ENDPOINT} ${GOOFYS_BUCKET} bench-mnt"
 BLOBFUSE="blobfuse bench-mnt --container-name=$BUCKET --tmp-path=/tmp/cache"
 LOCAL="cat"
 
