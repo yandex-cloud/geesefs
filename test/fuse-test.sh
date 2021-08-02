@@ -455,9 +455,8 @@ function run_all_tests {
     test_append_file
     test_truncate_file
     test_truncate_empty_file
-# FIXME: mv
-#    test_mv_file
-#    test_mv_directory
+    test_mv_file
+    test_mv_directory
     #test_redirects
     test_mkdir_rmdir
     #test_chmod
@@ -467,8 +466,7 @@ function run_all_tests {
     # TODO: broken: https://github.com/s3fs-fuse/s3fs-fuse/issues/145
     #test_rename_before_close
     test_multipart_upload
-# FIXME: mv again
-#    test_multipart_copy
+    test_multipart_copy
     test_special_characters
     #test_symlink
     test_extended_attributes
