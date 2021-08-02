@@ -200,6 +200,8 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, dirty bool, copyData b
 						if b.ptr.refs == 0 {
 							allocated -= int64(len(b.ptr.mem))
 						}
+						b.ptr = nil
+						b.data = nil
 					}
 					inode.buffers = append(inode.buffers[0 : pos], inode.buffers[pos+1 : ]...)
 					pos--
@@ -290,6 +292,8 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 				if b.ptr.refs == 0 {
 					inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
 				}
+				b.ptr = nil
+				b.data = nil
 			}
 			end--
 		}
@@ -996,6 +1000,8 @@ func (inode *Inode) resetCache() {
 			if b.ptr.refs == 0 {
 				inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
 			}
+			b.ptr = nil
+			b.data = nil
 		}
 	}
 	inode.buffers = nil

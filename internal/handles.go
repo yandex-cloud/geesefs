@@ -316,6 +316,8 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 				if b.ptr.refs == 0 {
 					inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
 				}
+				b.ptr = nil
+				b.data = nil
 			}
 		}
 		inode.fs.mu.Lock()
