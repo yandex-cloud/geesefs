@@ -66,8 +66,7 @@ type MPUPart struct {
 
 type Inode struct {
 	Id         fuseops.InodeID
-	// FIXME: Change *string to string, pointer is pointless here
-	Name       *string
+	Name       string
 	fs         *Goofys
 	Attributes InodeAttributes
 	// It is generally safe to read `AttrTime` without locking because if some other
@@ -104,7 +103,7 @@ type Inode struct {
 	flushErrorTime time.Time
 	// renamed from: parent, name
 	oldParent *Inode
-	oldName *string
+	oldName string
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
@@ -122,9 +121,9 @@ type Inode struct {
 	refcnt int64
 }
 
-func NewInode(fs *Goofys, parent *Inode, name *string) (inode *Inode) {
-	if strings.Index(*name, "/") != -1 {
-		fuseLog.Errorf("%v is not a valid name", *name)
+func NewInode(fs *Goofys, parent *Inode, name string) (inode *Inode) {
+	if strings.Index(name, "/") != -1 {
+		fuseLog.Errorf("%v is not a valid name", name)
 	}
 
 	inode = &Inode{
@@ -186,7 +185,7 @@ func (inode *Inode) cloud() (cloud StorageBackend, path string) {
 	var dir *Inode
 
 	if inode.dir == nil {
-		path = *inode.Name
+		path = inode.Name
 		dir = inode.Parent
 	} else {
 		dir = inode
@@ -216,10 +215,10 @@ func (inode *Inode) cloud() (cloud StorageBackend, path string) {
 		}
 
 		if path == "" {
-			path = *p.Name
+			path = p.Name
 		} else if p.Parent != nil {
 			// don't prepend if I am already the root node
-			path = *p.Name + "/" + path
+			path = p.Name + "/" + path
 		}
 	}
 
@@ -231,12 +230,11 @@ func (inode *Inode) cloud() (cloud StorageBackend, path string) {
 	return
 }
 
-func (inode *Inode) FullName() *string {
+func (inode *Inode) FullName() string {
 	if inode.Parent == nil {
 		return inode.Name
 	} else {
-		s := inode.Parent.getChildName(*inode.Name)
-		return &s
+		return inode.Parent.getChildName(inode.Name)
 	}
 }
 
@@ -275,12 +273,12 @@ func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 
 func (inode *Inode) logFuse(op string, args ...interface{}) {
 	if fuseLog.Level >= logrus.DebugLevel {
-		fuseLog.Debugln(op, inode.Id, *inode.FullName(), args)
+		fuseLog.Debugln(op, inode.Id, inode.FullName(), args)
 	}
 }
 
 func (inode *Inode) errFuse(op string, args ...interface{}) {
-	fuseLog.Errorln(op, inode.Id, *inode.FullName(), args)
+	fuseLog.Errorln(op, inode.Id, inode.FullName(), args)
 }
 
 func (inode *Inode) ToDir() {
@@ -306,7 +304,7 @@ func (inode *Inode) Ref() {
 func (inode *Inode) DeRef(n int64) (stale bool) {
 	res := atomic.AddInt64(&inode.refcnt, -n)
 	if res < 0 {
-		panic(fmt.Sprintf("deref inode %v (%v) by %v from %v", inode.Id, *inode.FullName(), n, res+n))
+		panic(fmt.Sprintf("deref inode %v (%v) by %v from %v", inode.Id, inode.FullName(), n, res+n))
 	}
 	inode.logFuse("DeRef", n, res)
 	if res == 0 && inode.CacheState == ST_CACHED {
@@ -360,7 +358,7 @@ func (inode *Inode) fillXattr() (err error) {
 		cloud, key := inode.cloud()
 		if inode.oldParent != nil {
 			_, key = inode.oldParent.cloud()
-			key = appendChildName(key, *inode.oldName)
+			key = appendChildName(key, inode.oldName)
 		}
 		if inode.isDir() {
 			key += "/"

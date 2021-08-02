@@ -38,7 +38,6 @@ type HeadBlobInput struct {
 }
 
 type BlobItemOutput struct {
-	// FIXME I'd remove these ubiquitous string pointers and convert them to strings :)
 	Key          *string
 	ETag         *string
 	LastModified *time.Time

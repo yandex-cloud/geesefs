@@ -149,7 +149,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 			for i := 2; i < MinInt(numChildren, 1000); i++ {
 				c := parent.dir.Children[i]
 				if c.isDir() {
-					if *c.Name == *inode.Name {
+					if c.Name == inode.Name {
 						dirIdx = i
 						seqMode = 1
 						firstDir = true
@@ -159,7 +159,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 			}
 		} else if parent.dir.lastOpenDirIdx < numChildren &&
 			parent.dir.Children[parent.dir.lastOpenDirIdx].isDir() &&
-			*parent.dir.Children[parent.dir.lastOpenDirIdx].Name == *inode.Name {
+			parent.dir.Children[parent.dir.lastOpenDirIdx].Name == inode.Name {
 			// allow to read the last directory again, don't reset, but don't bump seqOpenDirScore too
 			seqMode = 0
 		} else {
@@ -167,7 +167,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 			for i := parent.dir.lastOpenDirIdx + 1; i < MinInt(numChildren, parent.dir.lastOpenDirIdx+1000); i++ {
 				c := parent.dir.Children[i]
 				if c.isDir() {
-					if *c.Name == *inode.Name {
+					if c.Name == inode.Name {
 						dirIdx = i
 						seqMode = 1
 					}
@@ -183,7 +183,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 				parent.dir.seqOpenDirScore++
 			}
 			if parent.dir.seqOpenDirScore == 2 {
-				fuseLog.Debugf("%v in readdir mode", *parent.FullName())
+				fuseLog.Debugf("%v in readdir mode", parent.FullName())
 			}
 			parent.dir.lastOpenDirIdx = dirIdx
 			if firstDir {
@@ -195,7 +195,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 				wasSeqMode := dir.seqOpenDirScore >= 2
 				dir.seqOpenDirScore = parent.dir.seqOpenDirScore
 				if !wasSeqMode && dir.seqOpenDirScore >= 2 {
-					fuseLog.Debugf("%v in readdir mode", *inode.FullName())
+					fuseLog.Debugf("%v in readdir mode", inode.FullName())
 				}
 			}
 		} else {
@@ -203,7 +203,7 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 			// reset slurp
 			parent.dir.slurpMarker = nil
 			if dirIdx == -1 {
-				dirIdx = parent.findChildIdxUnlocked(*inode.Name)
+				dirIdx = parent.findChildIdxUnlocked(inode.Name)
 			}
 			parent.dir.lastOpenDirIdx = dirIdx
 		}
@@ -221,7 +221,7 @@ func (inode *Inode) listObjectsSlurp(lock bool) (done bool, err error) {
 	cloud, key := inode.cloud()
 	if inode.oldParent != nil {
 		_, key = inode.oldParent.cloud()
-		key = appendChildName(key, *inode.oldName)
+		key = appendChildName(key, inode.oldName)
 	}
 	prefix := key
 	if len(prefix) != 0 {
@@ -384,7 +384,7 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string) {
 			}
 		} else if _, deleted := parent.dir.DeletedChildren[dirName]; !deleted {
 			// don't revive deleted items
-			inode := NewInode(fs, parent, &dirName)
+			inode := NewInode(fs, parent, dirName)
 			inode.ToDir()
 			fs.insertInode(parent, inode)
 		}
@@ -409,7 +409,7 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string) {
 				// don't revive deleted items
 				_, deleted := parent.dir.DeletedChildren[baseName]
 				if !deleted {
-					inode = NewInode(fs, parent, &baseName)
+					inode = NewInode(fs, parent, baseName)
 					fs.insertInode(parent, inode)
 					inode.SetFromBlobItem(&obj)
 				}
@@ -435,7 +435,7 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	}
 	if dh.inode.oldParent != nil {
 		_, prefix = dh.inode.oldParent.cloud()
-		prefix = appendChildName(prefix, *dh.inode.oldName)
+		prefix = appendChildName(prefix, dh.inode.oldName)
 	}
 	if len(prefix) != 0 {
 		prefix += "/"
@@ -477,7 +477,7 @@ func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffs
 	defer dh.inode.mu.Unlock()
 
 	if dh.inode.dir == nil {
-		panic(*dh.inode.FullName())
+		panic(dh.inode.FullName())
 	}
 	if !expired(dh.inode.dir.DirTime, dh.inode.fs.flags.TypeCacheTTL) {
 		ok = true
@@ -489,7 +489,7 @@ func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffs
 		child := dh.inode.dir.Children[internalOffset]
 
 		en = &DirHandleEntry{
-			Name:   *child.Name,
+			Name:   child.Name,
 			Inode:  child.Id,
 			Offset: offset + 1,
 		}
@@ -591,7 +591,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 
 	child := parent.dir.Children[internalOffset]
 	en = &DirHandleEntry{
-		Name:   *child.Name,
+		Name:   child.Name,
 		Inode:  child.Id,
 		Offset: offset + 1,
 	}
@@ -705,7 +705,7 @@ func (parent *Inode) findChild(name string) (inode *Inode) {
 
 func (parent *Inode) findInodeFunc(name string) func(i int) bool {
 	return func(i int) bool {
-		return (*parent.dir.Children[i].Name) >= name
+		return parent.dir.Children[i].Name >= name
 	}
 }
 
@@ -717,7 +717,7 @@ func (parent *Inode) findChildUnlocked(name string) (inode *Inode) {
 	i := sort.Search(l, parent.findInodeFunc(name))
 	if i < l {
 		// found
-		if *parent.dir.Children[i].Name == name {
+		if parent.dir.Children[i].Name == name {
 			inode = parent.dir.Children[i]
 		}
 	}
@@ -730,7 +730,7 @@ func (parent *Inode) findChildIdxUnlocked(name string) int {
 		return -1
 	}
 	i := sort.Search(l, parent.findInodeFunc(name))
-	if i < l && *parent.dir.Children[i].Name == name {
+	if i < l && parent.dir.Children[i].Name == name {
 		return i
 	}
 	return -1
@@ -744,10 +744,10 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 	if l == 0 {
 		return
 	}
-	i := sort.Search(l, parent.findInodeFunc(*inode.Name))
-	if i >= l || *parent.dir.Children[i].Name != *inode.Name {
+	i := sort.Search(l, parent.findInodeFunc(inode.Name))
+	if i >= l || parent.dir.Children[i].Name != inode.Name {
 		panic(fmt.Sprintf("%v.removeName(%v) but child not found: %v",
-			*parent.FullName(), *inode.Name, i))
+			parent.FullName(), inode.Name, i))
 	}
 
 	// POSIX allows parallel readdir() and modifications,
@@ -824,13 +824,13 @@ func (parent *Inode) insertChildUnlocked(inode *Inode) {
 		return
 	}
 
-	i := sort.Search(l, parent.findInodeFunc(*inode.Name))
+	i := sort.Search(l, parent.findInodeFunc(inode.Name))
 	if i == l {
 		// not found = new value is the biggest
 		parent.dir.Children = append(parent.dir.Children, inode)
 	} else {
-		if *parent.dir.Children[i].Name == *inode.Name {
-			panic(fmt.Sprintf("double insert of %v", parent.getChildName(*inode.Name)))
+		if parent.dir.Children[i].Name == inode.Name {
+			panic(fmt.Sprintf("double insert of %v", parent.getChildName(inode.Name)))
 		}
 
 		// POSIX allows parallel readdir() and modifications,
@@ -853,7 +853,7 @@ func (parent *Inode) getChildName(name string) string {
 	if parent.Id == fuseops.RootInodeID {
 		return name
 	} else {
-		return fmt.Sprintf("%v/%v", *parent.FullName(), name)
+		return fmt.Sprintf("%v/%v", parent.FullName(), name)
 	}
 }
 
@@ -876,7 +876,7 @@ func (parent *Inode) Unlink(name string) (err error) {
 
 func (inode *Inode) SendDelete() {
 	cloud, key := inode.Parent.cloud()
-	key = appendChildName(key, *inode.Name)
+	key = appendChildName(key, inode.Name)
 	if inode.isDir() && !cloud.Capabilities().DirBlob {
 		key += "/"
 	}
@@ -916,7 +916,7 @@ func (inode *Inode) SendDelete() {
 		}
 		inode.mu.Unlock()
 		inode.Parent.mu.Lock()
-		delete(inode.Parent.dir.DeletedChildren, *inode.Name)
+		delete(inode.Parent.dir.DeletedChildren, inode.Name)
 		inode.Parent.mu.Unlock()
 		if forget {
 			inode.mu.Lock()
@@ -941,7 +941,7 @@ func (parent *Inode) Create(
 	defer fs.mu.Unlock()
 
 	now := time.Now()
-	inode = NewInode(fs, parent, &name)
+	inode = NewInode(fs, parent, name)
 	inode.userMetadata = make(map[string][]byte)
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
@@ -986,7 +986,7 @@ func (parent *Inode) MkDir(
 // LOCKS_REQUIRED(fs.mu)
 // Returns locked inode (!)
 func (parent *Inode) doMkDir(name string) (inode *Inode) {
-	inode = NewInode(parent.fs, parent, &name)
+	inode = NewInode(parent.fs, parent, name)
 	inode.mu.Lock()
 	inode.userMetadata = make(map[string][]byte)
 	inode.ToDir()
@@ -1022,7 +1022,7 @@ func (parent *Inode) CreateSymlink(
 	defer fs.mu.Unlock()
 
 	now := time.Now()
-	inode = NewInode(fs, parent, &name)
+	inode = NewInode(fs, parent, name)
 	inode.userMetadata = make(map[string][]byte)
 	inode.userMetadata[inode.fs.flags.SymlinkAttr] = []byte(target)
 	inode.userMetadataDirty = true
@@ -1059,7 +1059,7 @@ func (inode *Inode) ReadSymlink() (target string, err error) {
 
 func (dir *Inode) SendMkDir() {
 	cloud, key := dir.Parent.cloud()
-	key = appendChildName(key, *dir.Name)
+	key = appendChildName(key, dir.Name)
 	if !cloud.Capabilities().DirBlob {
 		key += "/"
 	}
@@ -1115,7 +1115,7 @@ func (inode *Inode) doUnlink() {
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
-		parent.dir.DeletedChildren[*inode.Name] = inode
+		parent.dir.DeletedChildren[inode.Name] = inode
 	}
 
 	parent.removeChildUnlocked(inode)
@@ -1143,7 +1143,7 @@ func (parent *Inode) RmDir(name string) (err error) {
 			return err
 		}
 		if en != nil {
-			fuseLog.Debugf("Directory %v not empty: still has entry \"%v\"", *inode.FullName(), en.Name)
+			fuseLog.Debugf("Directory %v not empty: still has entry \"%v\"", inode.FullName(), en.Name)
 			return fuse.ENOTEMPTY
 		}
 
@@ -1276,7 +1276,7 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 	} else if fromInode.oldParent != nil {
 		// Directory moved second time
 		_, oldKey := fromInode.oldParent.cloud()
-		oldKey = appendChildName(oldKey, *fromInode.oldName)
+		oldKey = appendChildName(oldKey, fromInode.oldName)
 		_, newKey := newParent.cloud()
 		newKey = appendChildName(newKey, to)
 		if oldKey == newKey {
@@ -1306,9 +1306,9 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 		child := fromInode.dir.Children[2]
 		child.mu.Lock()
 		if child.isDir() {
-			renameRecursive(child, toDir, *child.Name)
+			renameRecursive(child, toDir, child.Name)
 		} else {
-			renameInCache(child, toDir, *child.Name)
+			renameInCache(child, toDir, child.Name)
 		}
 		child.mu.Unlock()
 	}
@@ -1323,7 +1323,7 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
-		parent.dir.DeletedChildren[*fromInode.Name] = toDir
+		parent.dir.DeletedChildren[fromInode.Name] = toDir
 		parent.addModified(1)
 	}
 }
@@ -1345,7 +1345,7 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
-		parent.dir.DeletedChildren[*fromInode.Name] = fromInode
+		parent.dir.DeletedChildren[fromInode.Name] = fromInode
 		if fromInode.CacheState == ST_CACHED {
 			parent.addModified(1)
 		}
@@ -1354,7 +1354,7 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	}
 	fromInode.Ref()
 	parent.removeChildUnlocked(fromInode)
-	fromInode.Name = &to
+	fromInode.Name = to
 	fromInode.Parent = newParent
 	if fromInode.CacheState == ST_CACHED {
 		fromInode.SetCacheState(ST_MODIFIED)
@@ -1422,7 +1422,7 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			// don't revive deleted items
 			_, deleted := parent.dir.DeletedChildren[path]
 			if !deleted {
-				inode = NewInode(fs, parent, &path)
+				inode = NewInode(fs, parent, path)
 				fs.insertInode(parent, inode)
 				inode.SetFromBlobItem(obj)
 			}
@@ -1450,7 +1450,7 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 				// don't revive deleted items
 				_, deleted := parent.dir.DeletedChildren[dir]
 				if !deleted {
-					inode = NewInode(fs, parent, &dir)
+					inode = NewInode(fs, parent, dir)
 					inode.ToDir()
 					fs.insertInode(parent, inode)
 					inode.SetFromBlobItem(obj)
@@ -1480,7 +1480,7 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 				// don't revive deleted items
 				_, deleted := parent.dir.DeletedChildren[dir]
 				if !deleted {
-					inode = NewInode(fs, parent, &dir)
+					inode = NewInode(fs, parent, dir)
 					inode.ToDir()
 					fs.insertInode(parent, inode)
 					now := time.Now()

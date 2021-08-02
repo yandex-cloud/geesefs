@@ -429,7 +429,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 	cloud, key := inode.cloud()
 	if inode.oldParent != nil {
 		_, key = inode.oldParent.cloud()
-		key = appendChildName(key, *inode.oldName)
+		key = appendChildName(key, inode.oldName)
 	}
 	for i := 0; i < len(requests); i += 2 {
 		offset := requests[i]
@@ -761,7 +761,7 @@ func (inode *Inode) TryFlush() bool {
 	if inode.Parent != nil {
 		inode.Parent.mu.Lock()
 		if inode.Parent.dir.DeletedChildren != nil {
-			_, overDeleted = inode.Parent.dir.DeletedChildren[*inode.Name]
+			_, overDeleted = inode.Parent.dir.DeletedChildren[inode.Name]
 		}
 		inode.Parent.mu.Unlock()
 	}
@@ -800,12 +800,12 @@ func (inode *Inode) SendUpload() bool {
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
 		_, from := inode.oldParent.cloud()
-		from = appendChildName(from, *inode.oldName)
+		from = appendChildName(from, inode.oldName)
 		oldParent := inode.oldParent
 		oldName := inode.oldName
 		// Set to nil so another rename will move it again
 		inode.oldParent = nil
-		inode.oldName = nil
+		inode.oldName = ""
 		skipRename := false
 		if inode.isDir() {
 			from += "/"
@@ -826,7 +826,7 @@ func (inode *Inode) SendUpload() bool {
 			if err == nil {
 				// Remove from DeletedChildren of the old parent
 				oldParent.mu.Lock()
-				delete(oldParent.dir.DeletedChildren, *oldName)
+				delete(oldParent.dir.DeletedChildren, oldName)
 				oldParent.mu.Unlock()
 				// And track ModifiedChildren because rename is special - it takes two parents
 				oldParent.addModified(-1)
@@ -835,7 +835,7 @@ func (inode *Inode) SendUpload() bool {
 			inode.mu.Lock()
 			inode.recordFlushError(err)
 			var unmoveParent *Inode
-			var unmoveName *string
+			var unmoveName string
 			if err != nil {
 				log.Errorf("Error renaming object from %v to %v: %v", from, key, err)
 				unmoveParent = inode.oldParent
@@ -854,7 +854,7 @@ func (inode *Inode) SendUpload() bool {
 			// "Undo" the second move
 			if unmoveParent != nil {
 				unmoveParent.mu.Lock()
-				delete(unmoveParent.dir.DeletedChildren, *unmoveName)
+				delete(unmoveParent.dir.DeletedChildren, unmoveName)
 				unmoveParent.mu.Unlock()
 				unmoveParent.addModified(-1)
 			}
@@ -1045,7 +1045,7 @@ func (inode *Inode) FlushSmallObject() {
 	if inode.oldParent != nil {
 		// In this case, modify it in the old place and move when we're done with modifications
 		_, key = inode.oldParent.cloud()
-		key = appendChildName(key, *inode.oldName)
+		key = appendChildName(key, inode.oldName)
 	}
 	// File size may have been changed in between
 	bufReader, bufIds := inode.GetMultiReader(0, inode.Attributes.Size)
@@ -1053,7 +1053,7 @@ func (inode *Inode) FlushSmallObject() {
 		Key:         key,
 		Body:        bufReader,
 		Size:        PUInt64(uint64(bufReader.Len())),
-		ContentType: inode.fs.flags.GetMimeType(*inode.FullName()),
+		ContentType: inode.fs.flags.GetMimeType(inode.FullName()),
 	}
 	if inode.userMetadataDirty {
 		params.Metadata = escapeMetadata(inode.userMetadata)
@@ -1195,7 +1195,7 @@ func (inode *Inode) FlushPart(part uint64) {
 	if inode.oldParent != nil {
 		// Always apply modifications before moving
 		_, key = inode.oldParent.cloud()
-		key = appendChildName(key, *inode.oldName)
+		key = appendChildName(key, inode.oldName)
 	}
 	log.Debugf("Flushing part %v (%v-%v MB) of %v", part, partOffset/1024/1024, (partOffset+partSize)/1024/1024, key)
 

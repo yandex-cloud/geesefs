@@ -1301,7 +1301,7 @@ func (s *GoofysTest) TestMkDir(t *C) {
 
 	inode, err = s.getRoot(t).MkDir(dirName)
 	t.Assert(err, IsNil)
-	t.Assert(*inode.FullName(), Equals, dirName)
+	t.Assert(inode.FullName(), Equals, dirName)
 
 	_, err = s.LookUpInode(t, dirName)
 	t.Assert(err, IsNil)
@@ -1442,7 +1442,7 @@ func (s *GoofysTest) TestRenameToExisting(t *C) {
 
 	file2 := root.findChild("file2")
 	t.Assert(file2, NotNil)
-	t.Assert(*file2.Name, Equals, "file2")
+	t.Assert(file2.Name, Equals, "file2")
 }
 
 func (s *GoofysTest) TestBackendListPagination(t *C) {
@@ -2864,35 +2864,35 @@ func (s *GoofysTest) TestRenameBeforeCloseFuse(t *C) {
 func (s *GoofysTest) TestInodeInsert(t *C) {
 	root := s.getRoot(t)
 
-	in := NewInode(s.fs, root, aws.String("2"))
+	in := NewInode(s.fs, root, "2")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
-	t.Assert(*root.dir.Children[2].Name, Equals, "2")
+	t.Assert(root.dir.Children[2].Name, Equals, "2")
 
-	in = NewInode(s.fs, root, aws.String("1"))
+	in = NewInode(s.fs, root, "1")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
-	t.Assert(*root.dir.Children[2].Name, Equals, "1")
-	t.Assert(*root.dir.Children[3].Name, Equals, "2")
+	t.Assert(root.dir.Children[2].Name, Equals, "1")
+	t.Assert(root.dir.Children[3].Name, Equals, "2")
 
-	in = NewInode(s.fs, root, aws.String("4"))
+	in = NewInode(s.fs, root, "4")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
-	t.Assert(*root.dir.Children[2].Name, Equals, "1")
-	t.Assert(*root.dir.Children[3].Name, Equals, "2")
-	t.Assert(*root.dir.Children[4].Name, Equals, "4")
+	t.Assert(root.dir.Children[2].Name, Equals, "1")
+	t.Assert(root.dir.Children[3].Name, Equals, "2")
+	t.Assert(root.dir.Children[4].Name, Equals, "4")
 
 	inode := root.findChild("1")
 	t.Assert(inode, NotNil)
-	t.Assert(*inode.Name, Equals, "1")
+	t.Assert(inode.Name, Equals, "1")
 
 	inode = root.findChild("2")
 	t.Assert(inode, NotNil)
-	t.Assert(*inode.Name, Equals, "2")
+	t.Assert(inode.Name, Equals, "2")
 
 	inode = root.findChild("4")
 	t.Assert(inode, NotNil)
-	t.Assert(*inode.Name, Equals, "4")
+	t.Assert(inode.Name, Equals, "4")
 
 	inode = root.findChild("0")
 	t.Assert(inode, IsNil)
@@ -3726,7 +3726,7 @@ func (s *GoofysTest) TestMountsList(t *C) {
 
 	c1, err := s.LookUpInode(t, "dir4/cloud1")
 	t.Assert(err, IsNil)
-	t.Assert(*c1.Name, Equals, "cloud1")
+	t.Assert(c1.Name, Equals, "cloud1")
 	t.Assert(c1.dir.cloud == cloud, Equals, true)
 	t.Assert(int(c1.Id), Equals, 3)
 
@@ -3742,7 +3742,7 @@ func (s *GoofysTest) TestMountsList(t *C) {
 
 	c1, err = s.LookUpInode(t, "dir4/cloud1")
 	t.Assert(err, IsNil)
-	t.Assert(*c1.Name, Equals, "cloud1")
+	t.Assert(c1.Name, Equals, "cloud1")
 	t.Assert(c1.dir.cloud == cloud, Equals, true)
 	t.Assert(int(c1.Id), Equals, 3)
 
@@ -3786,7 +3786,7 @@ func (s *GoofysTest) TestMountsNewMounts(t *C) {
 
 	c1, err := s.LookUpInode(t, "dir4/cloud1")
 	t.Assert(err, IsNil)
-	t.Assert(*c1.Name, Equals, "cloud1")
+	t.Assert(c1.Name, Equals, "cloud1")
 	t.Assert(c1.dir.cloud == cloud, Equals, true)
 
 	_, err = s.LookUpInode(t, "dir4/cloud2")
@@ -3799,7 +3799,7 @@ func (s *GoofysTest) TestMountsNewMounts(t *C) {
 
 	c2, err := s.LookUpInode(t, "dir4/cloud2")
 	t.Assert(err, IsNil)
-	t.Assert(*c2.Name, Equals, "cloud2")
+	t.Assert(c2.Name, Equals, "cloud2")
 	t.Assert(c2.dir.cloud == cloud, Equals, true)
 	t.Assert(c2.dir.mountPrefix, Equals, "cloudprefix")
 }
@@ -3939,19 +3939,19 @@ func (s *GoofysTest) testMountsNested(t *C, cloud StorageBackend,
 	time.Sleep(time.Second)
 	dir_in, err := s.LookUpInode(t, "dir5/in")
 	t.Assert(err, IsNil)
-	t.Assert(*dir_in.Name, Equals, "in")
+	t.Assert(dir_in.Name, Equals, "in")
 
 	s.readDirIntoCache(t, dir_in.Id)
 
 	dir_a, err := s.LookUpInode(t, "dir5/in/a")
 	t.Assert(err, IsNil)
-	t.Assert(*dir_a.Name, Equals, "a")
+	t.Assert(dir_a.Name, Equals, "a")
 
 	s.assertEntries(t, dir_a, []string{"dir"})
 
 	dir_dir, err := s.LookUpInode(t, "dir5/in/a/dir")
 	t.Assert(err, IsNil)
-	t.Assert(*dir_dir.Name, Equals, "dir")
+	t.Assert(dir_dir.Name, Equals, "dir")
 	t.Assert(dir_dir.dir.cloud == cloud, Equals, true)
 
 	_, err = s.LookUpInode(t, "dir5/in/testfile")

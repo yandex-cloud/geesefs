@@ -225,7 +225,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 
 	fs.nextInodeID = fuseops.RootInodeID + 1
 	fs.inodes = make(map[fuseops.InodeID]*Inode)
-	root := NewInode(fs, nil, PString(""))
+	root := NewInode(fs, nil, "")
 	root.refcnt = 1
 	root.Id = fuseops.RootInodeID
 	root.ToDir()
@@ -441,7 +441,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 		if dirInode == nil {
 			fs.mu.Lock()
 
-			dirInode = NewInode(fs, mp, &dirName)
+			dirInode = NewInode(fs, mp, dirName)
 			dirInode.ToDir()
 			dirInode.AttrTime = TIME_MAX
 
@@ -457,7 +457,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 
 	prev := mp.findChildUnlocked(name)
 	if prev == nil {
-		mountInode := NewInode(fs, mp, &name)
+		mountInode := NewInode(fs, mp, name)
 		mountInode.ToDir()
 		mountInode.dir.cloud = b.cloud
 		mountInode.dir.mountPrefix = b.prefix
@@ -470,7 +470,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 		prev = mountInode
 	} else {
 		if !prev.isDir() {
-			panic(fmt.Sprintf("inode %v is not a directory", *prev.FullName()))
+			panic(fmt.Sprintf("inode %v is not a directory", prev.FullName()))
 		}
 
 		// This inode might have some cached data from a parent mount.
@@ -485,7 +485,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 
 	}
 	prev.addModified(1)
-	fuseLog.Infof("mounted /%v", *prev.FullName())
+	fuseLog.Infof("mounted /%v", prev.FullName())
 	b.mounted = true
 }
 
@@ -821,16 +821,16 @@ func (fs *Goofys) recheckInode(parent *Inode, inode *Inode, name string) (*Inode
 // LOCKS_REQUIRED(parent.mu)
 func (fs *Goofys) insertInode(parent *Inode, inode *Inode) {
 	addInode := false
-	if *inode.Name == "." {
+	if inode.Name == "." {
 		inode.Id = parent.Id
-	} else if *inode.Name == ".." {
+	} else if inode.Name == ".." {
 		inode.Id = fuseops.InodeID(fuseops.RootInodeID)
 		if parent.Parent != nil {
 			inode.Id = parent.Parent.Id
 		}
 	} else {
 		if inode.Id != 0 {
-			panic(fmt.Sprintf("inode id is set: %v %v", *inode.Name, inode.Id))
+			panic(fmt.Sprintf("inode id is set: %v %v", inode.Name, inode.Id))
 		}
 		inode.Id = fs.allocateInodeId()
 		addInode = true
@@ -848,12 +848,12 @@ func (fs *Goofys) insertInode(parent *Inode, inode *Inode) {
 }
 
 func (fs *Goofys) addDotAndDotDot(dir *Inode) {
-	dot := NewInode(fs, dir, PString("."))
+	dot := NewInode(fs, dir, ".")
 	dot.ToDir()
 	dot.AttrTime = TIME_MAX
 	fs.insertInode(dir, dot)
 
-	dot = NewInode(fs, dir, PString(".."))
+	dot = NewInode(fs, dir, "..")
 	dot.ToDir()
 	dot.AttrTime = TIME_MAX
 	fs.insertInode(dir, dot)
@@ -976,7 +976,7 @@ func (fs *Goofys) ReleaseDirHandle(
 	dh := fs.dirHandles[op.Handle]
 	dh.CloseDir()
 
-	fuseLog.Debugln("ReleaseDirHandle", *dh.inode.FullName())
+	fuseLog.Debugln("ReleaseDirHandle", dh.inode.FullName())
 
 	delete(fs.dirHandles, op.Handle)
 
@@ -1070,7 +1070,7 @@ func (fs *Goofys) ReleaseFileHandle(
 	fh := fs.fileHandles[op.Handle]
 	fh.Release()
 
-	fuseLog.Debugln("ReleaseFileHandle", *fh.inode.FullName(), op.Handle, fh.inode.Id)
+	fuseLog.Debugln("ReleaseFileHandle", fh.inode.FullName(), op.Handle, fh.inode.Id)
 
 	delete(fs.fileHandles, op.Handle)
 
