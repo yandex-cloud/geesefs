@@ -42,6 +42,7 @@ In addition to the items above, the following are supportable but not yet implem
 | ------------------------------ | ------- | ------ | ------ | ---- | ------- |
 | Parallel readahead             |    +    |    -   |    +   |   +  |    -    |
 | Parallel multipart uploads     |    +    |    -   |    +   |   +  |    -    |
+| No readahead on random read    |    +    |    -   |    +   |   -  |    +    |
 | Server-side copy on append     |    +    |    -   |    -   |   *  |    +    |
 | Server-side copy on update     |    +    |    -   |    -   |   *  |    -    |
 | xattrs without extra RTT       |    +    |    -   |    -   |   -  |    +    |
