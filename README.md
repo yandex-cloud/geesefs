@@ -122,7 +122,7 @@ The following backends are inherited from Goofys code and still exist, but are b
 
 # References
 
-* [Yandex Cloud Storage](https://cloud.yandex.com/en-ru/services/storage)
+* [Yandex Object Storage](https://cloud.yandex.com/en-ru/services/storage)
 * [Amazon S3](https://aws.amazon.com/s3/)
 * [Amazon SDK for Go](https://github.com/aws/aws-sdk-go)
 * Other related fuse filesystems
