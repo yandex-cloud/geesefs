@@ -40,7 +40,6 @@ type DirInodeData struct {
 	seqOpenDirScore uint8
 	DirTime         time.Time
 
-	slurpMarker *string
 	listMarker *string
 	lastFromCloud *string
 	listDone bool
@@ -200,8 +199,6 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 			}
 		} else {
 			parent.dir.seqOpenDirScore = 0
-			// reset slurp
-			parent.dir.slurpMarker = nil
 			if dirIdx == -1 {
 				dirIdx = parent.findChildIdxUnlocked(inode.Name)
 			}
@@ -217,22 +214,46 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 	return
 }
 
-func (inode *Inode) listObjectsSlurp(lock bool) (done bool, err error) {
-	cloud, key := inode.cloud()
-	if inode.oldParent != nil {
-		_, key = inode.oldParent.cloud()
-		key = appendChildName(key, inode.oldName)
+// Slurp is always done:
+// - at the uppermost possible level (usually root if not using the nested mount perversion)
+// - at some directory boundary
+// - only at the beginning of readdir()
+// Slurp can seal some directories - namely, it's safe to seal either the requested directory
+// or directories that are not a parent of the requested one.
+// I.e. if we're preloading at 00/05/06/01/ then it's safe to seal 00/05/06/01/, 01/*, 00/06/*,
+// but not 00/ itself, because it's likely that the slurp wasn't started at the beginning of 00/.
+// Slurp can be used multiple times by passing returned nextStartAfter as an argument the next time.
+func (inode *Inode) slurpOnce(lock bool) (done bool, err error) {
+	parent := inode
+	for parent != nil && parent.dir.cloud == nil {
+		parent = parent.Parent
 	}
-	prefix := key
-	if len(prefix) != 0 {
+	next, err := parent.listObjectsSlurp(inode, "", lock)
+	return next == "", err
+}
+
+func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool) (nextStartAfter string, err error) {
+	// Prefix is for insertSubTree
+	cloud, prefix := parent.cloud()
+	if prefix != "" {
 		prefix += "/"
+	}
+
+	_, key := inode.cloud()
+	var startWith *string
+	if startAfter != "" {
+		startWith = &startAfter
+	} else if key != "" {
+		// Simulate '>' operator with start-after
+		// '.' = '/'-1
+		// \x... = 0x10FFFF in UTF-8 = largest code point
+		startWith = PString(key+".\xF4\x8F\xBF\xBF")
 	}
 
 	params := &ListBlobsInput{
 		Prefix:     &prefix,
-		StartAfter: inode.dir.slurpMarker,
+		StartAfter: startWith,
 	}
-
 	resp, err := cloud.ListBlobs(params)
 	if err != nil {
 		s3Log.Errorf("ListObjects %v = %v", params, err)
@@ -241,29 +262,24 @@ func (inode *Inode) listObjectsSlurp(lock bool) (done bool, err error) {
 	s3Log.Debug(resp)
 
 	if lock {
-		inode.mu.Lock()
+		parent.mu.Lock()
 	}
-	inode.fs.mu.Lock()
+	parent.fs.mu.Lock()
 	dirs := make(map[*Inode]bool)
 	for _, obj := range resp.Items {
 		baseName := (*obj.Key)[len(prefix):]
 		if baseName != "" {
-			inode.insertSubTree(baseName, &obj, dirs)
+			parent.insertSubTree(baseName, &obj, dirs)
 		}
 	}
-	inode.fs.mu.Unlock()
+	parent.fs.mu.Unlock()
 	if lock {
-		inode.mu.Unlock()
+		parent.mu.Unlock()
 	}
 
 	for d, sealed := range dirs {
-		if d == inode {
-			// never seal the current dir because that's
-			// handled at upper layer
-			continue
-		}
-
-		if sealed || !resp.IsTruncated {
+		// It's not safe to seal upper directories, we're not slurping at their start
+		if (sealed || !resp.IsTruncated) && !d.isParentOf(inode) {
 			d.sealDir()
 		}
 	}
@@ -274,7 +290,7 @@ func (inode *Inode) listObjectsSlurp(lock bool) (done bool, err error) {
 	}
 	seal := false
 	// if we are done listing prefix, we are good
-	if obj != nil && !strings.HasPrefix(*obj.Key, prefix) {
+	if prefix != "" && obj != nil && !strings.HasPrefix(*obj.Key, prefix) {
 		if *obj.Key > prefix {
 			seal = true
 		}
@@ -284,23 +300,16 @@ func (inode *Inode) listObjectsSlurp(lock bool) (done bool, err error) {
 
 	if seal {
 		inode.sealDir()
+		nextStartAfter = ""
 	} else {
 		// NextContinuationToken is not returned when delimiter is empty, so use obj.Key
-		inode.dir.slurpMarker = obj.Key
-		last := (*obj.Key)[len(prefix):]
-		p := strings.Index(last, "/")
-		if p > 0 {
-			last = last[0 : p]
-		}
-		inode.dir.lastFromCloud = &last
+		nextStartAfter = *obj.Key
 	}
 
-	done = seal
 	return
 }
 
 func (inode *Inode) sealDir() {
-	inode.dir.slurpMarker = nil
 	inode.dir.listMarker = nil
 	inode.dir.listDone = true
 	inode.dir.lastFromCloud = nil
@@ -517,19 +526,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 
 	parent.mu.Lock()
 
-	// We don't want to wait for the whole slurp to finish when we just do 'ls ./dir/subdir'
-	// because subdir may be very large. So we only use slurp at the beginning of the directory.
-	// It will fill and seal some adjacent directories if they're small and they'll be served from cache.
-	// However, if a single slurp isn't enough to serve sufficient amount of directory entries,
-	// we immediately switch to regular listings.
-	// Goofys original had very similar implementation, but it was ugly in several places,
-	// so ... sorry, it's reworked. O:-)
-	// But it's still rather clunky. So FIXME: Allow to use slurp more than 1 directory level above
-	useSlurp := offset <= 2 && fs.flags.StatCacheTTL != 0 && dh.inode.dir.cloud == nil &&
-		(dh.inode.Parent != nil && dh.inode.Parent.dir.seqOpenDirScore >= 2)
-
-	if !dh.inode.dir.listDone && (!useSlurp && dh.inode.dir.listMarker == nil ||
-		useSlurp && dh.inode.Parent.dir.slurpMarker == nil) {
+	if !dh.inode.dir.listDone && dh.inode.dir.listMarker == nil {
 		// listMarker is nil => We just started refreshing this directory
 		dh.inode.dir.listDone = false
 		dh.inode.dir.lastFromCloud = nil
@@ -551,6 +548,15 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		}
 	}
 
+	// We don't want to wait for the whole slurp to finish when we just do 'ls ./dir/subdir'
+	// because subdir may be very large. So we only use slurp at the beginning of the directory.
+	// It will fill and seal some adjacent directories if they're small and they'll be served from cache.
+	// However, if a single slurp isn't enough to serve sufficient amount of directory entries,
+	// we immediately switch to regular listings.
+	// Original implementation in Goofys in fact was similar in this aspect
+	// but it was ugly in several places, so ... sorry, it's reworked. O:-)
+	useSlurp := dh.inode.dir.listMarker == nil && fs.flags.StatCacheTTL != 0
+
 	// the dir expired, so we need to fetch from the cloud. there
 	// may be static directories that we want to keep, so cloud
 	// listing should not overwrite them. here's what we do:
@@ -563,34 +569,27 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 	// 3. when we serve the entry we added last, signal that next
 	//    time we need to list from cloud again with continuation
 	//    token
-	if useSlurp && offset <= 2 {
-		// Allow to skip some objects deep inside the previous directory by resetting slurp position
-		_, startWith := parent.cloud()
-		// "." = "/"-1
-		// \x... = 0x10FFFF in UTF-8 = largest code point
-		startWith = startWith+".\xF4\x8F\xBF\xBF"
-		parent.Parent.dir.slurpMarker = &startWith
+
+	if useSlurp {
+		parent.mu.Unlock()
+		dh.mu.Unlock()
+		done, err := parent.slurpOnce(true)
+		dh.mu.Lock()
+		if err != nil {
+			return nil, err
+		}
+		if done && !parent.dir.listDone {
+			// Usually subdirs are sealed by slurp
+			// However, it is possible that sometimes they're not
+			// For example, in case of a nested mount...
+			parent.sealDir()
+		}
+		parent.mu.Lock()
 	}
-	// FIXME: inode.dir.lastFromCloud is always nil when slurp is active,
-	// so it basically tries to load the whole subtree. That's why we have
-	// to set useSlurp=false after the first call...
+
 	for dh.inode.dir.lastFromCloud == nil && !dh.inode.dir.listDone {
 		parent.mu.Unlock()
-		var done bool
-		if useSlurp {
-			dh.mu.Unlock()
-			done, err = dh.inode.Parent.listObjectsSlurp(true)
-			useSlurp = false
-			dh.mu.Lock()
-			if done && !dh.inode.dir.listDone {
-				// Usually subdirs are sealed by slurp
-				// However, it is possible that sometimes they're not
-				// For example, in case of a nested mount...
-				dh.inode.sealDir()
-			}
-		} else {
-			err = dh.listObjectsFlat()
-		}
+		err = dh.listObjectsFlat()
 		if err != nil {
 			return nil, err
 		}
@@ -1261,10 +1260,11 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		fromFullName += "/"
 		toFullName += "/"
 		// List all objects and rename them in cache (keeping the lock)
+		var next string
+		var err error
 		fromInode.dir.listDone = false
-		fromInode.dir.slurpMarker = nil
 		for !fromInode.dir.listDone {
-			_, err := fromInode.listObjectsSlurp(false)
+			next, err = fromInode.listObjectsSlurp(fromInode, next, false)
 			if err != nil {
 				return err
 			}
