@@ -517,9 +517,15 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 
 	parent.mu.Lock()
 
-	// FIXME Allow to use slurp more than 1 directory level above
-
-	useSlurp := fs.flags.StatCacheTTL != 0 && dh.inode.dir.cloud == nil &&
+	// We don't want to wait for the whole slurp to finish when we just do 'ls ./dir/subdir'
+	// because subdir may be very large. So we only use slurp at the beginning of the directory.
+	// It will fill and seal some adjacent directories if they're small and they'll be served from cache.
+	// However, if a single slurp isn't enough to serve sufficient amount of directory entries,
+	// we immediately switch to regular listings.
+	// Goofys original had very similar implementation, but it was ugly in several places,
+	// so ... sorry, it's reworked. O:-)
+	// But it's still rather clunky. So FIXME: Allow to use slurp more than 1 directory level above
+	useSlurp := offset <= 2 && fs.flags.StatCacheTTL != 0 && dh.inode.dir.cloud == nil &&
 		(dh.inode.Parent != nil && dh.inode.Parent.dir.seqOpenDirScore >= 2)
 
 	if !dh.inode.dir.listDone && (!useSlurp && dh.inode.dir.listMarker == nil ||
@@ -531,7 +537,6 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		for i := 2; i < len(parent.dir.Children); i++ {
 			// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
 			childTmp := parent.dir.Children[i]
-			// FIXME: Check if the kernel may still access removed inodes by their cached numbers
 			if atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
 				atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
 				(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
@@ -558,14 +563,24 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 	// 3. when we serve the entry we added last, signal that next
 	//    time we need to list from cloud again with continuation
 	//    token
+	if useSlurp && offset <= 2 {
+		// Allow to skip some objects deep inside the previous directory by resetting slurp position
+		_, startWith := parent.cloud()
+		// "." = "/"-1
+		// \x... = 0x10FFFF in UTF-8 = largest code point
+		startWith = startWith+".\xF4\x8F\xBF\xBF"
+		parent.Parent.dir.slurpMarker = &startWith
+	}
+	// FIXME: inode.dir.lastFromCloud is always nil when slurp is active,
+	// so it basically tries to load the whole subtree. That's why we have
+	// to set useSlurp=false after the first call...
 	for dh.inode.dir.lastFromCloud == nil && !dh.inode.dir.listDone {
-		// FIXME Maybe allow to skip some objects deep inside the previous directory
-		// by resetting slurp position when it's used after a non-sealed directory
 		parent.mu.Unlock()
 		var done bool
 		if useSlurp {
 			dh.mu.Unlock()
 			done, err = dh.inode.Parent.listObjectsSlurp(true)
+			useSlurp = false
 			dh.mu.Lock()
 			if done && !dh.inode.dir.listDone {
 				// Usually subdirs are sealed by slurp
