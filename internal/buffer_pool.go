@@ -220,14 +220,14 @@ func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) {
 func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) {
 	if size > 0 {
 		pool.requests++
-		if pool.requests >= 16 {
+		if pool.requests >= 2048 {
 			debug.FreeOSMemory()
 			pool.recomputeBufferLimit()
 			pool.requests = 0
 		}
 	}
 
-	if pool.cur+size > pool.max {
+	if size > 0 && pool.cur+size > pool.max {
 		// Try to free clean buffers, then flush dirty buffers
 		freed, canFreeMoreAsync := pool.FreeSomeCleanBuffers(pool.cur+size - pool.max)
 		bufferLog.Debugf("Freed %v, now: %v %v %v", freed, pool.cur, size, pool.max)

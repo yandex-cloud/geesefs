@@ -347,7 +347,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 
 	// Correct memory usage
 	if allocated != int64(len(data)) {
-		fh.inode.fs.bufferPool.Use(allocated-int64(len(data)), false)
+		fh.inode.fs.bufferPool.Use(allocated-int64(len(data)), true)
 	}
 
 	return
@@ -469,7 +469,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 			inode.mu.Unlock()
 			// Correct memory usage
 			if allocated < int64(size) {
-				inode.fs.bufferPool.Use(allocated-int64(size), false)
+				inode.fs.bufferPool.Use(allocated-int64(size), true)
 			}
 		}()
 	}

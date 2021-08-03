@@ -406,6 +406,8 @@ func (fs *Goofys) Flusher() {
 					}
 				}
 			}
+		} else {
+			again = false
 		}
 	}
 }
