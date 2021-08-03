@@ -35,6 +35,9 @@ import (
 	"github.com/urfave/cli"
 
 	daemon "github.com/sevlyar/go-daemon"
+
+	"net/http"
+	_ "net/http/pprof"
 )
 
 var log = GetLogger("main")
@@ -130,6 +133,12 @@ var Version = "use `make build' to fill version hash correctly"
 
 func main() {
 	VersionHash = Version
+
+	if os.Getenv("PPROF") != "" {
+		go func() {
+			fmt.Printf("%v", http.ListenAndServe("localhost:"+os.Getenv("PPROF"), nil))
+		}()
+	}
 
 	massagePath()
 
