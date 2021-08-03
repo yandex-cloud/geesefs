@@ -147,8 +147,8 @@ func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, dirty bool
 		allocated += inode.appendBuffer(&inode.buffers[pos-1], data)
 	} else {
 		var newBuf []byte
+		allocated += int64(len(data))
 		if copyData {
-			allocated += int64(len(data))
 			newBuf = make([]byte, len(data))
 			copy(newBuf, data)
 			dataPtr = &BufferPointer{
@@ -468,8 +468,8 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 			allocated := inode.addBuffer(offset, data, false, false)
 			inode.mu.Unlock()
 			// Correct memory usage
-			if allocated < int64(size) {
-				inode.fs.bufferPool.Use(allocated-int64(size), true)
+			if allocated == 0 {
+				inode.fs.bufferPool.Use(-int64(size), true)
 			}
 		}()
 	}
