@@ -1,5 +1,5 @@
-geesefs (0.24.0) UNRELEASED; urgency=medium
+geesefs (0.24.0) common; urgency=medium
 
   * Initial release
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Wed, 04 Aug 2021 12:43:00 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 04 Aug 2021 12:43:00 +0300
