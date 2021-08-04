@@ -4,7 +4,7 @@ Uploaders: Vitaliy Filippov <vitalif@yourcmc.ru>
 Section: golang
 Testsuite: autopkgtest-pkg-go
 Priority: optional
-Build-Depends: debhelper-compat (= 13),
+Build-Depends: debhelper-compat (= 11),
                dh-golang,
                golang-any
 Standards-Version: 4.5.0
