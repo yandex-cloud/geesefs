@@ -17,7 +17,7 @@ require (
 	github.com/detailyang/go-fallocate v0.0.0-20180908115635-432fa640bd2e
 	github.com/google/uuid v1.1.2
 	github.com/gopherjs/gopherjs v0.0.0-20210202160940-bed99a852dfe // indirect
-	github.com/jacobsa/fuse v0.0.0-20201216155545-e0296dec955f
+	github.com/jacobsa/fuse v0.0.0-20210802212912-d82237972ed9
 	github.com/jacobsa/oglematchers v0.0.0-20150720000706-141901ea67cd
 	github.com/jacobsa/oglemock v0.0.0-20150831005832-e94d794d06ff // indirect
 	github.com/jacobsa/ogletest v0.0.0-20170503003838-80d50a735a11
@@ -42,7 +42,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127
 	gopkg.in/ini.v1 v1.46.0
 )
-
-replace github.com/jacobsa/fuse => github.com/vitalif/fusego v0.0.0-20210720164351-7e700197681e
 
 replace github.com/aws/aws-sdk-go => ./s3ext

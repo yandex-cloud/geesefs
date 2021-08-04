@@ -941,8 +941,7 @@ func (inode *Inode) SendDelete() {
 	}()
 }
 
-func (parent *Inode) Create(
-	name string, metadata fuseops.OpMetadata) (inode *Inode, fh *FileHandle) {
+func (parent *Inode) Create(name string) (inode *Inode, fh *FileHandle) {
 
 	parent.logFuse("Create", name)
 
@@ -970,7 +969,7 @@ func (parent *Inode) Create(
 	inode.SetCacheState(ST_CREATED)
 	fs.WakeupFlusher()
 
-	fh = NewFileHandle(inode, metadata)
+	fh = NewFileHandle(inode)
 	inode.fileHandles = 1
 
 	parent.touch()

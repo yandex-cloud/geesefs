@@ -1001,7 +1001,7 @@ func (s *GoofysTest) TestReadFiles(t *C) {
 			in, err := parent.LookUp(en.Name)
 			t.Assert(err, IsNil)
 
-			fh, err := in.OpenFile(fuseops.OpMetadata{uint32(os.Getpid())})
+			fh, err := in.OpenFile()
 			t.Assert(err, IsNil)
 
 			buf := make([]byte, 4096)
@@ -1027,7 +1027,7 @@ func (s *GoofysTest) TestReadOffset(t *C) {
 	in, err := root.LookUp(f)
 	t.Assert(err, IsNil)
 
-	fh, err := in.OpenFile(fuseops.OpMetadata{uint32(os.Getpid())})
+	fh, err := in.OpenFile()
 	t.Assert(err, IsNil)
 
 	buf := make([]byte, 4096)
@@ -1051,7 +1051,7 @@ func (s *GoofysTest) TestReadOffset(t *C) {
 func (s *GoofysTest) TestCreateFiles(t *C) {
 	fileName := "testCreateFile"
 
-	_, fh := s.getRoot(t).Create(fileName, fuseops.OpMetadata{uint32(os.Getpid())})
+	_, fh := s.getRoot(t).Create(fileName)
 
 	err := fh.inode.SyncFile()
 	t.Assert(err, IsNil)
@@ -1070,7 +1070,7 @@ func (s *GoofysTest) TestCreateFiles(t *C) {
 	inode, err := s.getRoot(t).LookUp(fileName)
 	t.Assert(err, IsNil)
 
-	fh, err = inode.OpenFile(fuseops.OpMetadata{uint32(os.Getpid())})
+	fh, err = inode.OpenFile()
 	t.Assert(err, IsNil)
 
 	err = fh.inode.SyncFile()
@@ -1157,7 +1157,7 @@ func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size i
 		in := s.fs.inodes[lookup.Entry.Child]
 		err = s.fs.SetInodeAttributes(s.ctx, &fuseops.SetInodeAttributesOp{Inode: in.Id, Size: PUInt64(0)})
 		t.Assert(err, IsNil)
-		fh, err = in.OpenFile(fuseops.OpMetadata{uint32(os.Getpid())})
+		fh, err = in.OpenFile()
 		t.Assert(err, IsNil)
 	}
 
@@ -1258,7 +1258,7 @@ func (s *GoofysTest) TestReadRandom(t *C) {
 	in, err := s.LookUpInode(t, "testLargeFile")
 	t.Assert(err, IsNil)
 
-	fh, err := in.OpenFile(fuseops.OpMetadata{uint32(os.Getpid())})
+	fh, err := in.OpenFile()
 	t.Assert(err, IsNil)
 	fr := &FileHandleReader{s.fs, fh, 0}
 
@@ -1303,7 +1303,7 @@ func (s *GoofysTest) TestMkDir(t *C) {
 	_, err = s.LookUpInode(t, dirName)
 	t.Assert(err, IsNil)
 
-	_, fh := inode.Create(fileName, fuseops.OpMetadata{uint32(os.Getpid())})
+	_, fh := inode.Create(fileName)
 
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
@@ -3105,7 +3105,7 @@ func (s *GoofysTest) TestDirMtimeCreate(t *C) {
 	m1 := attr.Mtime
 	time.Sleep(time.Second)
 
-	_, _ = root.Create("foo", fuseops.OpMetadata{uint32(os.Getpid())})
+	_, _ = root.Create("foo")
 	attr2, _ := root.GetAttributes()
 	m2 := attr2.Mtime
 
@@ -3167,7 +3167,7 @@ func (s *GoofysTest) TestRead403(t *C) {
 	in, err := s.LookUpInode(t, "file1")
 	t.Assert(err, IsNil)
 
-	fh, err := in.OpenFile(fuseops.OpMetadata{uint32(os.Getpid())})
+	fh, err := in.OpenFile()
 	t.Assert(err, IsNil)
 
 	s3.awsConfig.Credentials = credentials.AnonymousCredentials
@@ -3615,7 +3615,7 @@ func (s *GoofysTest) TestVFS(t *C) {
 	_, err = in.LookUp("file5")
 	t.Assert(err, Equals, fuse.ENOENT)
 
-	_, fh := in.Create("testfile", fuseops.OpMetadata{uint32(os.Getpid())})
+	_, fh := in.Create("testfile")
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
@@ -3652,7 +3652,7 @@ func (s *GoofysTest) TestVFS(t *C) {
 
 	// create another file inside subdir to make sure that our
 	// mount check is correct for dir inside the root
-	_, fh = subdir.Create("testfile2", fuseops.OpMetadata{uint32(os.Getpid())})
+	_, fh = subdir.Create("testfile2")
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
@@ -3936,7 +3936,7 @@ func (s *GoofysTest) testMountsNested(t *C, cloud StorageBackend,
 
 	_, err = s.LookUpInode(t, "dir5/in/testfile")
 	t.Assert(err, Equals, fuse.ENOENT)
-	_, fh := dir_in.Create("testfile", fuseops.OpMetadata{uint32(os.Getpid())})
+	_, fh := dir_in.Create("testfile")
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
@@ -3946,7 +3946,7 @@ func (s *GoofysTest) testMountsNested(t *C, cloud StorageBackend,
 
 	//_, err = s.LookUpInode(t, "dir5/in/a/dir/testfile")
 	//t.Assert(err, IsNil)
-	_, fh = dir_dir.Create("testfile", fuseops.OpMetadata{uint32(os.Getpid())})
+	_, fh = dir_dir.Create("testfile")
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
@@ -4205,7 +4205,7 @@ func (s *GoofysTest) TestWriteListFlush(t *C) {
 	dir, err := root.MkDir("dir")
 	t.Assert(err, IsNil)
 
-	in, fh := dir.Create("file1", fuseops.OpMetadata{})
+	in, fh := dir.Create("file1")
 	t.Assert(in, NotNil)
 	t.Assert(fh, NotNil)
 
@@ -4253,7 +4253,7 @@ func (s *GoofysTest) TestWriteUnlinkFlush(t *C) {
 	dir, err := root.MkDir("dir")
 	t.Assert(err, IsNil)
 
-	in, fh := dir.Create("deleted", fuseops.OpMetadata{})
+	in, fh := dir.Create("deleted")
 	t.Assert(in, NotNil)
 	t.Assert(fh, NotNil)
 

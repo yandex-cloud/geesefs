@@ -994,7 +994,7 @@ func (fs *Goofys) OpenFile(
 	in := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
 
-	fh, err := in.OpenFile(op.Metadata)
+	fh, err := in.OpenFile()
 	if err != nil {
 		return
 	}
@@ -1091,7 +1091,7 @@ func (fs *Goofys) CreateFile(
 	parent := fs.getInodeOrDie(op.Parent)
 	fs.mu.RUnlock()
 
-	inode, fh := parent.Create(op.Name, op.Metadata)
+	inode, fh := parent.Create(op.Name)
 
 	// Always take inode locks after fs lock if you need both...
 	fs.mu.Lock()

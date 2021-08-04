@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/jacobsa/fuse"
-	"github.com/jacobsa/fuse/fuseops"
 )
 
 type FileHandle struct {
@@ -42,9 +41,8 @@ type FileHandle struct {
 
 const MAX_BUF = 5 * 1024 * 1024
 
-// NewFileHandle returns a new file handle for the given `inode` triggered by fuse
-// operation with the given `opMetadata`
-func NewFileHandle(inode *Inode, opMetadata fuseops.OpMetadata) *FileHandle {
+// NewFileHandle returns a new file handle for the given `inode`
+func NewFileHandle(inode *Inode) *FileHandle {
 	fh := &FileHandle{inode: inode}
 	if inode.fs.flags.SmallReadCount > 1 {
 		fh.lastReadSizes = make([]uint64, inode.fs.flags.SmallReadCount-1)
