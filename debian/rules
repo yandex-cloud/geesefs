@@ -1,0 +1,17 @@
+#!/usr/bin/make -f
+
+export DH_GOLANG_BUILDPKG := github.com/yandex-cloud/geesefs
+export GO111MODULE = on
+export GOPROXY = 
+
+%:
+	dh $@ --builddirectory=_build --buildsystem=golang --with=golang
+
+#override_dh_auto_build:
+#	cd _build && go install -trimpath -v -p 8 github.com/yandex-cloud/geesefs
+
+override_dh_auto_test:
+	cd _build
+
+override_dh_auto_install:
+	dh_auto_install -- --no-source
