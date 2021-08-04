@@ -213,7 +213,7 @@ func NewApp() (app *cli.App) {
 			cli.StringFlag{
 				Name:  "list-type",
 				Usage: "Listing type to use: ext-v1 (yandex only), 2 or 1 (default: ext-v1 for yandex, 1 for others)",
-				Value: "",
+				Value: "ext-v1",
 			},
 
 			/// http://docs.aws.amazon.com/AmazonS3/latest/dev/acl-overview.html#canned-acl
@@ -504,10 +504,6 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		DebugS3:    c.Bool("debug_s3"),
 		Foreground: c.Bool("f"),
 		LogFile:    c.String("log-file"),
-	}
-
-	if strings.Index(flags.Endpoint, "yandexcloud") >= 0 && !c.IsSet("list-type") {
-		c.Set("list-type", "ext-v1")
 	}
 
 	// S3

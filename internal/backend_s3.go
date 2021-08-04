@@ -369,6 +369,13 @@ func (s *S3Backend) ListObjectsV2(params *s3.ListObjectsV2Input) (*s3.ListObject
 		req, resp := s.S3.ListObjectsV1ExtRequest(&in)
 		err := req.Send()
 		if err != nil {
+			if awsErr, ok := err.(awserr.Error); ok {
+				if awsErr.Code() == "InvalidArgument" {
+					// Fallback to list v1
+					s.config.ListV1Ext = false
+					return s.ListObjectsV2(params)
+				}
+			}
 			return nil, "", err
 		}
 		out := s3.ListObjectsV2Output(*resp)
