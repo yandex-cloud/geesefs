@@ -231,6 +231,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	root.ToDir()
 	root.dir.cloud = cloud
 	root.dir.mountPrefix = prefix
+	root.userMetadata = make(map[string][]byte)
 	root.Attributes.Mtime = fs.rootAttrs.Mtime
 
 	fs.inodes[fuseops.RootInodeID] = root
@@ -448,6 +449,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 			dirInode = NewInode(fs, mp, dirName)
 			dirInode.ToDir()
 			dirInode.AttrTime = TIME_MAX
+			dirInode.userMetadata = make(map[string][]byte)
 
 			fs.insertInode(mp, dirInode)
 			fs.mu.Unlock()
@@ -466,6 +468,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 		mountInode.dir.cloud = b.cloud
 		mountInode.dir.mountPrefix = b.prefix
 		mountInode.AttrTime = TIME_MAX
+		mountInode.userMetadata = make(map[string][]byte)
 
 		fs.mu.Lock()
 		defer fs.mu.Unlock()
@@ -855,11 +858,13 @@ func (fs *Goofys) addDotAndDotDot(dir *Inode) {
 	dot := NewInode(fs, dir, ".")
 	dot.ToDir()
 	dot.AttrTime = TIME_MAX
+	dot.userMetadata = make(map[string][]byte)
 	fs.insertInode(dir, dot)
 
 	dot = NewInode(fs, dir, "..")
 	dot.ToDir()
 	dot.AttrTime = TIME_MAX
+	dot.userMetadata = make(map[string][]byte)
 	fs.insertInode(dir, dot)
 }
 
