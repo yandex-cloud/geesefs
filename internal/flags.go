@@ -506,18 +506,10 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		LogFile:    c.String("log-file"),
 	}
 
-	// S3
-	if c.IsSet("region") || c.IsSet("requester-pays") || c.IsSet("storage-class") ||
-		c.IsSet("profile") || c.IsSet("sse") || c.IsSet("sse-kms") ||
-		c.IsSet("sse-c") || c.IsSet("acl") || c.IsSet("subdomain") ||
-		c.IsSet("no-checksum") || c.IsSet("list-type") ||
-		c.IsSet("iam") || c.IsSet("iam-header") {
-
-		if flags.Backend == nil {
-			flags.Backend = (&S3Config{}).Init()
-		}
+	// S3 by default, if not initialized in api/api.go
+	if flags.Backend == nil {
+		flags.Backend = (&S3Config{}).Init()
 		config, _ := flags.Backend.(*S3Config)
-
 		config.Region = c.String("region")
 		config.RegionSet = c.IsSet("region")
 		config.RequesterPays = c.Bool("requester-pays")
@@ -532,11 +524,9 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.NoChecksum = c.Bool("no-checksum")
 		config.UseIAM = c.Bool("iam")
 		config.IAMHeader = c.String("iam-header")
-		if c.IsSet("list-type") {
-			listType := c.String("list-type")
-			config.ListV1Ext = listType == "ext-v1"
-			config.ListV2 = listType == "2"
-		}
+		listType := c.String("list-type")
+		config.ListV1Ext = listType == "ext-v1"
+		config.ListV2 = listType == "2"
 
 		// KMS implies SSE
 		if config.UseKMS {
