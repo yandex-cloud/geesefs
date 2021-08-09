@@ -1,3 +1,9 @@
+geesefs (0.24.3) stable; urgency=medium
+
+  * Silently ignore forbidden xattr operations
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 09 Aug 2021 13:16:52 +0300
+
 geesefs (0.24.2) stable; urgency=medium
 
   * Fix configuration parsing

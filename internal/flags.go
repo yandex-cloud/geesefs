@@ -84,7 +84,7 @@ func NewApp() (app *cli.App) {
 
 	app = &cli.App{
 		Name:     "geesefs",
-		Version:  "0.24.2",
+		Version:  "0.24.3",
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
 		Writer:   os.Stderr,
