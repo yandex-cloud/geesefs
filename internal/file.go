@@ -407,11 +407,11 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 			offset := requests[i]
 			size := requests[i+1]
 			if size > minPart {
-				parts := int((size+minPart-1)/minPart)
+				parts := int(size/minPart)
 				for j := 0; j < parts; j++ {
 					partLen := minPart
 					if j == parts-1 {
-						partLen = size-uint64(parts-1)*minPart
+						partLen = size - uint64(j)*minPart
 					}
 					splitRequests = append(splitRequests, offset + minPart*uint64(j), partLen)
 				}
