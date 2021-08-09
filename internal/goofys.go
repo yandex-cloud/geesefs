@@ -629,6 +629,10 @@ func (fs *Goofys) RemoveXattr(ctx context.Context,
 	fs.mu.RUnlock()
 
 	err = inode.RemoveXattr(op.Name)
+	if err == syscall.EPERM {
+		// Silently ignore forbidden xattr operations
+		err = nil
+	}
 
 	return
 }
@@ -640,6 +644,10 @@ func (fs *Goofys) SetXattr(ctx context.Context,
 	fs.mu.RUnlock()
 
 	err = inode.SetXattr(op.Name, op.Value, op.Flags)
+	if err == syscall.EPERM {
+		// Silently ignore forbidden xattr operations
+		err = nil
+	}
 	return
 }
 
