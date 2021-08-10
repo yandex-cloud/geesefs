@@ -64,6 +64,29 @@ type MPUPart struct {
 	ETag string
 }
 
+const (
+	BUF_LOADING int32 = 0
+	BUF_CLEAN int32 = 1
+	BUF_DIRTY int32 = 2
+	BUF_FLUSHED int32 = 3
+)
+
+type FileBuffer struct {
+	offset uint64
+	// Chunk state: 0 = loading. 1 = clean. 2 = dirty. 3 = part flushed, but not finalized
+	state int32
+	// Unmodified chunks (equal to the current server-side object state) have dirtyID = 0.
+	// Every write or split assigns a new unique chunk ID.
+	// Flusher tracks IDs that are currently being flushed to the server,
+	// which allows to do flush and write in parallel.
+	dirtyID uint64
+	// Data
+	length uint64
+	zero bool
+	data []byte
+	ptr *BufferPointer
+}
+
 type Inode struct {
 	Id         fuseops.InodeID
 	Name       string
@@ -80,6 +103,7 @@ type Inode struct {
 	AttrTime time.Time
 
 	mu sync.Mutex // everything below is protected by mu
+	readCond *sync.Cond
 
 	// We are not very consistent about enforcing locks for `Parent` because, the
 	// parent field very very rarely changes and it is generally fine to operate on
@@ -101,6 +125,7 @@ type Inode struct {
 	forceFlush bool
 	flushError error
 	flushErrorTime time.Time
+	readError error
 	// renamed from: parent, name
 	oldParent *Inode
 	oldName string

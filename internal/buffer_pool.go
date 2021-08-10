@@ -44,26 +44,10 @@ type BufferPool struct {
 }
 
 // Several FileBuffers may be slices of the same array,
-// but we want to track memory usage, so we have to refcount them...
+// but we want to track memory usage, so we have to refcount them... O_o
 type BufferPointer struct {
 	mem []byte
 	refs int
-}
-
-type FileBuffer struct {
-	offset uint64
-	// Unmodified chunks (equal to the current server-side object state) have dirtyID = 0.
-	// Every write or split assigns a new unique chunk ID.
-	// Flusher tracks IDs that are currently being flushed to the server,
-	// which allows to do flush and write in parallel.
-	dirtyID uint64
-	// Is this chunk already saved to the server as a part of multipart upload?
-	flushed bool
-	// Data
-	length uint64
-	zero bool
-	data []byte
-	ptr *BufferPointer
 }
 
 type BufferOrZero struct {
