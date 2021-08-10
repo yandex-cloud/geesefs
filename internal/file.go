@@ -809,36 +809,6 @@ func (fh *FileHandle) Release() {
 	fh.inode.fs.WakeupFlusher()
 }
 
-func (inode *Inode) CheckLoadRange(offset uint64, size uint64, ignoreMemoryLimit bool) error {
-	loadStart := uint64(0)
-	loadEnd := uint64(0)
-	last := offset
-	end := offset+size
-	for i := locateBuffer(inode.buffers, offset); i < len(inode.buffers); i++ {
-		buf := &inode.buffers[i]
-		if buf.offset > last {
-			if loadEnd == 0 {
-				loadStart = last
-			}
-			loadEnd = buf.offset
-		}
-		last = buf.offset + buf.length
-		if last >= end {
-			break
-		}
-	}
-	if last < end {
-		if loadEnd == 0 {
-			loadStart = last
-		}
-		loadEnd = end
-	}
-	if loadEnd > 0 {
-		return inode.LoadRange(loadStart, loadEnd-loadStart, 0, ignoreMemoryLimit)
-	}
-	return nil
-}
-
 func (inode *Inode) splitBuffer(i int, size uint64) {
 	b := &inode.buffers[i]
 	endBuf := FileBuffer{
@@ -1195,7 +1165,7 @@ func (inode *Inode) FlushSmallObject() {
 	inode.LockRange(0, sz, true)
 
 	if inode.CacheState == ST_MODIFIED {
-		err := inode.CheckLoadRange(0, sz, true)
+		err := inode.LoadRange(0, sz, 0, true)
 		if err == fuse.ENOENT || err == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			inode.resetCache()
@@ -1376,7 +1346,7 @@ func (inode *Inode) FlushPart(part uint64) {
 		// Ignore memory limit to not produce a deadlock when we need to free some memory
 		// by flushing objects, but we can't flush a part without allocating more memory
 		// for read-modify-write...
-		err := inode.CheckLoadRange(partOffset, partSize, true)
+		err := inode.LoadRange(partOffset, partSize, 0, true)
 		if err == fuse.ENOENT || err == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			inode.resetCache()
