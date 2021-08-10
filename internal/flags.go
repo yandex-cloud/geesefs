@@ -234,7 +234,8 @@ func NewApp() (app *cli.App) {
 
 			cli.IntFlag{
 				Name:  "memory-limit",
-				Usage: "Maximum memory in MB to use for data cache (default: use cgroup free memory limit)",
+				Usage: "Maximum memory in MB to use for data cache",
+				Value: 1000,
 			},
 
 			cli.BoolFlag{
