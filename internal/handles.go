@@ -69,6 +69,7 @@ const (
 	BUF_CLEAN int32 = 1
 	BUF_DIRTY int32 = 2
 	BUF_FLUSHED int32 = 3
+	BUF_FL_CLEARED int32 = 4
 )
 
 type FileBuffer struct {
@@ -104,6 +105,7 @@ type Inode struct {
 
 	mu sync.Mutex // everything below is protected by mu
 	readCond *sync.Cond
+	pauseWriters int
 
 	// We are not very consistent about enforcing locks for `Parent` because, the
 	// parent field very very rarely changes and it is generally fine to operate on

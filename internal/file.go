@@ -311,6 +311,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 		inode.buffers = append(inode.buffers, FileBuffer{
 			offset: inode.Attributes.Size,
 			dirtyID: atomic.AddUint64(&inode.fs.bufferPool.curDirtyID, 1),
+			state: BUF_DIRTY,
 			length: newSize - inode.Attributes.Size,
 			zero: true,
 		})
@@ -327,6 +328,13 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 	fh.inode.fs.bufferPool.Use(int64(len(data)), false)
 
 	fh.inode.mu.Lock()
+
+	for fh.inode.pauseWriters > 0 {
+		if fh.inode.readCond == nil {
+			fh.inode.readCond = sync.NewCond(&fh.inode.mu)
+		}
+		fh.inode.readCond.Wait()
+	}
 
 	if fh.inode.Attributes.Size < end {
 		// Extend and zero fill
@@ -402,34 +410,17 @@ func (inode *Inode) addLoadingBuffers(offset uint64, size uint64) {
 
 func (inode *Inode) removeLoadingBuffers(offset uint64, size uint64) {
 	end := offset+size
-	pos := offset
 	i := locateBuffer(inode.buffers, offset)
 	for ; i < len(inode.buffers); i++ {
 		b := &inode.buffers[i]
 		if b.offset >= end {
 			break
 		}
-		if b.offset > pos {
-			inode.buffers = insertBuffer(inode.buffers, i, FileBuffer{
-				offset: pos,
-				dirtyID: 0,
-				state: BUF_LOADING,
-				zero: true,
-				length: b.offset-pos,
-			})
-			i++
-			b = &inode.buffers[i]
+		if b.state == BUF_LOADING {
+			inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)
+			i--
+			continue
 		}
-		pos = b.offset+b.length
-	}
-	if pos < end {
-		inode.buffers = insertBuffer(inode.buffers, i, FileBuffer{
-			offset: pos,
-			dirtyID: 0,
-			state: BUF_LOADING,
-			zero: true,
-			length: end-pos,
-		})
 	}
 }
 
@@ -441,7 +432,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 	end := offset+size
 
 	// Collect requests to the server
-	requests := make([]uint64, 0)
+	requests := []uint64(nil)
 	start := locateBuffer(inode.buffers, offset)
 	pos := offset
 	toLoad := uint64(0)
@@ -464,6 +455,10 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 			} else {
 				toLoad += b.length
 			}
+		} else if b.state == BUF_FL_CLEARED {
+			// Buffer is saved as a part and then removed
+			// We must complete multipart upload to be able to read it back
+			return syscall.ESPIPE
 		}
 		pos = b.offset+b.length
 	}
@@ -544,7 +539,8 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 		pos := offset
 		start := locateBuffer(inode.buffers, offset)
 		stillLoading := false
-		for i := start; i < len(inode.buffers); i++ {
+		i := start
+		for ; i < len(inode.buffers); i++ {
 			b := &inode.buffers[i]
 			if b.offset >= end {
 				break
@@ -563,15 +559,15 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 			}
 			pos = b.offset+b.length
 		}
-		if pos < end {
-			// One of the buffers disappeared => read error
-			requestErr = inode.readError
-			if requestErr == nil {
-				requestErr = fuse.EIO
-			}
-			return
-		}
 		if !stillLoading {
+			if pos < end {
+				// One of the buffers disappeared => read error
+				requestErr = inode.readError
+				if requestErr == nil {
+					requestErr = fuse.EIO
+				}
+				return
+			}
 			break
 		}
 	}
@@ -588,6 +584,7 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 		Count: size,
 	})
 	if err != nil {
+		log.Errorf("Error reading %v +%v of %v: %v", offset, size, key, err)
 		inode.fs.bufferPool.Use(-int64(size), false)
 		inode.mu.Lock()
 		inode.removeLoadingBuffers(offset, size)
@@ -610,6 +607,7 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 			n, err := resp.Body.Read(buf[done :])
 			done += uint64(n)
 			if err != nil && (err != io.EOF || done < bs) {
+				log.Errorf("Error reading %v +%v of %v: %v", offset, bs, key, err)
 				inode.mu.Lock()
 				inode.readError = err
 				inode.removeLoadingBuffers(offset, left)
@@ -669,6 +667,40 @@ func (inode *Inode) IsRangeLocked(offset uint64, size uint64, onlyFlushing bool)
 		}
 	}
 	return false
+}
+
+func (inode *Inode) CheckLoadRange(offset, size, readAheadSize uint64, ignoreMemoryLimit bool) error {
+	err := inode.LoadRange(offset, size, readAheadSize, ignoreMemoryLimit)
+	if err == syscall.ESPIPE {
+		// Finalize multipart upload to get some flushed data back
+		// We have to flush all parts that extend the file up until the last flushed part
+		// Everything else can be copied on the server. Example:
+		//
+		// ON SERVER    [111111111111           ]
+		// UPDATED      [2222222    222222222222]
+		// FLUSHED      [22222             2    ]
+		// READ EVICTED [  2                    ]
+		// FLUSH NOW    [           2222222     ]
+		// COPY NOW     [     111111            ]
+		// WILL BECOME  [2222211111122222222    ]
+		// FLUSH LATER  [     22            2222]
+		//
+		// But... simpler way is, in fact, to just block writers and flush the whole file
+		inode.pauseWriters++
+		for err == syscall.ESPIPE {
+			inode.mu.Unlock()
+			err = inode.SyncFile()
+			inode.mu.Lock()
+			if err == nil {
+				err = inode.LoadRange(offset, size, readAheadSize, ignoreMemoryLimit)
+			}
+		}
+		inode.pauseWriters--
+		if inode.readCond != nil {
+			inode.readCond.Broadcast()
+		}
+	}
+	return err
 }
 
 func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err error) {
@@ -732,7 +764,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 				ra = fh.inode.fs.flags.ReadAheadSmallKB*1024
 			}
 		}
-		requestErr = fh.inode.LoadRange(offset, end-offset, ra, false)
+		requestErr = fh.inode.CheckLoadRange(offset, end-offset, ra, false)
 		if requestErr == fuse.ENOENT || requestErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			fh.inode.resetCache()
@@ -1084,27 +1116,80 @@ func (inode *Inode) SendUpload() bool {
 
 	// Pick part(s) to flush
 	initiated := false
-	for i := 0; i < len(inode.buffers); i++ {
-		buf := &inode.buffers[i]
-		if buf.state == BUF_DIRTY && !inode.IsRangeLocked(buf.offset, buf.length, true) {
-			part := inode.fs.partNum(buf.offset)
-			// Don't write out the last part that's still written to (if not under memory pressure)
-			if inode.fileHandles == 0 || inode.forceFlush ||
-				inode.fs.bufferPool.wantFree > 0 || part != inode.fs.partNum(inode.lastWriteEnd) {
-				// Found
-				partOffset, partSize := inode.fs.partRange(part)
-				// Guard part against eviction
-				inode.LockRange(partOffset, partSize, true)
-				inode.IsFlushing++
-				atomic.AddInt64(&inode.fs.activeFlushers, 1)
-				go inode.FlushPart(part)
-				initiated = true
-				if atomic.LoadInt64(&inode.fs.activeFlushers) >= inode.fs.flags.MaxFlushers ||
-					inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
-					return true
-				}
-			}
+	lastPart := uint64(0)
+	flushInode := inode.fileHandles == 0 || inode.forceFlush || inode.fs.bufferPool.wantFree > 0
+	partDirty := false
+	partLocked := false
+	partEvicted := false
+	hasEvictedParts := false
+	canComplete := true
+	for i := 0; i <= len(inode.buffers); i++ {
+		var buf *FileBuffer
+		var part uint64
+		if i < len(inode.buffers) {
+			buf = &inode.buffers[i]
+			part = inode.fs.partNum(buf.offset)
+		} else {
+			part = 1+inode.fs.partNum(inode.Attributes.Size-1)
 		}
+		for lastPart < part {
+			// Don't flush parts that require RMW with evicted buffers
+			if partLocked {
+				canComplete = false
+			} else if partDirty && !partEvicted {
+				canComplete = false
+				// Don't write out the last part that's still written to (if not under memory pressure)
+				if flushInode || lastPart != inode.fs.partNum(inode.lastWriteEnd) {
+					// Found
+					partOffset, partSize := inode.fs.partRange(lastPart)
+					// Guard part against eviction
+					inode.LockRange(partOffset, partSize, true)
+					inode.IsFlushing++
+					atomic.AddInt64(&inode.fs.activeFlushers, 1)
+					go func(lastPart, partOffset, partSize uint64) {
+						inode.mu.Lock()
+						inode.FlushPart(lastPart)
+						inode.UnlockRange(partOffset, partSize, true)
+						inode.IsFlushing--
+						inode.mu.Unlock()
+						atomic.AddInt64(&inode.fs.activeFlushers, -1)
+						inode.fs.WakeupFlusher()
+					}(lastPart, partOffset, partSize)
+					initiated = true
+					if atomic.LoadInt64(&inode.fs.activeFlushers) >= inode.fs.flags.MaxFlushers ||
+						inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
+						return true
+					}
+				}
+			} else if partDirty && partEvicted {
+				hasEvictedParts = true
+			}
+			lastPart++
+			partDirty = false
+			partLocked = false
+			partEvicted = false
+		}
+		if i >= len(inode.buffers) {
+			break
+		}
+		partDirty = partDirty || buf.state == BUF_DIRTY
+		partLocked = partLocked || inode.IsRangeLocked(buf.offset, buf.length, true)
+		partEvicted = partEvicted || buf.state == BUF_FL_CLEARED
+	}
+
+	if canComplete && (inode.fileHandles == 0 || inode.forceFlush ||
+		inode.fs.bufferPool.wantFree > 0 && hasEvictedParts) {
+		// Complete the multipart upload
+		inode.IsFlushing += inode.fs.flags.MaxParallelParts
+		atomic.AddInt64(&inode.fs.activeFlushers, 1)
+		go func() {
+			inode.mu.Lock()
+			inode.completeMultipart()
+			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+			inode.mu.Unlock()
+			atomic.AddInt64(&inode.fs.activeFlushers, -1)
+			inode.fs.WakeupFlusher()
+		}()
 	}
 
 	return initiated
@@ -1165,7 +1250,7 @@ func (inode *Inode) FlushSmallObject() {
 	inode.LockRange(0, sz, true)
 
 	if inode.CacheState == ST_MODIFIED {
-		err := inode.LoadRange(0, sz, 0, true)
+		err := inode.CheckLoadRange(0, sz, 0, true)
 		if err == fuse.ENOENT || err == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			inode.resetCache()
@@ -1316,17 +1401,7 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 
 func (inode *Inode) FlushPart(part uint64) {
 
-	inode.mu.Lock()
-
 	partOffset, partSize := inode.fs.partRange(part)
-
-	defer func(partOffset, partSize uint64) {
-		inode.UnlockRange(partOffset, partSize, true)
-		inode.IsFlushing--
-		inode.mu.Unlock()
-		atomic.AddInt64(&inode.fs.activeFlushers, -1)
-		inode.fs.WakeupFlusher()
-	} (partOffset, partSize)
 
 	cloud, key := inode.cloud()
 	if inode.oldParent != nil {
@@ -1346,10 +1421,14 @@ func (inode *Inode) FlushPart(part uint64) {
 		// Ignore memory limit to not produce a deadlock when we need to free some memory
 		// by flushing objects, but we can't flush a part without allocating more memory
 		// for read-modify-write...
-		err := inode.LoadRange(partOffset, partSize, 0, true)
+		err := inode.CheckLoadRange(partOffset, partSize, 0, true)
 		if err == fuse.ENOENT || err == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			inode.resetCache()
+			return
+		}
+		if err != nil {
+			log.Errorf("Failed to flush part %v of object %v: %v", part, key, err)
 			return
 		}
 		// File size may have been changed again
@@ -1379,7 +1458,6 @@ func (inode *Inode) FlushPart(part uint64) {
 	if err != nil {
 		log.Errorf("Failed to flush part %v of object %v: %v", part, key, err)
 	} else {
-		stillDirty := false
 		if inode.mpu != nil {
 			// It could become nil if the file was deleted remotely in the meantime
 			inode.mpu.Parts[part] = resp.PartId
@@ -1392,73 +1470,87 @@ func (inode *Inode) FlushPart(part uint64) {
 					// Still dirty because the upload is not completed yet,
 					// but flushed to the server
 					b.state = BUF_FLUSHED
-				} else if b.state == BUF_DIRTY {
-					stillDirty = true
 				}
 			}
 		}
-		if !stillDirty && (inode.fileHandles == 0 || inode.forceFlush || inode.fs.bufferPool.wantFree > 0) && (
-			inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
-			// Server-size copy unmodified parts
-			numParts := inode.fs.partNum(inode.Attributes.Size)
-			numPartOffset, _ := inode.fs.partRange(numParts)
-			if numPartOffset < inode.Attributes.Size {
-				numParts++
-			}
-			err := inode.copyUnmodifiedParts(numParts)
-			if err == fuse.ENOENT || err == syscall.ERANGE {
-				// Object is deleted or resized remotely (416). Discard local version
-				inode.resetCache()
-				return
-			}
+		if inode.fs.bufferPool.wantFree > 0 {
+			inode.fs.bufferPool.cond.Broadcast()
+		}
+	}
+}
+
+// LOCKS_REQUIRED(inode.mu)
+func (inode *Inode) completeMultipart() {
+	// Server-size copy unmodified parts
+	numParts := inode.fs.partNum(inode.Attributes.Size)
+	numPartOffset, _ := inode.fs.partRange(numParts)
+	if numPartOffset < inode.Attributes.Size {
+		numParts++
+	}
+	err := inode.copyUnmodifiedParts(numParts)
+	if err == fuse.ENOENT || err == syscall.ERANGE {
+		// Object is deleted or resized remotely (416). Discard local version
+		inode.resetCache()
+		return
+	}
+	inode.recordFlushError(err)
+	if err == nil && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
+		cloud, key := inode.cloud()
+		if inode.oldParent != nil {
+			// Always apply modifications before moving
+			_, key = inode.oldParent.cloud()
+			key = appendChildName(key, inode.oldName)
+		}
+		// Finalize the upload
+		inode.mpu.NumParts = uint32(numParts)
+		if inode.userMetadataDirty {
+			inode.mpu.Metadata = escapeMetadata(inode.userMetadata)
+			inode.userMetadataDirty = false
+		}
+		inode.mu.Unlock()
+		resp, err := cloud.MultipartBlobCommit(inode.mpu)
+		inode.mu.Lock()
+		if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
 			inode.recordFlushError(err)
-			if err == nil && (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
-				// Finalize the upload
-				inode.mpu.NumParts = uint32(numParts)
-				if inode.userMetadataDirty {
-					inode.mpu.Metadata = escapeMetadata(inode.userMetadata)
-					inode.userMetadataDirty = false
-				}
-				inode.mu.Unlock()
-				resp, err := cloud.MultipartBlobCommit(inode.mpu)
-				inode.mu.Lock()
-				if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
-					inode.recordFlushError(err)
-					if err != nil {
-						log.Errorf("Failed to finalize multi-part upload of object %v: %v", key, err)
-						if inode.mpu.Metadata != nil {
-							inode.userMetadataDirty = true
-						}
-					} else {
-						inode.mpu = nil
-						inode.updateFromFlush(inode.Attributes.Size, resp.ETag, resp.LastModified, resp.StorageClass)
-						stillDirty := inode.userMetadataDirty || inode.oldParent != nil
-						for i := 0; i < len(inode.buffers); i++ {
-							if inode.buffers[i].state == BUF_FLUSHED {
-								inode.buffers[i].dirtyID = 0
-								inode.buffers[i].state = BUF_CLEAN
-							}
-							if inode.buffers[i].dirtyID != 0 {
-								stillDirty = true
-							}
-						}
-						if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
-							if !stillDirty {
-								inode.SetCacheState(ST_CACHED)
-							} else {
-								inode.SetCacheState(ST_MODIFIED)
-							}
-							if inode.fs.bufferPool.wantFree > 0 {
-								inode.fs.bufferPool.cond.Broadcast()
-							}
-						}
-					}
+			if err != nil {
+				log.Errorf("Failed to finalize multi-part upload of object %v: %v", key, err)
+				if inode.mpu.Metadata != nil {
+					inode.userMetadataDirty = true
 				}
 			} else {
-				// FIXME: Abort multipart upload, but not just here
-				// For example, we also should abort it if a partially flushed file is deleted
+				log.Debugf("Finalized multi-part upload of object %v", key)
+				inode.mpu = nil
+				inode.updateFromFlush(inode.Attributes.Size, resp.ETag, resp.LastModified, resp.StorageClass)
+				stillDirty := inode.userMetadataDirty || inode.oldParent != nil
+				for i := 0; i < len(inode.buffers); {
+					if inode.buffers[i].state == BUF_FL_CLEARED {
+						inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)
+					} else {
+						if inode.buffers[i].state == BUF_FLUSHED {
+							inode.buffers[i].dirtyID = 0
+							inode.buffers[i].state = BUF_CLEAN
+						}
+						if inode.buffers[i].dirtyID != 0 {
+							stillDirty = true
+						}
+						i++
+					}
+				}
+				if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
+					if !stillDirty {
+						inode.SetCacheState(ST_CACHED)
+					} else {
+						inode.SetCacheState(ST_MODIFIED)
+					}
+					if inode.fs.bufferPool.wantFree > 0 {
+						inode.fs.bufferPool.cond.Broadcast()
+					}
+				}
 			}
 		}
+	} else {
+		// FIXME: Abort multipart upload, but not just here
+		// For example, we also should abort it if a partially flushed file is deleted
 	}
 }
 

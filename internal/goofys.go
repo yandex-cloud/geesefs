@@ -318,8 +318,8 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 		for i := 0; i < len(inode.buffers); i++ {
 			buf := &inode.buffers[i]
 			// FIXME: STUPID. Add generations or LRU or something else
-			if buf.dirtyID == 0 {
-				if !buf.zero && !inode.IsRangeLocked(buf.offset, buf.length, false) {
+			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED {
+				if freed < size && !buf.zero && !inode.IsRangeLocked(buf.offset, buf.length, false) {
 					buf.ptr.refs--
 					if buf.ptr.refs == 0 {
 						freed += int64(len(buf.ptr.mem))
@@ -327,8 +327,16 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 					}
 					buf.ptr = nil
 					buf.data = nil
-					inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)
-					i--
+					if buf.dirtyID == 0 {
+						inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)
+						i--
+					} else if buf.state == BUF_FLUSHED {
+						// A flushed buffer can be removed at a cost of finalizing multipart upload
+						// to read it back later. However it's likely not a problem if we're uploading
+						// a large file because we may never need to read it back.
+						buf.state = BUF_FL_CLEARED
+						buf.zero = true
+					}
 				}
 			} else {
 				haveDirty = true
