@@ -68,6 +68,10 @@ type FlagStorage struct {
 	MaxMergeCopyMB uint64
 	IgnoreFsync bool
 	SymlinkAttr string
+	CachePopularThreshold int64
+	CacheMaxHits int64
+	CacheAgeInterval int64
+	CacheAgeDecrement int64
 
 	// Debugging
 	DebugMain  bool

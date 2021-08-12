@@ -96,6 +96,8 @@ type Goofys struct {
 	flushRetrySet int32
 
 	forgotCnt uint32
+
+	lfru *LFRU
 }
 
 var s3Log = GetLogger("s3")
@@ -178,6 +180,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		bucket: bucket,
 		flags:  flags,
 		umask:  0122,
+		lfru:   NewLFRU(flags.CachePopularThreshold, flags.CacheMaxHits, flags.CacheAgeInterval, flags.CacheAgeDecrement),
 	}
 
 	var prefix string
@@ -296,18 +299,16 @@ func (fs *Goofys) getInodeOrDie(id fuseops.InodeID) (inode *Inode) {
 }
 
 // Try to reclaim some clean buffers
-// FIXME: Add data cache TTL
 func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
-	fs.mu.RLock()
-	inodes := make([]fuseops.InodeID, 0, len(fs.inodes))
-	for id := range fs.inodes {
-		inodes = append(inodes, id)
-	}
-	fs.mu.RUnlock()
-
 	freed := int64(0)
 	haveDirty := false
-	for _, inodeId := range inodes {
+	var cacheItem *LFRUItem
+	for {
+		cacheItem = fs.lfru.Pick(cacheItem)
+		if cacheItem == nil {
+			break
+		}
+		inodeId := cacheItem.Id()
 		fs.mu.RLock()
 		inode := fs.inodes[inodeId]
 		fs.mu.RUnlock()
@@ -317,7 +318,6 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 		inode.mu.Lock()
 		for i := 0; i < len(inode.buffers); i++ {
 			buf := &inode.buffers[i]
-			// FIXME: STUPID. Add generations or LRU or something else
 			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED {
 				if freed < size && !buf.zero && !inode.IsRangeLocked(buf.offset, buf.length, false) {
 					buf.ptr.refs--

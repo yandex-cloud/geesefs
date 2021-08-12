@@ -327,6 +327,8 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 	// Try to reserve space without the inode lock
 	fh.inode.fs.bufferPool.Use(int64(len(data)), false)
 
+	fh.inode.fs.lfru.Hit(fh.inode.Id, 0)
+
 	fh.inode.mu.Lock()
 
 	for fh.inode.pauseWriters > 0 {
@@ -727,6 +729,9 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	}
 	if offset == fh.lastReadEnd {
 		fh.seqReadSize += uint64(len(buf))
+		if fh.lastReadCount == 0 {
+			fh.inode.fs.lfru.Hit(fh.inode.Id, 1)
+		}
 	} else {
 		// Track sizes of last N read requests
 		if len(fh.lastReadSizes) > 0 {
@@ -740,6 +745,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 			fh.lastReadIdx = (fh.lastReadIdx+1) % len(fh.lastReadSizes)
 		}
 		fh.seqReadSize = uint64(len(buf))
+		fh.inode.fs.lfru.Hit(fh.inode.Id, 1)
 	}
 	fh.lastReadEnd = end
 
@@ -1232,6 +1238,8 @@ func (inode *Inode) resetCache() {
 	inode.CacheState = ST_CACHED
 	// Invalidate metadata entry
 	inode.AttrTime = time.Time{}
+	// Remove from LFRU tracker
+	inode.fs.lfru.Forget(inode.Id)
 }
 
 func (inode *Inode) FlushSmallObject() {

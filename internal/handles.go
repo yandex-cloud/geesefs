@@ -351,6 +351,8 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 		delete(inode.fs.inodes, inode.Id)
 		inode.fs.forgotCnt += 1
 		inode.fs.mu.Unlock()
+		// Remove from LFRU tracker
+		inode.fs.lfru.Forget(inode.Id)
 	}
 	return res == 0
 }
