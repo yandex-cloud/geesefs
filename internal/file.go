@@ -842,10 +842,22 @@ func (inode *Inode) CheckLoadRange(offset, size, readAheadSize uint64, ignoreMem
 	return err
 }
 
-func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err error) {
-	offset := uint64(sOffset)
+func appendZero(data [][]byte, zeroBuf []byte, zeroLen int) [][]byte {
+	for zeroLen > len(zeroBuf) {
+		data = append(data, zeroBuf)
+		zeroLen -= len(zeroBuf)
+	}
+	if zeroLen > 0 {
+		data = append(data, zeroBuf[0 : zeroLen])
+	}
+	return data
+}
 
-	fh.inode.logFuse("ReadFile", offset, len(buf))
+func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesRead int, err error) {
+	offset := uint64(sOffset)
+	size := uint64(sLen)
+
+	fh.inode.logFuse("ReadFile", offset, size)
 	defer func() {
 		fh.inode.logFuse("< ReadFile", bytesRead, err)
 		if err != nil {
@@ -860,12 +872,12 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 		err = io.EOF
 		return
 	}
-	end := offset+uint64(len(buf))
+	end := offset+size
 	if end >= fh.inode.Attributes.Size {
 		end = fh.inode.Attributes.Size
 	}
 	if offset == fh.lastReadEnd {
-		fh.seqReadSize += uint64(len(buf))
+		fh.seqReadSize += size
 		if fh.lastReadCount == 0 && fh.lastReadEnd == 0 {
 			fh.inode.fs.lfru.Hit(fh.inode.Id, 1)
 		}
@@ -881,7 +893,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 			fh.lastReadCount++
 			fh.lastReadIdx = (fh.lastReadIdx+1) % len(fh.lastReadSizes)
 		}
-		fh.seqReadSize = uint64(len(buf))
+		fh.seqReadSize = size
 		fh.inode.fs.lfru.Hit(fh.inode.Id, 1)
 	}
 	fh.lastReadEnd = end
@@ -917,7 +929,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 		}
 	}
 
-	// copy cached buffers into the result
+	// return cached buffers directly without copying
 	start := locateBuffer(fh.inode.buffers, offset)
 	pos := offset
 	for i := start; i < len(fh.inode.buffers); i++ {
@@ -930,7 +942,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 			if fh.inode.CacheState == ST_CREATED {
 				// It's okay if the file is just created
 				// Zero empty ranges in this case
-				memzero(buf[pos-offset : b.offset-offset])
+				data = appendZero(data, fh.inode.fs.zeroBuf, int(b.offset-pos))
 				pos = b.offset
 			} else {
 				err = requestErr
@@ -945,9 +957,9 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 			readEnd = end
 		}
 		if b.zero {
-			memzero(buf[pos-offset : readEnd-offset])
+			data = appendZero(data, fh.inode.fs.zeroBuf, int(readEnd-pos))
 		} else {
-			copy(buf[pos-offset : readEnd-offset], b.data[pos-b.offset : readEnd-b.offset])
+			data = append(data, b.data[pos-b.offset : readEnd-b.offset])
 		}
 		pos = readEnd
 	}
@@ -956,7 +968,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 		if fh.inode.CacheState == ST_CREATED {
 			// It's okay if the file is just created
 			// Zero empty ranges in this case
-			memzero(buf[pos-offset : end-offset])
+			data = appendZero(data, fh.inode.fs.zeroBuf, int(end-pos))
 			pos = end
 		} else {
 			err = requestErr

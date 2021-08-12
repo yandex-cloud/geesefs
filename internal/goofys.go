@@ -97,6 +97,7 @@ type Goofys struct {
 
 	forgotCnt uint32
 
+	zeroBuf []byte
 	lfru *LFRU
 	diskFdMu sync.Mutex
 	diskFdCond *sync.Cond
@@ -184,6 +185,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		flags:  flags,
 		umask:  0122,
 		lfru:   NewLFRU(flags.CachePopularThreshold, flags.CacheMaxHits, flags.CacheAgeInterval, flags.CacheAgeDecrement),
+		zeroBuf: make([]byte, 1048576),
 	}
 
 	var prefix string
@@ -1148,7 +1150,7 @@ func (fs *Goofys) ReadFile(
 	fh := fs.fileHandles[op.Handle]
 	fs.mu.RUnlock()
 
-	op.BytesRead, err = fh.ReadFile(op.Offset, op.Dst)
+	op.Data, op.BytesRead, err = fh.ReadFile(op.Offset, op.Size)
 	err = mapAwsError(err)
 
 	return
