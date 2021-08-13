@@ -807,6 +807,7 @@ func (parent *Inode) removeAllChildrenUnlocked() {
 			dh.lastInternalOffset = 2
 		}
 	}
+	parent.dir.Children = parent.dir.Children[0 : 2]
 }
 
 // LOCKS_EXCLUDED(parent.fs.mu)
