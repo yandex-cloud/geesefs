@@ -1283,29 +1283,8 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 	newParent.fs.mu.Lock()
 	toDir := newParent.doMkDir(to)
 	newParent.fs.mu.Unlock()
-	isNew := fromInode.CacheState == ST_CREATED && fromInode.IsFlushing == 0
 	toDir.userMetadata = fromInode.userMetadata
 	toDir.ImplicitDir = fromInode.ImplicitDir
-	if isNew {
-		// Brand new directory, not yet on the server, nothing to rename
-	} else if fromInode.oldParent != nil {
-		// Directory moved second time
-		_, oldKey := fromInode.oldParent.cloud()
-		oldKey = appendChildName(oldKey, fromInode.oldName)
-		_, newKey := newParent.cloud()
-		newKey = appendChildName(newKey, to)
-		if oldKey == newKey {
-			toDir.SetCacheState(ST_CACHED)
-		} else {
-			toDir.SetCacheState(ST_MODIFIED)
-			toDir.oldParent = fromInode.oldParent
-			toDir.oldName = fromInode.oldName
-		}
-	} else {
-		toDir.SetCacheState(ST_MODIFIED)
-		toDir.oldParent = fromInode.Parent
-		toDir.oldName = fromInode.Name
-	}
 	// Trick IDs
 	oldId := fromInode.Id
 	newId := toDir.Id
@@ -1328,19 +1307,7 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 		child.mu.Unlock()
 	}
 	toDir.mu.Unlock()
-	if isNew {
-		// Unlink will be immediate
-		fromInode.doUnlink()
-	} else {
-		// Removing the object will be done during the flush of rename
-		parent := fromInode.Parent
-		parent.removeChildUnlocked(fromInode)
-		if parent.dir.DeletedChildren == nil {
-			parent.dir.DeletedChildren = make(map[string]*Inode)
-		}
-		parent.dir.DeletedChildren[fromInode.Name] = toDir
-		parent.addModified(1)
-	}
+	fromInode.doUnlink()
 }
 
 func renameInCache(fromInode *Inode, newParent *Inode, to string) {
@@ -1353,15 +1320,15 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	// 6) rename then modify then rename => either rename then modify or modify then rename
 	// and etc...
 	parent := fromInode.Parent
-	if (fromInode.CacheState != ST_CREATED || fromInode.IsFlushing > 0 || fromInode.mpu != nil) &&
-		fromInode.oldParent == nil {
+	if fromInode.IsFlushing > 0 || fromInode.mpu != nil ||
+		fromInode.CacheState != ST_CREATED && fromInode.oldParent == nil {
 		// Remember that the original file is "deleted"
 		// We can skip this step if the file is new and isn't being flushed yet
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[fromInode.Name] = fromInode
-		if fromInode.CacheState == ST_CACHED {
+		if fromInode.CacheState == ST_CACHED && fromInode.oldParent == nil {
 			parent.addModified(1)
 		}
 		fromInode.oldParent = parent
