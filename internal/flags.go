@@ -29,6 +29,8 @@ import (
 	"github.com/urfave/cli"
 )
 
+const GEESEFS_VERSION = "0.24.3"
+
 var flagCategories map[string]string
 
 // Set up custom help text for goofys; in particular the usage section.
@@ -84,7 +86,7 @@ func NewApp() (app *cli.App) {
 
 	app = &cli.App{
 		Name:     "geesefs",
-		Version:  "0.24.3",
+		Version:  GEESEFS_VERSION,
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
 		Writer:   os.Stderr,

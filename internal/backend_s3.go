@@ -24,6 +24,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -204,6 +205,12 @@ func (s *S3Backend) newS3() {
 		s.setV2Signer(&s.S3.Handlers)
 	}
 	s.S3.Handlers.Sign.PushBack(addAcceptEncoding)
+	s.S3.Handlers.Build.RemoveByName("core.SDKVersionUserAgentHandler")
+	s.S3.Handlers.Build.PushBackNamed(request.NamedHandler{
+		Name: "core.SDKVersionUserAgentHandler",
+		Fn: request.MakeAddToUserAgentHandler("GeeseFS", GEESEFS_VERSION,
+			runtime.Version(), runtime.GOOS, runtime.GOARCH),
+	})
 }
 
 func (s *S3Backend) detectBucketLocationByHEAD() (err error, isAws bool) {
