@@ -233,7 +233,7 @@ func main() {
 				err = fmt.Errorf("MountedFileSystem.Join: %v", err)
 				return
 			}
-			fs.SyncFS()
+			fs.SyncFS(nil)
 
 			log.Println("Successfully exiting.")
 		}

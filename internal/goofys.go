@@ -1068,7 +1068,9 @@ func (fs *Goofys) SyncFile(
 		fs.mu.RUnlock()
 
 		if in.Id == fuseops.RootInodeID {
-			err = fs.SyncFS()
+			err = fs.SyncFS(nil)
+		} else if in.isDir() {
+			err = fs.SyncFS(in)
 		} else {
 			err = in.SyncFile()
 		}
@@ -1258,12 +1260,18 @@ func (fs *Goofys) Rename(
 	return
 }
 
-func (fs *Goofys) SyncFS() (err error) {
-	log.Infof("Flushing all changes")
+func (fs *Goofys) SyncFS(parent *Inode) (err error) {
+	if parent == nil {
+		log.Infof("Flushing all changes")
+	} else {
+		log.Infof("Flushing all changes under %v", parent.FullName())
+	}
 	fs.mu.RLock()
 	inodes := make([]fuseops.InodeID, 0, len(fs.inodes))
-	for id := range fs.inodes {
-		inodes = append(inodes, id)
+	for id, inode := range fs.inodes {
+		if parent == nil || parent.isParentOf(inode) {
+			inodes = append(inodes, id)
+		}
 	}
 	fs.mu.RUnlock()
 	for i := 0; i < len(inodes); i++ {

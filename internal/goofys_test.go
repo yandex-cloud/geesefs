@@ -365,7 +365,7 @@ func (s *GoofysTest) TearDownTest(t *C) {
 	close(s.timeout)
 	s.timeout = nil
 
-	s.fs.SyncFS()
+	s.fs.SyncFS(nil)
 
 	for _, cloud := range s.removeBucket {
 		err := s.deleteBucket(cloud)
