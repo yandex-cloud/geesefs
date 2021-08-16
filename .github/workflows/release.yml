@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags:
+    - "v*"
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.16
+
+    - name: Build linux amd64
+      run: go build -o geesefs-linux-amd64 -v
+
+    - name: Build Mac amd64
+      run: env GOOS=darwin GOARCH=amd64 go build -o geesefs-mac-amd64 -v
+
+    - name: Test
+      continue-on-error: true
+      run: make run-test
+
+    - uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        prerelease: false
+        files: |
+          geesefs-linux-amd64
+          geesefs-mac-amd64
