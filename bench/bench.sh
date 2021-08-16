@@ -1,94 +1,32 @@
 #!/bin/bash
 
-: ${TRAVIS:="false"}
-: ${FAST:="false"}
-: ${test:=""}
-: ${CACHE:="false"}
-: ${CLEANUP:="true"}
+set -x
+
+FAST=$FAST
+test=$test
+CLEANUP=${CLEANUP:-true}
 
 iter=10
-
-if [ "$TRAVIS" != "false" ]; then
-    set -o xtrace
-    iter=1
-fi
-
-if [ "$FAST" != "false" ]; then
+if [ "$FAST" != "" ]; then
     iter=1
 fi
 
 set -o errexit
 set -o nounset
 
-if [ $# -lt 2 ]; then
-    echo "Usage: $0 <mount cmd> <dir> [test name]"
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <dir> [test name]"
     exit 1
 fi
 
-cmd=$1
-mnt=$2
+mnt=$1
 if [ $# -gt 2 ]; then
-    t=$3
+    t=$2
 else
     t=
 fi
 
 prefix=$mnt/test_dir
-
-MOUNTED=0
-
-if [[ "$cmd" == riofs* ]]; then
-    RIOFS="true"
-else
-    RIOFS="false"
-fi
-
-if [[ "$cmd" == blobfuse* ]]; then
-    BLOBFUSE="true"
-else
-    BLOBFUSE="false"
-fi
-
-$cmd >& mount.log &
-PID=$!
-
-function cleanup {
-    if [ $MOUNTED == 1 ]; then
-        popd >/dev/null
-	if [ "$CLEANUP" = "true" ]; then
-            if [ "$TRAVIS" != "false" ]; then
-		rmdir $prefix
-            else
-		rmdir $prefix >& /dev/null || true # riofs doesn't support rmdir
-            fi
-	fi
-    fi
-
-    if [ "$PID" != "" ]; then
-        kill $PID >& /dev/null || true
-        fusermount -u $mnt >& /dev/null || true
-        sleep 1
-    fi
-}
-
-function cleanup_err {
-    err=$?
-    cat mount.log
-    if [ $MOUNTED == 1 ]; then
-        popd >&/dev/null || true
-        rmdir $prefix >&/dev/null || true
-    fi
-
-    if [ "$PID" != "" ]; then
-        kill $PID >& /dev/null || true
-        fusermount -u $mnt >& /dev/null || true
-    fi
-
-    return $err
-}
-
-trap cleanup EXIT
-trap cleanup_err ERR
 
 function wait_for_mount {
     for i in $(seq 1 10); do
@@ -98,59 +36,20 @@ function wait_for_mount {
         sleep 1
     done
     if ! grep -q $mnt /proc/mounts; then
-        echo "$mnt not mounted by $cmd"
-        cat mount.log
+        echo "$mnt not mounted"
         exit 1
     fi
 }
 
-if [ "$TRAVIS" == "false" -a "$cmd" != "cat" ]; then
-    wait_for_mount
-    MOUNTED=1
-else
-    # in travis we mount things externally so we know we are mounted
-    MOUNTED=1
-fi
-
 mkdir -p "$prefix"
-pushd "$prefix" >/dev/null
-
-SUDO=
-if [ $(id -u) != 0 ]; then
-    SUDO=sudo
-fi
-
-function drop_cache {
-    if [ "$TRAVIS" == "false" ]; then
-        (echo 3 | $SUDO tee /proc/sys/vm/drop_caches) > /dev/null
-    fi
-}
+cd "$prefix"
 
 export TIMEFORMAT=%R
 
 function run_test {
     test=$1
     shift
-    drop_cache
     sleep 2
-    if [ "$CACHE" == "false" ]; then
-        if [ -d /tmp/cache ]; then
-            rm -Rf /tmp/cache/*
-        fi
-	if [ "$BLOBFUSE" == "true" ]; then
-	    popd >/dev/null
-	    # re-mount blobfuse to cleanup cache
-	    if [ "$PID" != "" ]; then
-		fusermount -u $mnt
-		sleep 1
-	    fi
-	    $cmd >& mount.log &
-	    PID=$!
-	    wait_for_mount
-	    pushd "$prefix" >/dev/null
-	fi
-    fi
-
     echo -n "$test "
     if [ $# -gt 1 ]; then
         time $test $@
@@ -160,18 +59,10 @@ function run_test {
 }
 
 function get_howmany {
-    if [ "$TRAVIS" != "false" ]; then
-	if [ $# == 2 ]; then
-	    howmany=$2
-	else
-            howmany=10
-	fi
+    if [ $# == 2 ]; then
+        howmany=$2
     else
-        if [ $# == 0 ]; then
-            howmany=100
-        else
-            howmany=$1
-        fi
+        howmany=10
     fi
 }
 
@@ -288,11 +179,6 @@ function write_md5 {
     fi
     MD5=$(dd if=/dev/zero bs=1MB count=$count status=none | $random_cmd | \
         tee >(md5sum) >(dd of=largefile bs=1MB oflag=nocache status=none) >/dev/null | cut -f 1 '-d ')
-    if [ "$RIOFS" == "true" ]; then
-        # riofs doesn't wait for flush, so we need to wait for object to show up
-        # XXX kind of broken due to eventual consistency but it's hte best we can do
-        while ! aws s3api --endpoint ${ENDPOINT} head-object --bucket ${BUCKET} --key test_dir/largefile >& /dev/null; do sleep 0.1; done
-    fi
 }
 
 function read_md5 {
@@ -304,32 +190,13 @@ function read_md5 {
     fi
 }
 
-function rm {
-    if [ "$RIOFS" == "true" ]; then
-        while ! /bin/rm $@; do true; done
-    else
-        /bin/rm $@
-    fi
-}
-
 if [ "$t" = "" -o "$t" = "io" ]; then
     for i in $(seq 1 $iter); do
         run_test write_md5
-        if [ "$CACHE" != "true" ]; then
-            run_test read_md5
-            run_test read_first_byte
-        fi
+        run_test read_md5
+        run_test read_first_byte
         rm largefile
     done
-    if [ "$CACHE" = "true" ]; then
-        write_md5
-        read_md5
-        for i in $(seq 1 $iter); do
-            run_test read_md5
-            run_test read_first_byte
-        done
-        rm largefile
-    fi
 fi
 
 if [ "$t" = "" -o "$t" = "ls" ]; then
@@ -341,7 +208,7 @@ if [ "$t" = "" -o "$t" = "ls" ]; then
         run_test ls_files 2000 2000
     done
     if [ "$CLEANUP" = "true" ]; then
-	rm_files 2000 2000
+        rm_files 2000 2000
     fi
     cd ..
 fi
@@ -400,7 +267,7 @@ if [ "$t" = "cleanup" ]; then
 fi
 
 # for https://github.com/kahing/goofys/issues/64
-# quote: There are 5 concurrent transfers gong at a time.
+# quote: There are 5 concurrent transfers going at a time.
 # Data file size is often 100-400MB.
 # Regarding the number of transfers, I think it's about 200 files.
 # We read from the goofys mounted s3 bucket and write to a local spring webapp using curl.
@@ -434,7 +301,7 @@ if [ "$t" = "disable" -o "$t" = "issue64" ]; then
     if [ $? != 0 ]; then
         exit $?
     fi
-    
+
     # cleanup
     (for i in $(seq 0 9); do
         rm -f file$i & true
