@@ -2433,7 +2433,6 @@ func (s *GoofysTest) TestXAttrGet(t *C) {
 	dir1 = s.fs.inodes[lookup.Entry.Child]
 	file3 := dir1.findChild("file3")
 	t.Assert(file3, NotNil)
-	t.Assert(file3.userMetadata, IsNil)
 
 	if checkETag {
 		value, err = file3.GetXattr("s3.etag")
@@ -2451,6 +2450,15 @@ func (s *GoofysTest) TestXAttrGet(t *C) {
 	names, err = emptyDir2.ListXattr()
 	t.Assert(err, IsNil)
 	sort.Strings(names)
+	expectedXattrs = []string{
+		xattrPrefix + "etag",
+		xattrPrefix + "storage-class",
+		"user.name",
+	}
+	if len(names) == 2 {
+		// STANDARD storage-class may be present or not
+		expectedXattrs = []string{ xattrPrefix + "etag", "user.name" }
+	}
 	t.Assert(names, DeepEquals, expectedXattrs)
 
 	emptyDir, err := s.LookUpInode(t, "empty_dir")
@@ -2565,7 +2573,6 @@ func (s *GoofysTest) TestXAttrGetCached(t *C) {
 
 	in, err := s.LookUpInode(t, "file1")
 	t.Assert(err, IsNil)
-	t.Assert(in.userMetadata, IsNil)
 
 	_, err = in.GetXattr(xattrPrefix + "etag")
 	t.Assert(err, IsNil)
