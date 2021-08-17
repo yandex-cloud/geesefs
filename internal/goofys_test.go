@@ -4104,6 +4104,11 @@ func (s *GoofysTest) TestRmImplicitDir(t *C) {
 	err = os.RemoveAll(mountPoint + "/test_rm_implicit_dir/dir2")
 	t.Assert(err, IsNil)
 
+	if s.emulator {
+		// s3proxy seems to return stale listing after delete here...
+		time.Sleep(time.Second)
+	}
+
 	root, err := os.Open(mountPoint + "/test_rm_implicit_dir")
 	t.Assert(err, IsNil)
 	defer root.Close()
