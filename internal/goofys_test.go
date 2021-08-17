@@ -1359,13 +1359,8 @@ func (s *GoofysTest) TestRenamePreserveMetadata(t *C) {
 
 	s.readDirIntoCache(t, root.Id)
 
-	fromInode, err := s.LookUpInode(t, from)
+	_, err = s.LookUpInode(t, from)
 	t.Assert(err, IsNil)
-
-	if _, ok := s.cloud.(*S3Backend); ok {
-		// In S3 metadata is only fetchable with a separate HEAD request
-		t.Assert(fromInode.userMetadata, IsNil)
-	}
 
 	toInode, err := s.LookUpInode(t, to)
 	if err != nil {
