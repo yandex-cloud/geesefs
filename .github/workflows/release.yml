@@ -25,7 +25,7 @@ jobs:
 
     - name: Test
       continue-on-error: true
-      run: make run-test
+      run: ln -s geesefs-linux-amd64 geesefs && make run-test
 
     - uses: "marvinpinto/action-automatic-releases@latest"
       with:
