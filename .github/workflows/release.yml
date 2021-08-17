@@ -23,6 +23,9 @@ jobs:
     - name: Build Mac amd64
       run: env GOOS=darwin GOARCH=amd64 go build -o geesefs-mac-amd64 -v
 
+    - name: Build Mac arm64
+      run: env GOOS=darwin GOARCH=arm64 go build -o geesefs-mac-arm64 -v
+
     - name: Test
       continue-on-error: true
       run: ln -s geesefs-linux-amd64 geesefs && make run-test
@@ -34,3 +37,4 @@ jobs:
         files: |
           geesefs-linux-amd64
           geesefs-mac-amd64
+          geesefs-mac-arm64
