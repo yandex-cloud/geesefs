@@ -17,7 +17,7 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/google/uuid v1.1.2
 	github.com/gopherjs/gopherjs v0.0.0-20210202160940-bed99a852dfe // indirect
-	github.com/jacobsa/fuse v0.0.0-20210802212912-d82237972ed9
+	github.com/jacobsa/fuse v0.0.0-20210811193110-7782064498ca
 	github.com/jtolds/gls v4.2.0+incompatible // indirect
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 	github.com/kr/pretty v0.1.1-0.20190720101428-71e7e4993750 // indirect
