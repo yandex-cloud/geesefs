@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -x
-
 FAST=$FAST
 test=$test
 CLEANUP=${CLEANUP:-true}
