@@ -1,3 +1,11 @@
+geesefs (0.25.0) stable; urgency=medium
+
+  * Improve linear read and write
+  * Set default memory limit to 1000 MB
+  * Fix some bugs
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 17 Aug 2021 15:34:46 +0300
+
 geesefs (0.24.3) stable; urgency=medium
 
   * Silently ignore forbidden xattr operations
