@@ -1,3 +1,9 @@
+geesefs (0.25.1) stable; urgency=medium
+
+  * Don't remove all MPUs on start
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Tue, 17 Aug 2021 23:33:34 +0300
+
 geesefs (0.25.0) stable; urgency=medium
 
   * Improve linear read and write
