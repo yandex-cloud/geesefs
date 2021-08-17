@@ -157,7 +157,7 @@ func waitFor(t *C, addr string) (err error) {
 			return
 		} else {
 			t.Logf("Cound not connect: %v", err)
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 		}
 	}
 
@@ -3349,6 +3349,12 @@ func (s *GoofysTest) TestDirMTimeNoTTL(t *C) {
 	if s.cloud.Capabilities().DirBlob {
 		t.Skip("Tests for behavior without dir blob")
 	}
+
+	time.Sleep(2 * time.Second)
+	s.setupBlobs(s.cloud, t, map[string]*string{
+		"dir2/dir10/": nil,
+	})
+
 	// enable cheap to ensure GET dir/ will come back before LIST dir/
 	s.fs.flags.Cheap = true
 
@@ -3360,7 +3366,7 @@ func (s *GoofysTest) TestDirMTimeNoTTL(t *C) {
 
 	// dir2/dir3/ exists and has mtime
 	s.readDirIntoCache(t, dir2.Id)
-	dir3, err := s.LookUpInode(t, "dir2/dir3")
+	dir3, err := s.LookUpInode(t, "dir2/dir10")
 	t.Assert(err, IsNil)
 
 	attr3, _ := dir3.GetAttributes()
@@ -3787,6 +3793,9 @@ func (s *GoofysTest) TestMountsNewMounts(t *C) {
 }
 
 func (s *GoofysTest) TestMountsError(t *C) {
+	if s.emulator {
+		t.Skip("Fails under s3proxy, presumably because s3proxy replies 403 to non-existing buckets")
+	}
 	bucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
 	var cloud StorageBackend
 	if s3, ok := s.cloud.Delegate().(*S3Backend); ok {
