@@ -132,22 +132,19 @@ func (a *LFRUItem) Less(bi btree.Item) bool {
 		return true
 	}
 	b := bi.(*LFRUItem)
-	if !a.popular && b.popular {
-		return true
+	if a.popular != b.popular {
+		return !a.popular
 	}
 	if a.popular {
-		if a.hits < b.hits {
-			return true
-		} else if a.hits == b.hits {
-			return a.id < b.id
+		if a.hits != b.hits {
+			return a.hits < b.hits
+		}
+	} else {
+		if a.recency != b.recency {
+			return a.recency < b.recency
 		}
 	}
-	if a.recency < b.recency {
-		return true
-	} else if a.recency == b.recency {
-		return a.id < b.id
-	}
-	return false
+	return a.id < b.id
 }
 
 func (a *LFRUItem) Id() fuseops.InodeID {
