@@ -194,6 +194,8 @@ github.com/jacobsa/fuse v0.0.0-20210802212912-d82237972ed9 h1:Aj6Gc4SQtfSQctQXQV
 github.com/jacobsa/fuse v0.0.0-20210802212912-d82237972ed9/go.mod h1:xtZnnLxHY6QniCrfIpTwr5h8mH8zr+jsOFj0y9cfyp4=
 github.com/jacobsa/fuse v0.0.0-20210811193110-7782064498ca h1:Svlas5TMJ8P0EP5ImoGB12qDaeD0A9VzK77jjH2Cohg=
 github.com/jacobsa/fuse v0.0.0-20210811193110-7782064498ca/go.mod h1:xtZnnLxHY6QniCrfIpTwr5h8mH8zr+jsOFj0y9cfyp4=
+github.com/jacobsa/fuse v0.0.0-20210818065549-10d864429bf7 h1:1sUZkRpOpTY4L/QbnCrCVMk9UTfdn9nfLdW3uZQPk7c=
+github.com/jacobsa/fuse v0.0.0-20210818065549-10d864429bf7/go.mod h1:xtZnnLxHY6QniCrfIpTwr5h8mH8zr+jsOFj0y9cfyp4=
 github.com/jacobsa/oglematchers v0.0.0-20150720000706-141901ea67cd/go.mod h1:TlmyIZDpGmwRoTWiakdr+HA1Tukze6C6XbRVidYq02M=
 github.com/jacobsa/oglemock v0.0.0-20150831005832-e94d794d06ff/go.mod h1:gJWba/XXGl0UoOmBQKRWCJdHrr3nE0T65t6ioaj3mLI=
 github.com/jacobsa/ogletest v0.0.0-20170503003838-80d50a735a11/go.mod h1:+DBdDyfoO2McrOyDemRBq0q9CMEByef7sYl7JH5Q3BI=
