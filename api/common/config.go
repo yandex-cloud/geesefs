@@ -42,36 +42,35 @@ type FlagStorage struct {
 	// Common Backend Config
 	UseContentType bool
 	Endpoint       string
-
-	Backend interface{}
+	Backend        interface{}
 
 	// Tuning
-	MemoryLimit  uint64
-	Cheap        bool
-	ExplicitDir  bool
-	NoDirObject  bool
-	MaxFlushers  int64
-	MaxParallelParts int
-	MaxParallelCopy int
-	StatCacheTTL time.Duration
-	HTTPTimeout  time.Duration
-	RetryInterval time.Duration
-	ReadAheadKB         uint64
-	SmallReadCount      uint64
-	SmallReadCutoffKB   uint64
-	ReadAheadSmallKB    uint64
-	LargeReadCutoffKB   uint64
-	ReadAheadLargeKB    uint64
-	ReadAheadParallelKB uint64
-	ReadMergeKB  uint64
-	SinglePartMB uint64
-	MaxMergeCopyMB uint64
-	IgnoreFsync bool
-	SymlinkAttr string
+	MemoryLimit           uint64
+	Cheap                 bool
+	ExplicitDir           bool
+	NoDirObject           bool
+	MaxFlushers           int64
+	MaxParallelParts      int
+	MaxParallelCopy       int
+	StatCacheTTL          time.Duration
+	HTTPTimeout           time.Duration
+	RetryInterval         time.Duration
+	ReadAheadKB           uint64
+	SmallReadCount        uint64
+	SmallReadCutoffKB     uint64
+	ReadAheadSmallKB      uint64
+	LargeReadCutoffKB     uint64
+	ReadAheadLargeKB      uint64
+	ReadAheadParallelKB   uint64
+	ReadMergeKB           uint64
+	SinglePartMB          uint64
+	MaxMergeCopyMB        uint64
+	IgnoreFsync           bool
+	SymlinkAttr           string
 	CachePopularThreshold int64
-	CacheMaxHits int64
-	CacheAgeInterval int64
-	CacheAgeDecrement int64
+	CacheMaxHits          int64
+	CacheAgeInterval      int64
+	CacheAgeDecrement     int64
 
 	// Debugging
 	DebugMain  bool
