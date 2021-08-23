@@ -17,6 +17,8 @@ package internal
 
 import (
 	"io"
+	"os"
+	"path"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -121,7 +123,7 @@ func (inode *Inode) appendBuffer(buf *FileBuffer, data []byte) int64 {
 	return allocated
 }
 
-func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, state int32, copyData bool, dataPtr *BufferPointer) int64 {
+func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, state int16, copyData bool, dataPtr *BufferPointer) int64 {
 	allocated := int64(0)
 	dirtyID := uint64(0)
 	if state == BUF_DIRTY {
@@ -129,7 +131,7 @@ func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, state int3
 	}
 	partStart, _ := inode.fs.partRange(inode.fs.partNum(offset))
 	if copyData && pos > 0 &&
-		!inode.buffers[pos-1].zero &&
+		inode.buffers[pos-1].data != nil &&
 		(inode.buffers[pos-1].offset + inode.buffers[pos-1].length) == offset &&
 		offset != partStart &&
 		state == BUF_DIRTY &&
@@ -159,6 +161,7 @@ func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, state int3
 			offset: offset,
 			dirtyID: dirtyID,
 			state: state,
+			onDisk: false,
 			zero: false,
 			length: uint64(len(newBuf)),
 			data: newBuf,
@@ -180,7 +183,7 @@ func insertBuffer(buffers []FileBuffer, pos int, add ...FileBuffer) []FileBuffer
 	return buffers
 }
 
-func (inode *Inode) addBuffer(offset uint64, data []byte, state int32, copyData bool) int64 {
+func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData bool) int64 {
 	allocated := int64(0)
 
 	start := locateBuffer(inode.buffers, offset)
@@ -199,7 +202,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int32, copyData 
 			if offset <= b.offset {
 				if endOffset >= bufEnd {
 					// whole buffer
-					if !b.zero {
+					if b.data != nil {
 						b.ptr.refs--
 						if b.ptr.refs == 0 {
 							allocated -= int64(len(b.ptr.mem))
@@ -211,7 +214,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int32, copyData 
 					pos--
 				} else {
 					// beginning
-					if !b.zero {
+					if b.data != nil {
 						b.data = b.data[endOffset - b.offset : ]
 					}
 					b.length = bufEnd-endOffset
@@ -219,7 +222,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int32, copyData 
 				}
 			} else if endOffset >= bufEnd {
 				// end
-				if !b.zero {
+				if b.data != nil {
 					b.data = b.data[0 : offset - b.offset]
 				}
 				b.length = offset - b.offset
@@ -229,6 +232,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int32, copyData 
 					offset: b.offset,
 					dirtyID: b.dirtyID,
 					state: b.state,
+					onDisk: b.onDisk,
 					length: offset-b.offset,
 					zero: b.zero,
 					ptr: b.ptr,
@@ -237,11 +241,12 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int32, copyData 
 					offset: endOffset,
 					dirtyID: b.dirtyID,
 					state: b.state,
+					onDisk: b.onDisk,
 					length: b.length-(endOffset-b.offset),
 					zero: b.zero,
 					ptr: b.ptr,
 				}
-				if !b.zero {
+				if b.data != nil {
 					b.ptr.refs++
 					startBuf.data = b.data[0 : offset-b.offset]
 					endBuf.data = b.data[endOffset-b.offset : ]
@@ -287,7 +292,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 		end := len(inode.buffers)
 		for end > 0 && inode.buffers[end-1].offset >= newSize {
 			b := &inode.buffers[end-1]
-			if !b.zero {
+			if b.data != nil {
 				b.ptr.refs--
 				if b.ptr.refs == 0 {
 					inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
@@ -314,6 +319,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 			offset: inode.Attributes.Size,
 			dirtyID: atomic.AddUint64(&inode.fs.bufferPool.curDirtyID, 1),
 			state: BUF_DIRTY,
+			onDisk: false,
 			length: newSize - inode.Attributes.Size,
 			zero: true,
 		})
@@ -377,8 +383,16 @@ func appendRequest(requests []uint64, offset uint64, size uint64, requestCost ui
 	return append(requests, offset, size)
 }
 
-// FIXME: there are several similar functions that all do something with non-overlapping ranges
-// Maybe de-copy-paste them?
+// FIXME: All "foreach-buffers" operations require some serious refactoring.
+//
+// We need the following "buffer-list" operations:
+// 1) Remove/cut all buffers in a given range and matching a condition
+// 2) Insert non-overlapping parts of a buffer at a given offset,
+//    with support for merging adjacent buffers in the same state
+// 3) Find all empty areas in a given range
+// 4) Find all parts of buffers in a given range, matching a condition
+// 5) Cut buffers at given range boundaries
+
 func (inode *Inode) addLoadingBuffers(offset uint64, size uint64) {
 	end := offset+size
 	pos := offset
@@ -392,7 +406,9 @@ func (inode *Inode) addLoadingBuffers(offset uint64, size uint64) {
 			inode.buffers = insertBuffer(inode.buffers, i, FileBuffer{
 				offset: pos,
 				dirtyID: 0,
-				state: BUF_LOADING,
+				state: BUF_CLEAN,
+				loading: true,
+				onDisk: false,
 				zero: true,
 				length: b.offset-pos,
 			})
@@ -405,7 +421,9 @@ func (inode *Inode) addLoadingBuffers(offset uint64, size uint64) {
 		inode.buffers = insertBuffer(inode.buffers, i, FileBuffer{
 			offset: pos,
 			dirtyID: 0,
-			state: BUF_LOADING,
+			state: BUF_CLEAN,
+			loading: true,
+			onDisk: false,
 			zero: true,
 			length: end-pos,
 		})
@@ -420,12 +438,39 @@ func (inode *Inode) removeLoadingBuffers(offset uint64, size uint64) {
 		if b.offset >= end {
 			break
 		}
-		if b.state == BUF_LOADING {
+		if b.loading {
 			inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)
 			i--
 			continue
 		}
 	}
+}
+
+func (inode *Inode) OpenCacheFD() error {
+	if inode.DiskCacheFD == nil {
+		fs := inode.fs
+		cacheFileName := fs.flags.CachePath+"/"+inode.FullName()
+		os.MkdirAll(path.Dir(cacheFileName), fs.flags.CacheFileMode | ((fs.flags.CacheFileMode & 0777) >> 2))
+		var err error
+		inode.DiskCacheFD, err = os.OpenFile(cacheFileName, os.O_RDWR|os.O_CREATE, fs.flags.CacheFileMode)
+		if err != nil {
+			log.Errorf("Couldn't open %v: %v", cacheFileName, err)
+			return err
+		} else {
+			inode.OnDisk = true
+			fs.diskFdMu.Lock()
+			fs.diskFdCount++
+			if fs.flags.MaxDiskCacheFD > 0 && fs.diskFdCount >= fs.flags.MaxDiskCacheFD {
+				// Wakeup the coroutine that closes old FDs
+				// This way we don't guarantee that we never exceed MaxDiskCacheFD
+				// But we assume it's not a problem if we leave some safety margin for the limit
+				// The same thing happens with our memory usage anyway :D
+				fs.diskFdCond.Broadcast()
+			}
+			fs.diskFdMu.Unlock()
+		}
+	}
+	return nil
 }
 
 // Load some inode data into memory
@@ -435,8 +480,9 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 
 	end := offset+size
 
-	// Collect requests to the server
+	// Collect requests to the server and disk
 	requests := []uint64(nil)
+	diskRequests := []uint64(nil)
 	start := locateBuffer(inode.buffers, offset)
 	pos := offset
 	toLoad := uint64(0)
@@ -452,12 +498,20 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 			toLoad += b.offset-pos
 			useSplit = useSplit || b.offset-pos > splitThreshold
 		}
-		if b.state == BUF_LOADING {
-			// We're already reading it from the server
-			if b.offset+b.length > end {
-				toLoad += end-b.offset
-			} else {
-				toLoad += b.length
+		if b.loading || !b.zero && b.data == nil && b.onDisk {
+			// We're already reading it from the server or from disk
+			// OR it should be loaded from disk
+			s := b.offset
+			if s < pos {
+				s = pos
+			}
+			e := end
+			if end > b.offset+b.length {
+				e = b.offset+b.length
+			}
+			toLoad += e-s
+			if !b.loading {
+				diskRequests = append(diskRequests, s, e-s)
 			}
 		} else if b.state == BUF_FL_CLEARED {
 			// Buffer is saved as a part and then removed
@@ -477,7 +531,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 		return
 	}
 
-	// add readahead
+	// add readahead to the server request
 	if len(requests) > 0 {
 		nr := len(requests)
 		lastEnd := requests[nr-2]+readAheadSize
@@ -521,20 +575,88 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 		inode.addLoadingBuffers(offset, size)
 	}
 
-	if inode.readCond == nil {
-		inode.readCond = sync.NewCond(&inode.mu)
+	// Mark other ranges as being loaded from the disk (may require splitting)
+	for i := 0; i < len(diskRequests); i += 2 {
+		last := diskRequests[i]
+		end := diskRequests[i]+diskRequests[i+1]
+		for i := locateBuffer(inode.buffers, last); i < len(inode.buffers); i++ {
+			b := &inode.buffers[i]
+			if last > b.offset {
+				// Split the buffer
+				inode.splitBuffer(i, last-b.offset)
+				continue
+			}
+			last = b.offset+b.length
+			if last > end {
+				// Split the buffer
+				inode.splitBuffer(i, end-b.offset)
+				b = &inode.buffers[i]
+				last = b.offset+b.length
+			}
+			b.loading = true
+			if last >= end {
+				break
+			}
+		}
 	}
 
 	// send requests
-	cloud, key := inode.cloud()
-	if inode.oldParent != nil {
-		_, key = inode.oldParent.cloud()
-		key = appendChildName(key, inode.oldName)
+	if len(requests) > 0 {
+		if inode.readCond == nil {
+			inode.readCond = sync.NewCond(&inode.mu)
+		}
+		cloud, key := inode.cloud()
+		if inode.oldParent != nil {
+			_, key = inode.oldParent.cloud()
+			key = appendChildName(key, inode.oldName)
+		}
+		for i := 0; i < len(requests); i += 2 {
+			requestOffset := requests[i]
+			requestSize := requests[i+1]
+			go inode.sendRead(cloud, key, requestOffset, requestSize, ignoreMemoryLimit)
+		}
 	}
-	for i := 0; i < len(requests); i += 2 {
-		requestOffset := requests[i]
-		requestSize := requests[i+1]
-		go inode.sendRead(cloud, key, requestOffset, requestSize, ignoreMemoryLimit)
+
+	if len(diskRequests) > 0 {
+		if err := inode.OpenCacheFD(); err != nil {
+			return err
+		}
+		loadedFromDisk := uint64(0)
+		for i := 0; i < len(diskRequests); i += 2 {
+			requestOffset := diskRequests[i]
+			requestSize := diskRequests[i+1]
+			data := make([]byte, requestSize)
+			_, err := inode.DiskCacheFD.ReadAt(data, int64(requestOffset))
+			if err != nil {
+				return err
+			}
+			pos := locateBuffer(inode.buffers, requestOffset)
+			var ib *FileBuffer
+			if pos < len(inode.buffers) {
+				ib = &inode.buffers[pos]
+			}
+			if ib == nil || ib.offset != requestOffset || ib.length != requestSize || !ib.loading {
+				panic("BUG: Disk read buffer was modified by someone else in meantime")
+			}
+			ib.loading = false
+			ib.data = data
+			ib.ptr = &BufferPointer{
+				mem: data,
+				refs: 1,
+			}
+			if ib.state == BUF_FL_CLEARED {
+				ib.state = BUF_FLUSHED
+			}
+			loadedFromDisk += requestSize
+		}
+		inode.mu.Unlock()
+		// Correct memory usage without the inode lock
+		inode.fs.bufferPool.Use(int64(loadedFromDisk), true)
+		inode.mu.Lock()
+	}
+
+	if len(requests) == 0 {
+		return
 	}
 
 	for {
@@ -557,7 +679,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 				}
 				return
 			}
-			if b.state == BUF_LOADING {
+			if b.loading {
 				stillLoading = true
 				break
 			}
@@ -731,7 +853,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	}
 	if offset == fh.lastReadEnd {
 		fh.seqReadSize += uint64(len(buf))
-		if fh.lastReadCount == 0 {
+		if fh.lastReadCount == 0 && fh.lastReadEnd == 0 {
 			fh.inode.fs.lfru.Hit(fh.inode.Id, 1)
 		}
 	} else {
@@ -855,12 +977,13 @@ func (inode *Inode) splitBuffer(i int, size uint64) {
 		offset: b.offset+size,
 		dirtyID: b.dirtyID,
 		state: b.state,
+		onDisk: b.onDisk,
 		length: b.length-size,
 		zero: b.zero,
 		ptr: b.ptr,
 	}
 	b.length = size
-	if !b.zero {
+	if b.data != nil {
 		endBuf.data = b.data[size : ]
 		b.data = b.data[0 : size]
 		endBuf.ptr.refs++
@@ -1219,7 +1342,7 @@ func (inode *Inode) isStillDirty() bool {
 func (inode *Inode) resetCache() {
 	// Drop all buffers including dirty ones
 	for _, b := range inode.buffers {
-		if !b.zero {
+		if b.data != nil {
 			b.ptr.refs--
 			if b.ptr.refs == 0 {
 				inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
@@ -1229,6 +1352,22 @@ func (inode *Inode) resetCache() {
 		}
 	}
 	inode.buffers = nil
+	// Also remove the cache file from disk, if present
+	if inode.OnDisk {
+		if inode.DiskCacheFD != nil {
+			inode.DiskCacheFD.Close()
+			inode.DiskCacheFD = nil
+			atomic.AddInt64(&inode.fs.diskFdCount, -1)
+		}
+		cacheFileName := inode.fs.flags.CachePath+"/"+inode.FullName()
+		err := os.Remove(cacheFileName)
+		if err != nil {
+			log.Errorf("Couldn't remove %v: %v", cacheFileName, err)
+		} else {
+			inode.OnDisk = false
+		}
+	}
+	// And abort multipart upload, too
 	if inode.mpu != nil {
 		cloud, key := inode.cloud()
 		_, abortErr := cloud.MultipartBlobAbort(inode.mpu)
@@ -1580,7 +1719,7 @@ func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *tim
 
 func (inode *Inode) SyncFile() (err error) {
 	inode.logFuse("SyncFile")
-	for true {
+	for {
 		inode.mu.Lock()
 		inode.forceFlush = false
 		if inode.CacheState == ST_CACHED {

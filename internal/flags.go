@@ -112,6 +112,12 @@ func NewApp() (app *cli.App) {
 		},
 
 		cli.IntFlag{
+			Name:  "cache-file-mode",
+			Value: 0644,
+			Usage: "Permission bits for disk cache files. (default: 0644)",
+		},
+
+		cli.IntFlag{
 			Name:  "uid",
 			Value: uid,
 			Usage: "UID owner of all inodes.",
@@ -383,6 +389,18 @@ func NewApp() (app *cli.App) {
 			Value: 1,
 			Usage: "Decrement amount",
 		},
+
+		cli.IntFlag{
+			Name:  "cache-to-disk-hits",
+			Value: 2,
+			Usage: "Minimum value of the read counter to cache file on disk",
+		},
+
+		cli.IntFlag{
+			Name:  "max-disk-cache-fd",
+			Value: 512,
+			Usage: "Simultaneously opened cache file descriptor limit",
+		},
 	}
 
 	debugFlags := []cli.Flag{
@@ -531,6 +549,10 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		CacheMaxHits:           int64(c.Int("cache-max-hits")),
 		CacheAgeInterval:       int64(c.Int("cache-age-interval")),
 		CacheAgeDecrement:      int64(c.Int("cache-age-decrement")),
+		CacheToDiskHits:        int64(c.Int("cache-to-disk-hits")),
+		CachePath:              c.String("cache"),
+		MaxDiskCacheFD:         int64(c.Int("max-disk-cache-fd")),
+		CacheFileMode:          os.FileMode(c.Int("cache-file-mode")),
 
 		// Common Backend Config
 		Endpoint:               c.String("endpoint"),
@@ -586,10 +608,6 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 			flags.Cleanup()
 		}
 	}()
-
-	if c.IsSet("cache") {
-		// FIXME: catfs removed. Implement local cache
-	}
 
 	return flags
 }

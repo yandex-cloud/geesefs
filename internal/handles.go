@@ -65,25 +65,30 @@ type MPUPart struct {
 }
 
 const (
-	BUF_LOADING int32 = 0
-	BUF_CLEAN int32 = 1
-	BUF_DIRTY int32 = 2
-	BUF_FLUSHED int32 = 3
-	BUF_FL_CLEARED int32 = 4
+	BUF_CLEAN int16 = 1
+	BUF_DIRTY int16 = 2
+	BUF_FLUSHED int16 = 3
+	BUF_FL_CLEARED int16 = 4
 )
 
 type FileBuffer struct {
 	offset uint64
-	// Chunk state: 0 = loading. 1 = clean. 2 = dirty. 3 = part flushed, but not finalized
-	state int32
+	length uint64
+	// Chunk state: 1 = clean. 2 = dirty. 3 = part flushed, but not finalized
+	// 4 = flushed, not finalized, but removed from memory
+	state int16
+	// Loading from server or from disk
+	loading bool
+	// Latest chunk data is written to the disk cache
+	onDisk bool
+	// Chunk only contains zeroes, data and ptr are nil
+	zero bool
 	// Unmodified chunks (equal to the current server-side object state) have dirtyID = 0.
 	// Every write or split assigns a new unique chunk ID.
 	// Flusher tracks IDs that are currently being flushed to the server,
 	// which allows to do flush and write in parallel.
 	dirtyID uint64
 	// Data
-	length uint64
-	zero bool
 	data []byte
 	ptr *BufferPointer
 }
@@ -97,7 +102,7 @@ type Inode struct {
 	// operation is modifying `AttrTime`, in most cases the reader is okay with working with
 	// stale data. But Time is a struct and modifying it is not atomic. However
 	// in practice (until the year 2157) we should be okay because
-	// - Almost all uses of AttrTime will be about comparisions (AttrTime < x, AttrTime > x)
+	// - Almost all uses of AttrTime will be about comparisons (AttrTime < x, AttrTime > x)
 	// - Time object will have Time::monotonic bit set (until the year 2157) => the time
 	//   comparision just compares Time::ext field
 	// Ref: https://github.com/golang/go/blob/e42ae65a8507/src/time/time.go#L12:L56
@@ -123,8 +128,10 @@ type Inode struct {
 	CacheState int32
 	buffers []FileBuffer
 	readRanges []ReadRange
-	IsFlushing int
+	DiskCacheFD *os.File
+	OnDisk bool
 	forceFlush bool
+	IsFlushing int
 	flushError error
 	flushErrorTime time.Time
 	readError error

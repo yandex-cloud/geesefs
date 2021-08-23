@@ -98,6 +98,9 @@ type Goofys struct {
 	forgotCnt uint32
 
 	lfru *LFRU
+	diskFdMu sync.Mutex
+	diskFdCond *sync.Cond
+	diskFdCount int64
 }
 
 var s3Log = GetLogger("s3")
@@ -248,6 +251,11 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	fs.flusherCond = sync.NewCond(&fs.flusherMu)
 	go fs.Flusher()
 
+	if fs.flags.CachePath != "" && fs.flags.MaxDiskCacheFD > 0 {
+		fs.diskFdCond = sync.NewCond(&fs.diskFdMu)
+		go fs.FDCloser()
+	}
+
 	return fs
 }
 
@@ -298,6 +306,34 @@ func (fs *Goofys) getInodeOrDie(id fuseops.InodeID) (inode *Inode) {
 	return
 }
 
+// Close unneeded cache FDs
+func (fs *Goofys) FDCloser() {
+	fs.diskFdMu.Lock()
+	for {
+		rmFdItem := fs.lfru.Pick(nil)
+		for fs.flags.MaxDiskCacheFD > 0 && fs.diskFdCount > fs.flags.MaxDiskCacheFD {
+			for rmFdItem != nil {
+				fs.mu.RLock()
+				rmFdInode := fs.inodes[rmFdItem.Id()]
+				fs.mu.RUnlock()
+				if rmFdInode != nil {
+					rmFdInode.mu.Lock()
+					if rmFdInode.DiskCacheFD != nil {
+						rmFdInode.DiskCacheFD.Close()
+						rmFdInode.DiskCacheFD = nil
+						fs.diskFdCount--
+						break
+					}
+					rmFdInode.mu.Unlock()
+				}
+				rmFdItem = fs.lfru.Pick(rmFdItem)
+			}
+		}
+		fs.diskFdCond.Wait()
+	}
+	fs.diskFdMu.Unlock()
+}
+
 // Try to reclaim some clean buffers
 func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 	freed := int64(0)
@@ -315,11 +351,37 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 		if inode == nil {
 			continue
 		}
+		toFs := -1
 		inode.mu.Lock()
 		for i := 0; i < len(inode.buffers); i++ {
 			buf := &inode.buffers[i]
 			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED {
-				if freed < size && !buf.zero && !inode.IsRangeLocked(buf.offset, buf.length, false) {
+				if freed < size && buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) {
+					if fs.flags.CachePath != "" && !buf.onDisk {
+						if toFs == -1 {
+							toFs = 0
+							if fs.lfru.GetHits(inode.Id) >= fs.flags.CacheToDiskHits {
+								toFs = 1
+							}
+						}
+						if toFs > 0 {
+							// Evict to disk
+							err := inode.OpenCacheFD()
+							if err != nil {
+								toFs = 0
+							} else {
+								_, err := inode.DiskCacheFD.WriteAt(buf.data, int64(buf.offset))
+								if err != nil {
+									toFs = 0
+									log.Errorf("Couldn't write %v bytes at offset %v to %v: %v",
+										len(buf.data), buf.offset, fs.flags.CachePath+"/"+inode.FullName(), err)
+								} else {
+									buf.onDisk = true
+								}
+							}
+						}
+					}
+					// Release memory
 					buf.ptr.refs--
 					if buf.ptr.refs == 0 {
 						freed += int64(len(buf.ptr.mem))
@@ -327,7 +389,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 					}
 					buf.ptr = nil
 					buf.data = nil
-					if buf.dirtyID == 0 {
+					if buf.dirtyID == 0 && !buf.onDisk {
 						inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)
 						i--
 					} else if buf.state == BUF_FLUSHED {
@@ -335,7 +397,6 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 						// to read it back later. However it's likely not a problem if we're uploading
 						// a large file because we may never need to read it back.
 						buf.state = BUF_FL_CLEARED
-						buf.zero = true
 					}
 				}
 			} else {

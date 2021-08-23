@@ -17,6 +17,7 @@ package internal
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -1340,6 +1341,25 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 		}
 		fromInode.oldParent = parent
 		fromInode.oldName = fromInode.Name
+	}
+	// Rename on-disk cache entry
+	if fromInode.OnDisk {
+		fs := fromInode.fs
+		oldFileName := fs.flags.CachePath+"/"+fromInode.FullName()
+		newDirName := fs.flags.CachePath+"/"+newParent.FullName()
+		newFileName := appendChildName(newDirName, to)
+		err := os.MkdirAll(newDirName, fs.flags.CacheFileMode | ((fs.flags.CacheFileMode & 0777) >> 2))
+		if err == nil {
+			err = os.Rename(oldFileName, newFileName)
+		}
+		if err != nil {
+			log.Errorf("Error renaming %v to %v: %v", oldFileName, newFileName, err)
+			if fromInode.DiskCacheFD != nil {
+				fromInode.DiskCacheFD.Close()
+				fromInode.DiskCacheFD = nil
+				atomic.AddInt64(&fromInode.fs.diskFdCount, -1)
+			}
+		}
 	}
 	fromInode.Ref()
 	parent.removeChildUnlocked(fromInode)

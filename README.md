@@ -51,8 +51,8 @@ In addition to the items above, the following are supportable but not yet implem
 | Asynchronous write             |    +    |    +   |    -   |   -  |    -    |
 | Asynchronous delete            |    +    |    -   |    -   |   -  |    -    |
 | Asynchronous rename            |    +    |    -   |    -   |   -  |    -    |
-| Disk cache for reads           |  TODO   |    +   |    -   |   +  |    +    |
-| Disk cache for writes          |  TODO   |    +   |    -   |   +  |    -    |
+| Disk cache for reads           |    +    |    +   |    -   |   +  |    +    |
+| Disk cache for writes          |    +    |    +   |    -   |   +  |    -    |
 
 \* Recursive listing optimisation in Goofys is buggy and may skip files under certain conditions
 

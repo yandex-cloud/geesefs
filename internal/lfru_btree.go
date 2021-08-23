@@ -74,6 +74,18 @@ func (c *LFRU) Hit(id fuseops.InodeID, hits int64) {
 	c.mu.Unlock()
 }
 
+func (c *LFRU) GetHits(id fuseops.InodeID) (r int64) {
+	c.mu.Lock()
+	item := c.items[id]
+	if item == nil {
+		r = -1
+	} else {
+		r = item.hits
+	}
+	c.mu.Unlock()
+	return r
+}
+
 func (c *LFRU) Pick(prev *LFRUItem) *LFRUItem {
 	var next *LFRUItem
 	c.mu.Lock()

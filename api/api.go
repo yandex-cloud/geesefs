@@ -139,10 +139,6 @@ func Mount(
 		return
 	}
 
-	if len(flags.Cache) != 0 {
-		// FIXME: catfs removed. Implement local cache
-	}
-
 	return
 }
 
