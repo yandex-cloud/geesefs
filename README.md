@@ -60,9 +60,10 @@ In addition to the items above, the following are supportable but not yet implem
 
 # Installation
 
-* Ure-built binaries:
+* Pre-built binaries:
   * [Linux amd64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-linux-amd64). You may also need to install fuse-utils first.
-  * [Mac amd64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-mac-amd64). You also need `osxfuse` for GeeseFS to work.
+  * [Mac amd64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-mac-amd64),
+    [arm64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-mac-arm64). You also need osxfuse/macfuse for GeeseFS to work.
 * Or build from source with Go 1.13 or later:
 
 ```ShellSession
