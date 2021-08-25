@@ -327,7 +327,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 	inode.Attributes.Size = newSize
 }
 
-func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
+func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err error) {
 	fh.inode.logFuse("WriteFile", offset, len(data))
 
 	end := uint64(offset)+uint64(len(data))
@@ -351,7 +351,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte) (err error) {
 		fh.inode.ResizeUnlocked(end)
 	}
 
-	allocated := fh.inode.addBuffer(uint64(offset), data, BUF_DIRTY, true)
+	allocated := fh.inode.addBuffer(uint64(offset), data, BUF_DIRTY, copyData)
 
 	fh.inode.lastWriteEnd = end
 	if fh.inode.CacheState == ST_CACHED {
