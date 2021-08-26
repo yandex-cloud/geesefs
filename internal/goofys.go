@@ -353,6 +353,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 		}
 		toFs := -1
 		inode.mu.Lock()
+		del := -1
 		for i := 0; i < len(inode.buffers); i++ {
 			buf := &inode.buffers[i]
 			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED {
@@ -390,18 +391,42 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 					buf.ptr = nil
 					buf.data = nil
 					if buf.dirtyID == 0 && !buf.onDisk {
-						inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)
-						i--
+						if del == -1 {
+							del = i
+						}
+						continue
 					} else if buf.state == BUF_FLUSHED {
 						// A flushed buffer can be removed at a cost of finalizing multipart upload
 						// to read it back later. However it's likely not a problem if we're uploading
 						// a large file because we may never need to read it back.
-						buf.state = BUF_FL_CLEARED
+						prev := del
+						if prev < 0 {
+							prev = i-1
+						}
+						if prev > 0 && inode.buffers[prev].state == BUF_FL_CLEARED &&
+							buf.offset == (inode.buffers[prev].offset + inode.buffers[prev].length) {
+							inode.buffers[prev].length += buf.length
+							if del == -1 {
+								del = i
+							}
+							continue
+						} else {
+							buf.state = BUF_FL_CLEARED
+						}
 					}
 				}
 			} else {
 				haveDirty = true
 			}
+			if del >= 0 {
+				inode.buffers = append(inode.buffers[0 : del], inode.buffers[i : ]...)
+				i = del
+				del = -1
+			}
+		}
+		if del >= 0 {
+			inode.buffers = inode.buffers[0 : del]
+			del = -1
 		}
 		inode.mu.Unlock()
 		if freed >= size {

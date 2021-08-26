@@ -386,12 +386,13 @@ func appendRequest(requests []uint64, offset uint64, size uint64, requestCost ui
 // FIXME: All "foreach-buffers" operations require some serious refactoring.
 //
 // We need the following "buffer-list" operations:
-// 1) Remove/cut all buffers in a given range and matching a condition
+// 1) Remove/cut all buffers in a given range, matching a condition
 // 2) Insert non-overlapping parts of a buffer at a given offset,
 //    with support for merging adjacent buffers in the same state
-// 3) Find all empty areas in a given range
+// 3) Find (and fill) all empty areas in a given range
 // 4) Find all parts of buffers in a given range, matching a condition
 // 5) Cut buffers at given range boundaries
+// 6) Quickly select buffers in a given state
 
 func (inode *Inode) addLoadingBuffers(offset uint64, size uint64) {
 	end := offset+size
