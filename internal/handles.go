@@ -126,7 +126,7 @@ type Inode struct {
 
 	// cached/buffered data
 	CacheState int32
-	buffers []FileBuffer
+	buffers []*FileBuffer
 	readRanges []ReadRange
 	DiskCacheFD *os.File
 	OnDisk bool
@@ -344,7 +344,7 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 	if res == 0 && inode.CacheState == ST_CACHED {
 		// Clear buffers
 		for i := 0; i < len(inode.buffers); i++ {
-			b := &inode.buffers[i]
+			b := inode.buffers[i]
 			if !b.zero {
 				b.ptr.refs--
 				if b.ptr.refs == 0 {

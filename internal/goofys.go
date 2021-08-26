@@ -355,7 +355,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 		inode.mu.Lock()
 		del := -1
 		for i := 0; i < len(inode.buffers); i++ {
-			buf := &inode.buffers[i]
+			buf := inode.buffers[i]
 			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED {
 				if freed < size && buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) {
 					if fs.flags.CachePath != "" && !buf.onDisk {

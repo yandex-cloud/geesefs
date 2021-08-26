@@ -83,7 +83,7 @@ func (fs *Goofys) partRange(num uint64) (offset uint64, size uint64) {
 	return
 }
 
-func locateBuffer(buffers []FileBuffer, offset uint64) int {
+func locateBuffer(buffers []*FileBuffer, offset uint64) int {
 	return sort.Search(len(buffers), func(i int) bool {
 		return buffers[i].offset + buffers[i].length > offset
 	})
@@ -142,7 +142,7 @@ func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, state int1
 		// in overwriting data that may be referenced by other buffers
 		// This is profitable because a lot of tools write in small chunks
 		inode.buffers[pos-1].dirtyID = dirtyID
-		allocated += inode.appendBuffer(&inode.buffers[pos-1], data)
+		allocated += inode.appendBuffer(inode.buffers[pos-1], data)
 	} else {
 		var newBuf []byte
 		allocated += int64(len(data))
@@ -157,7 +157,7 @@ func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, state int1
 			newBuf = data
 		}
 		dataPtr.refs++
-		inode.buffers = insertBuffer(inode.buffers, pos, FileBuffer{
+		inode.buffers = insertBuffer(inode.buffers, pos, &FileBuffer{
 			offset: offset,
 			dirtyID: dirtyID,
 			state: state,
@@ -171,7 +171,7 @@ func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, state int1
 	return allocated
 }
 
-func insertBuffer(buffers []FileBuffer, pos int, add ...FileBuffer) []FileBuffer {
+func insertBuffer(buffers []*FileBuffer, pos int, add ...*FileBuffer) []*FileBuffer {
 	// Ugly insert()...
 	// Why can't Golang do append(buffers[0:s], a, buffers[s+1]...) ?
 	if pos >= len(buffers) {
@@ -193,7 +193,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData 
 	// Remove intersecting parts as they're being overwritten
 	// If we're inserting a clean buffer, don't remove dirty ones
 	for pos := start; pos < len(inode.buffers); pos++ {
-		b := &inode.buffers[pos]
+		b := inode.buffers[pos]
 		if b.offset >= endOffset {
 			break
 		}
@@ -228,7 +228,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData 
 				b.length = offset - b.offset
 			} else {
 				// middle
-				startBuf := FileBuffer{
+				startBuf := &FileBuffer{
 					offset: b.offset,
 					dirtyID: b.dirtyID,
 					state: b.state,
@@ -237,7 +237,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData 
 					zero: b.zero,
 					ptr: b.ptr,
 				}
-				endBuf := FileBuffer{
+				endBuf := &FileBuffer{
 					offset: endOffset,
 					dirtyID: b.dirtyID,
 					state: b.state,
@@ -266,7 +266,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData 
 		refs: 0,
 	}
 	for pos := start; pos < len(inode.buffers) && curOffset < endOffset; pos++ {
-		b := &inode.buffers[pos]
+		b := inode.buffers[pos]
 		if b.offset > curOffset {
 			// insert curOffset->min(b.offset,endOffset)
 			nextEnd := b.offset
@@ -291,7 +291,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 		// Truncate - remove extra buffers
 		end := len(inode.buffers)
 		for end > 0 && inode.buffers[end-1].offset >= newSize {
-			b := &inode.buffers[end-1]
+			b := inode.buffers[end-1]
 			if b.data != nil {
 				b.ptr.refs--
 				if b.ptr.refs == 0 {
@@ -304,7 +304,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 		}
 		inode.buffers = inode.buffers[0 : end]
 		if end > 0 {
-			buf := &inode.buffers[end-1]
+			buf := inode.buffers[end-1]
 			if buf.offset + buf.length > newSize {
 				buf.length = newSize - buf.offset
 				if buf.data != nil {
@@ -315,7 +315,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 	}
 	if inode.Attributes.Size < newSize {
 		// Zero fill extended region
-		inode.buffers = append(inode.buffers, FileBuffer{
+		inode.buffers = append(inode.buffers, &FileBuffer{
 			offset: inode.Attributes.Size,
 			dirtyID: atomic.AddUint64(&inode.fs.bufferPool.curDirtyID, 1),
 			state: BUF_DIRTY,
@@ -399,12 +399,12 @@ func (inode *Inode) addLoadingBuffers(offset uint64, size uint64) {
 	pos := offset
 	i := locateBuffer(inode.buffers, offset)
 	for ; i < len(inode.buffers); i++ {
-		b := &inode.buffers[i]
+		b := inode.buffers[i]
 		if b.offset >= end {
 			break
 		}
 		if b.offset > pos {
-			inode.buffers = insertBuffer(inode.buffers, i, FileBuffer{
+			inode.buffers = insertBuffer(inode.buffers, i, &FileBuffer{
 				offset: pos,
 				dirtyID: 0,
 				state: BUF_CLEAN,
@@ -414,12 +414,12 @@ func (inode *Inode) addLoadingBuffers(offset uint64, size uint64) {
 				length: b.offset-pos,
 			})
 			i++
-			b = &inode.buffers[i]
+			b = inode.buffers[i]
 		}
 		pos = b.offset+b.length
 	}
 	if pos < end {
-		inode.buffers = insertBuffer(inode.buffers, i, FileBuffer{
+		inode.buffers = insertBuffer(inode.buffers, i, &FileBuffer{
 			offset: pos,
 			dirtyID: 0,
 			state: BUF_CLEAN,
@@ -435,7 +435,7 @@ func (inode *Inode) removeLoadingBuffers(offset uint64, size uint64) {
 	end := offset+size
 	i := locateBuffer(inode.buffers, offset)
 	for ; i < len(inode.buffers); i++ {
-		b := &inode.buffers[i]
+		b := inode.buffers[i]
 		if b.offset >= end {
 			break
 		}
@@ -490,7 +490,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 	useSplit := false
 	splitThreshold := 2*inode.fs.flags.ReadAheadParallelKB*1024
 	for i := start; i < len(inode.buffers); i++ {
-		b := &inode.buffers[i]
+		b := inode.buffers[i]
 		if b.offset >= end {
 			break
 		}
@@ -581,7 +581,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 		last := diskRequests[i]
 		end := diskRequests[i]+diskRequests[i+1]
 		for i := locateBuffer(inode.buffers, last); i < len(inode.buffers); i++ {
-			b := &inode.buffers[i]
+			b := inode.buffers[i]
 			if last > b.offset {
 				// Split the buffer
 				inode.splitBuffer(i, last-b.offset)
@@ -591,7 +591,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 			if last > end {
 				// Split the buffer
 				inode.splitBuffer(i, end-b.offset)
-				b = &inode.buffers[i]
+				b = inode.buffers[i]
 				last = b.offset+b.length
 			}
 			b.loading = true
@@ -634,7 +634,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 			pos := locateBuffer(inode.buffers, requestOffset)
 			var ib *FileBuffer
 			if pos < len(inode.buffers) {
-				ib = &inode.buffers[pos]
+				ib = inode.buffers[pos]
 			}
 			if ib == nil || ib.offset != requestOffset || ib.length != requestSize || !ib.loading {
 				panic("BUG: Disk read buffer was modified by someone else in meantime")
@@ -669,7 +669,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 		stillLoading := false
 		i := start
 		for ; i < len(inode.buffers); i++ {
-			b := &inode.buffers[i]
+			b := inode.buffers[i]
 			if b.offset >= end {
 				break
 			}
@@ -910,7 +910,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	start := locateBuffer(fh.inode.buffers, offset)
 	pos := offset
 	for i := start; i < len(fh.inode.buffers); i++ {
-		b := &fh.inode.buffers[i]
+		b := fh.inode.buffers[i]
 		if b.offset >= end {
 			break
 		}
@@ -975,8 +975,8 @@ func (fh *FileHandle) Release() {
 }
 
 func (inode *Inode) splitBuffer(i int, size uint64) {
-	b := &inode.buffers[i]
-	endBuf := FileBuffer{
+	b := inode.buffers[i]
+	endBuf := &FileBuffer{
 		offset: b.offset+size,
 		dirtyID: b.dirtyID,
 		state: b.state,
@@ -1003,7 +1003,7 @@ func (inode *Inode) GetMultiReader(offset uint64, size uint64) (reader *MultiRea
 	last := offset
 	end := offset+size
 	for i := locateBuffer(inode.buffers, offset); i < len(inode.buffers); i++ {
-		b := &inode.buffers[i]
+		b := inode.buffers[i]
 		if last < b.offset {
 			// It can happen if the file is sparse. Then we have to zero-fill empty ranges
 			reader.AddZero(b.offset-last)
@@ -1016,7 +1016,7 @@ func (inode *Inode) GetMultiReader(offset uint64, size uint64) (reader *MultiRea
 		if last > end {
 			// Split the buffer
 			inode.splitBuffer(i, end-b.offset)
-			b = &inode.buffers[i]
+			b = inode.buffers[i]
 			last = b.offset+b.length
 		}
 		if b.dirtyID != 0 {
@@ -1168,7 +1168,7 @@ func (inode *Inode) SendUpload() bool {
 		inode.oldParent == nil && inode.IsFlushing == 0 {
 		hasDirty := false
 		for i := 0; i < len(inode.buffers); i++ {
-			buf := &inode.buffers[i]
+			buf := inode.buffers[i]
 			if buf.dirtyID != 0 {
 				hasDirty = true
 				break
@@ -1263,7 +1263,7 @@ func (inode *Inode) SendUpload() bool {
 		var buf *FileBuffer
 		var part uint64
 		if i < len(inode.buffers) {
-			buf = &inode.buffers[i]
+			buf = inode.buffers[i]
 			part = inode.fs.partNum(buf.offset)
 		} else {
 			part = 1+inode.fs.partNum(inode.Attributes.Size-1)
@@ -1336,7 +1336,7 @@ func (inode *Inode) isStillDirty() bool {
 		return true
 	}
 	for i := 0; i < len(inode.buffers); i++ {
-		b := &inode.buffers[i]
+		b := inode.buffers[i]
 		if b.dirtyID != 0 {
 			return true
 		}
@@ -1451,7 +1451,7 @@ func (inode *Inode) FlushSmallObject() {
 		log.Debugf("Flushed small file %v", key)
 		stillDirty := inode.userMetadataDirty || inode.oldParent != nil
 		for i := 0; i < len(inode.buffers); i++ {
-			b := &inode.buffers[i]
+			b := inode.buffers[i]
 			if b.dirtyID != 0 {
 				if bufIds[b.dirtyID] {
 					// OK, not dirty anymore
@@ -1620,7 +1620,7 @@ func (inode *Inode) FlushPart(part uint64) {
 		}
 		log.Debugf("Flushed part %v of object %v", part, key)
 		for i := 0; i < len(inode.buffers); i++ {
-			b := &inode.buffers[i]
+			b := inode.buffers[i]
 			if b.dirtyID != 0 {
 				if bufIds[b.dirtyID] {
 					// Still dirty because the upload is not completed yet,
