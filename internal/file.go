@@ -653,9 +653,10 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 		// Correct memory usage without the inode lock
 		inode.fs.bufferPool.Use(int64(loadedFromDisk), true)
 		inode.mu.Lock()
+		toLoad -= loadedFromDisk
 	}
 
-	if len(requests) == 0 {
+	if toLoad == 0 {
 		return
 	}
 
