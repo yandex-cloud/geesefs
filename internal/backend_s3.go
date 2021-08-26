@@ -1088,7 +1088,7 @@ func (s *S3Backend) MultipartExpire(param *MultipartExpireInput) (*MultipartExpi
 
 	now := time.Now()
 	for _, upload := range mpu.Uploads {
-		expireTime := upload.Initiated.Add(48 * time.Hour)
+		expireTime := upload.Initiated.Add(s.config.MultipartAge)
 
 		if !expireTime.After(now) {
 			// FIXME: Maybe keep parts with known etags if we load them from disk

@@ -20,6 +20,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/client"
@@ -42,6 +43,7 @@ type S3Config struct {
 	RegionSet     bool
 
 	StorageClass string
+	MultipartAge time.Duration
 
 	UseSSE     bool
 	UseKMS     bool

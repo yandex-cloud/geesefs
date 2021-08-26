@@ -214,6 +214,12 @@ func NewApp() (app *cli.App) {
 			Value: "ext-v1",
 		},
 
+		cli.StringFlag{
+			Name:  "multipart-age",
+			Usage: "Multipart uploads older than this value will be deleted on start (default: 48 hours)",
+			Value: "48h",
+		},
+
 		/// http://docs.aws.amazon.com/AmazonS3/latest/dev/acl-overview.html#canned-acl
 		cli.StringFlag{
 			Name:  "acl",
@@ -584,6 +590,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.NoChecksum    = c.Bool("no-checksum")
 		config.UseIAM        = c.Bool("iam")
 		config.IAMHeader     = c.String("iam-header")
+		config.MultipartAge  = c.Duration("multipart-age")
 		listType := c.String("list-type")
 		config.ListV1Ext     = listType == "ext-v1"
 		config.ListV2        = listType == "2"
