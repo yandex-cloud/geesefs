@@ -895,7 +895,8 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 			}
 		}
 		requestErr = fh.inode.CheckLoadRange(offset, end-offset, ra, false)
-		if requestErr == fuse.ENOENT || requestErr == syscall.ERANGE {
+		mappedErr := mapAwsError(requestErr)
+		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			fh.inode.resetCache()
 			err = requestErr
@@ -1113,7 +1114,8 @@ func (inode *Inode) SendUpload() bool {
 			var err error
 			if !inode.fs.flags.NoDirObject {
 				err = RenameObject(cloud, from, key, nil)
-				if err == syscall.ENOENT && skipRename {
+				mappedErr := mapAwsError(err)
+				if mappedErr == syscall.ENOENT && skipRename {
 					// Rename the old directory object to copy xattrs from it if it has them
 					// We're almost never sure if the directory is implicit so we always try
 					// to rename the directory object
@@ -1187,11 +1189,12 @@ func (inode *Inode) SendUpload() bool {
 				inode.mu.Lock()
 				inode.recordFlushError(err)
 				if err != nil {
-					if err == fuse.ENOENT {
-						// Object is deleted remotely. Forget it locally
-						// By the way, what if size changes remotely?
-					}
+					mappedErr := mapAwsError(err)
 					inode.userMetadataDirty = true
+					if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
+						// Object is deleted or resized remotely (416). Discard local version
+						inode.resetCache()
+					}
 					log.Errorf("Error flushing metadata using COPY for %v: %v", key, err)
 				} else if inode.CacheState == ST_MODIFIED && !inode.isStillDirty() {
 					inode.SetCacheState(ST_CACHED)
@@ -1400,7 +1403,8 @@ func (inode *Inode) FlushSmallObject() {
 
 	if inode.CacheState == ST_MODIFIED {
 		err := inode.CheckLoadRange(0, sz, 0, true)
-		if err == fuse.ENOENT || err == syscall.ERANGE {
+		mappedErr := mapAwsError(err)
+		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			inode.resetCache()
 			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
@@ -1571,7 +1575,8 @@ func (inode *Inode) FlushPart(part uint64) {
 		// by flushing objects, but we can't flush a part without allocating more memory
 		// for read-modify-write...
 		err := inode.CheckLoadRange(partOffset, partSize, 0, true)
-		if err == fuse.ENOENT || err == syscall.ERANGE {
+		mappedErr := mapAwsError(err)
+		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			inode.resetCache()
 			return
@@ -1637,7 +1642,8 @@ func (inode *Inode) completeMultipart() {
 		numParts++
 	}
 	err := inode.copyUnmodifiedParts(numParts)
-	if err == fuse.ENOENT || err == syscall.ERANGE {
+	mappedErr := mapAwsError(err)
+	if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 		// Object is deleted or resized remotely (416). Discard local version
 		inode.resetCache()
 		return

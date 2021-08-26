@@ -1274,7 +1274,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		for !fromInode.dir.listDone {
 			next, err = fromInode.listObjectsSlurp(fromInode, next, false)
 			if err != nil {
-				return err
+				return mapAwsError(err)
 			}
 		}
 		renameRecursive(fromInode, newParent, to)

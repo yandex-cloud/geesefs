@@ -630,6 +630,7 @@ func (fs *Goofys) GetInodeAttributes(
 	fs.mu.RUnlock()
 
 	attr, err := inode.GetAttributes()
+	err = mapAwsError(err)
 	if err == nil {
 		op.Attributes = *attr
 		op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
@@ -645,8 +646,9 @@ func (fs *Goofys) GetXattr(ctx context.Context,
 	fs.mu.RUnlock()
 
 	value, err := inode.GetXattr(op.Name)
+	err = mapAwsError(err)
 	if err != nil {
-		return
+		return err
 	}
 
 	op.BytesRead = len(value)
@@ -668,6 +670,7 @@ func (fs *Goofys) ListXattr(ctx context.Context,
 	fs.mu.RUnlock()
 
 	xattrs, err := inode.ListXattr()
+	err = mapAwsError(err)
 
 	ncopied := 0
 
@@ -698,6 +701,7 @@ func (fs *Goofys) RemoveXattr(ctx context.Context,
 	fs.mu.RUnlock()
 
 	err = inode.RemoveXattr(op.Name)
+	err = mapAwsError(err)
 	if err == syscall.EPERM {
 		// Silently ignore forbidden xattr operations
 		err = nil
@@ -713,6 +717,7 @@ func (fs *Goofys) SetXattr(ctx context.Context,
 	fs.mu.RUnlock()
 
 	err = inode.SetXattr(op.Name, op.Value, op.Flags)
+	err = mapAwsError(err)
 	if err == syscall.EPERM {
 		// Silently ignore forbidden xattr operations
 		err = nil
@@ -741,6 +746,7 @@ func (fs *Goofys) ReadSymlink(ctx context.Context,
 	fs.mu.RUnlock()
 
 	op.Target, err = inode.ReadSymlink()
+	err = mapAwsError(err)
 	return
 }
 
@@ -876,6 +882,7 @@ func (fs *Goofys) LookUpInode(
 
 	if !ok {
 		inode, err = fs.recheckInode(parent, inode, op.Name)
+		err = mapAwsError(err)
 		if err != nil {
 			return
 		}
@@ -1026,6 +1033,7 @@ func (fs *Goofys) ReadDir(
 		e, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
 		if err != nil {
 			dh.mu.Unlock()
+			err = mapAwsError(err)
 			return err
 		}
 		if e == nil {
@@ -1078,6 +1086,7 @@ func (fs *Goofys) OpenFile(
 
 	fh, err := in.OpenFile()
 	if err != nil {
+		err = mapAwsError(err)
 		return
 	}
 
@@ -1115,6 +1124,7 @@ func (fs *Goofys) ReadFile(
 	fs.mu.RUnlock()
 
 	op.BytesRead, err = fh.ReadFile(op.Offset, op.Dst)
+	err = mapAwsError(err)
 
 	return
 }
@@ -1135,6 +1145,7 @@ func (fs *Goofys) SyncFile(
 		} else {
 			err = in.SyncFile()
 		}
+		err = mapAwsError(err)
 	}
 
 	return
@@ -1210,6 +1221,7 @@ func (fs *Goofys) MkDir(
 	// ignore op.Mode for now
 	inode, err := parent.MkDir(op.Name)
 	if err != nil {
+		err = mapAwsError(err)
 		return err
 	}
 
@@ -1230,6 +1242,7 @@ func (fs *Goofys) RmDir(
 	fs.mu.RUnlock()
 
 	err = parent.RmDir(op.Name)
+	err = mapAwsError(err)
 	parent.logFuse("<-- RmDir", op.Name, err)
 	return
 }
@@ -1253,6 +1266,7 @@ func (fs *Goofys) SetInodeAttributes(
 	}
 
 	attr, err := inode.GetAttributes()
+	err = mapAwsError(err)
 	if err == nil {
 		op.Attributes = *attr
 		op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
@@ -1273,6 +1287,7 @@ func (fs *Goofys) WriteFile(
 	fs.mu.RUnlock()
 
 	err = fh.WriteFile(op.Offset, op.Data)
+	err = mapAwsError(err)
 
 	return
 }
@@ -1286,6 +1301,7 @@ func (fs *Goofys) Unlink(
 	fs.mu.RUnlock()
 
 	err = parent.Unlink(op.Name)
+	err = mapAwsError(err)
 	return
 }
 
@@ -1317,6 +1333,7 @@ func (fs *Goofys) Rename(
 	}
 
 	err = parent.Rename(op.OldName, newParent, op.NewName)
+	err = mapAwsError(err)
 
 	return
 }
