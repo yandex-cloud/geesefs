@@ -479,7 +479,13 @@ func (inode *Inode) OpenCacheFD() error {
 // Loaded range should be guarded against eviction by adding it into inode.readRanges
 func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, ignoreMemoryLimit bool) (requestErr error) {
 
-	end := offset+size
+	end := offset+readAheadSize
+	if size > readAheadSize {
+		end = offset+size
+	}
+	if end > inode.Attributes.Size {
+		end = inode.Attributes.Size
+	}
 
 	// Collect requests to the server and disk
 	requests := []uint64(nil)
@@ -536,6 +542,10 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 	if len(requests) > 0 {
 		nr := len(requests)
 		lastEnd := requests[nr-2]+readAheadSize
+		if readAheadSize > inode.fs.flags.ReadAheadParallelKB*1024 {
+			// Pipelining
+			lastEnd = requests[nr-2]+inode.fs.flags.ReadAheadParallelKB*1024
+		}
 		if lastEnd > inode.Attributes.Size {
 			lastEnd = inode.Attributes.Size
 		}
@@ -661,8 +671,8 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 		return
 	}
 
+	end = offset+size
 	for {
-		inode.readCond.Wait()
 		// Check if all buffers are loaded or if there is a read error
 		pos := offset
 		start := locateBuffer(inode.buffers, offset)
@@ -698,6 +708,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 			}
 			break
 		}
+		inode.readCond.Wait()
 	}
 
 	return
@@ -886,7 +897,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, buf []byte) (bytesRead int, err er
 	if fh.inode.CacheState != ST_CREATED {
 		ra := fh.inode.fs.flags.ReadAheadKB*1024
 		if fh.seqReadSize >= fh.inode.fs.flags.LargeReadCutoffKB*1024 {
-			// Use larger readahead
+			// Use larger readahead with 'pipelining'
 			ra = fh.inode.fs.flags.ReadAheadLargeKB*1024
 		} else if fh.lastReadCount > 0 {
 			// Disable readahead if last N read requests are smaller than X on average
