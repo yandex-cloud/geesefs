@@ -261,8 +261,8 @@ github.com/stretchr/testify v1.6.1 h1:hDPOHmpOpP40lSULcqw7IrRb/u7w6RpDC9399XyoNd
 github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/urfave/cli v1.21.1-0.20190807111034-521735b7608a h1:Q372CokLjPoo4bx4qmpjaxZ0yEJR05rZkeEyXcEvSTY=
 github.com/urfave/cli v1.21.1-0.20190807111034-521735b7608a/go.mod h1:pLnliFgEwGWwRKy8217bLxXBDmG6pBQeZcIzf+m7U+k=
-github.com/vitalif/fusego v0.0.0-20210817200248-04482a2697a0 h1:TQTbCvx2K5yFRtqTOLvg5F6P3LgW8Je3Kar2iQHIP6U=
-github.com/vitalif/fusego v0.0.0-20210817200248-04482a2697a0/go.mod h1:xtZnnLxHY6QniCrfIpTwr5h8mH8zr+jsOFj0y9cfyp4=
+github.com/vitalif/fusego v0.0.0-20210827131224-604f0cac79eb h1:knaAaXtcWrH75aVO9UHSjjd81chemg/iA5aGCGSuEf8=
+github.com/vitalif/fusego v0.0.0-20210827131224-604f0cac79eb/go.mod h1:xtZnnLxHY6QniCrfIpTwr5h8mH8zr+jsOFj0y9cfyp4=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.32/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
