@@ -356,10 +356,14 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 		toFs := -1
 		inode.mu.Lock()
 		del := -1
-		for i := 0; i < len(inode.buffers); i++ {
+		i := 0
+		for ; i < len(inode.buffers); i++ {
+			if freed >= size {
+				break
+			}
 			buf := inode.buffers[i]
 			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED {
-				if freed < size && buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) {
+				if buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) {
 					if fs.flags.CachePath != "" && !buf.onDisk {
 						if toFs == -1 {
 							toFs = 0
@@ -405,7 +409,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 						if prev < 0 {
 							prev = i-1
 						}
-						if prev > 0 && inode.buffers[prev].state == BUF_FL_CLEARED &&
+						if prev >= 0 && inode.buffers[prev].state == BUF_FL_CLEARED &&
 							buf.offset == (inode.buffers[prev].offset + inode.buffers[prev].length) {
 							inode.buffers[prev].length += buf.length
 							if del == -1 {
@@ -427,7 +431,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 			}
 		}
 		if del >= 0 {
-			inode.buffers = inode.buffers[0 : del]
+			inode.buffers = append(inode.buffers[0 : del], inode.buffers[i : ]...)
 			del = -1
 		}
 		inode.mu.Unlock()
