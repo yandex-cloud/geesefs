@@ -999,14 +999,13 @@ func (s *GoofysTest) TestReadFiles(t *C) {
 			fh, err := in.OpenFile()
 			t.Assert(err, IsNil)
 
-			buf := make([]byte, 4096)
-
-			nread, err := fh.ReadFile(0, buf)
+			bufs, nread, err := fh.ReadFile(0, 4096)
 			if en.Name == "zero" {
 				t.Assert(nread, Equals, 0)
 			} else {
 				t.Assert(nread, Equals, len(en.Name))
-				buf = buf[0:nread]
+				t.Assert(len(bufs), Equals, 1)
+				buf := bufs[0][0:nread]
 				t.Assert(string(buf), Equals, en.Name)
 			}
 		} else {
@@ -1025,21 +1024,22 @@ func (s *GoofysTest) TestReadOffset(t *C) {
 	fh, err := in.OpenFile()
 	t.Assert(err, IsNil)
 
-	buf := make([]byte, 4096)
-
-	nread, err := fh.ReadFile(1, buf)
+	bufs, nread, err := fh.ReadFile(1, 4096)
 	t.Assert(err, IsNil)
 	t.Assert(nread, Equals, len(f)-1)
-	t.Assert(string(buf[0:nread]), DeepEquals, f[1:])
+
+	t.Assert(len(bufs), Equals, 1)
+	t.Assert(string(bufs[0][0:nread]), DeepEquals, f[1:])
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	for i := 0; i < 3; i++ {
 		off := r.Int31n(int32(len(f)))
-		nread, err = fh.ReadFile(int64(off), buf)
+		bufs, nread, err = fh.ReadFile(int64(off), 4096)
 		t.Assert(err, IsNil)
 		t.Assert(nread, Equals, len(f)-int(off))
-		t.Assert(string(buf[0:nread]), DeepEquals, f[off:])
+		t.Assert(len(bufs), Equals, 1)
+		t.Assert(string(bufs[0][0:nread]), DeepEquals, f[off:])
 	}
 }
 
@@ -1104,8 +1104,14 @@ type FileHandleReader struct {
 }
 
 func (r *FileHandleReader) Read(p []byte) (nread int, err error) {
-	nread, err = r.fh.ReadFile(r.offset, p)
+	var bufs [][]byte
+	bufs, nread, err = r.fh.ReadFile(r.offset, int64(len(p)))
 	r.offset += int64(nread)
+	off := 0
+	for _, buf := range bufs {
+		copy(p[off : ], buf)
+		off += len(buf)
+	}
 	return
 }
 
@@ -1169,7 +1175,7 @@ func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size i
 		}
 		t.Assert(err, IsNil)
 
-		err = fh.WriteFile(nwritten, buf[:nread])
+		err = fh.WriteFile(nwritten, buf[:nread], true)
 		t.Assert(err, IsNil)
 		nwritten += int64(nread)
 	}
@@ -3170,14 +3176,12 @@ func (s *GoofysTest) TestRead403(t *C) {
 	s3.awsConfig.Credentials = credentials.AnonymousCredentials
 	s3.newS3()
 
-	buf := make([]byte, 5)
-
-	_, err = fh.ReadFile(0, buf)
+	_, _, err = fh.ReadFile(0, 5)
 	t.Assert(mapAwsError(err), Equals, syscall.EACCES)
 
 	// now that the S3 GET has failed, try again, see
 	// https://github.com/kahing/goofys/pull/243
-	_, err = fh.ReadFile(0, buf)
+	_, _, err = fh.ReadFile(0, 5)
 	t.Assert(mapAwsError(err), Equals, syscall.EACCES)
 }
 
