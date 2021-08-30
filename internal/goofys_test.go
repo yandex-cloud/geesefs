@@ -3173,12 +3173,12 @@ func (s *GoofysTest) TestRead403(t *C) {
 	buf := make([]byte, 5)
 
 	_, err = fh.ReadFile(0, buf)
-	t.Assert(err, Equals, syscall.EACCES)
+	t.Assert(mapAwsError(err), Equals, syscall.EACCES)
 
 	// now that the S3 GET has failed, try again, see
 	// https://github.com/kahing/goofys/pull/243
 	_, err = fh.ReadFile(0, buf)
-	t.Assert(err, Equals, syscall.EACCES)
+	t.Assert(mapAwsError(err), Equals, syscall.EACCES)
 }
 
 func (s *GoofysTest) TestRmdirWithDiropen(t *C) {

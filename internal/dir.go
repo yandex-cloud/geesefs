@@ -916,7 +916,7 @@ func (inode *Inode) SendDelete() {
 		inode.mu.Lock()
 		atomic.AddInt64(&inode.Parent.fs.activeFlushers, -1)
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
-		if err == fuse.ENOENT {
+		if mapAwsError(err) == fuse.ENOENT {
 			// object is already deleted
 			err = nil
 		}
@@ -1590,7 +1590,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		}
 		if parent.fs.flags.Cheap {
 			<- results
-			if objectError != fuse.ENOENT {
+			if mapAwsError(objectError) != fuse.ENOENT {
 				break
 			}
 		}
@@ -1603,7 +1603,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 			}()
 			if parent.fs.flags.Cheap {
 				<- results
-				if dirError != fuse.ENOENT {
+				if mapAwsError(dirError) != fuse.ENOENT {
 					break
 				}
 			}
@@ -1649,13 +1649,13 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		}
 	}
 
-	if objectError != nil && objectError != fuse.ENOENT {
+	if objectError != nil && mapAwsError(objectError) != fuse.ENOENT {
 		return nil, objectError
 	}
-	if dirError != nil && dirError != fuse.ENOENT {
+	if dirError != nil && mapAwsError(dirError) != fuse.ENOENT {
 		return nil, dirError
 	}
-	if prefixError != nil && prefixError != fuse.ENOENT {
+	if prefixError != nil && mapAwsError(prefixError) != fuse.ENOENT {
 		return nil, prefixError
 	}
 	return nil, fuse.ENOENT
