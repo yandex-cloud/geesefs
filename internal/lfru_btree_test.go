@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"testing"
 	. "gopkg.in/check.v1"
 	"github.com/jacobsa/fuse/fuseops"
 )
@@ -9,10 +8,6 @@ import (
 type LFRUTest struct{}
 
 var _ = Suite(&LFRUTest{})
-
-func Test(t *testing.T) {
-	TestingT(t)
-}
 
 func (s *LFRUTest) TestIterate(t *C) {
 	l := NewLFRU(4, 16, 4, 1)

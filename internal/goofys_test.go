@@ -57,7 +57,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"testing"
 	"time"
 
 	"context"
@@ -130,10 +129,6 @@ type GoofysTest struct {
 	env map[string]*string
 
 	timeout chan int
-}
-
-func Test(t *testing.T) {
-	TestingT(t)
 }
 
 var _ = Suite(&GoofysTest{})
