@@ -1844,6 +1844,7 @@ func (s *GoofysTest) mountSame(t *C, mountPoint string, sameProc bool) {
 			Options:                 s.fs.flags.MountOptions,
 			ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
 			DisableWritebackCaching: true,
+			UseVectoredRead:         true,
 		}
 		mountCfg.DebugLogger = GetStdLogger(fuseLog, logrus.DebugLevel)
 

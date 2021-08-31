@@ -44,6 +44,7 @@ func Mount(
 		Options:                 flags.MountOptions,
 		ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
 		DisableWritebackCaching: true,
+		UseVectoredRead:         true,
 	}
 
 	if flags.DebugFuse {
