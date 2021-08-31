@@ -232,6 +232,15 @@ func (inode *Inode) slurpOnce(lock bool) (done bool, err error) {
 	return next == "", err
 }
 
+func isInvalidName(name string) bool {
+	return name == "" || name[0] == '/' ||
+		len(name) >= 2 && (name[0:2] == "./" || name[len(name)-2:] == "/.") ||
+		len(name) >= 3 && (name[0:3] == "../" || name[len(name)-3:] == "/..") ||
+		strings.Index(name, "//") >= 0 ||
+		strings.Index(name, "/./") >= 0 ||
+		strings.Index(name, "/../") >= 0
+}
+
 func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool) (nextStartAfter string, err error) {
 	// Prefix is for insertSubTree
 	cloud, prefix := parent.cloud()
@@ -268,7 +277,7 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 	dirs := make(map[*Inode]bool)
 	for _, obj := range resp.Items {
 		baseName := (*obj.Key)[len(prefix):]
-		if baseName != "" {
+		if !isInvalidName(baseName) {
 			parent.insertSubTree(baseName, &obj, dirs)
 		}
 	}
@@ -380,7 +389,7 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string) {
 		dirName := (*dir.Prefix)[0 : len(*dir.Prefix)-1]
 		// strip previous prefix
 		dirName = dirName[len(prefix):]
-		if len(dirName) == 0 {
+		if isInvalidName(dirName) {
 			continue
 		}
 
@@ -403,14 +412,12 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string) {
 
 	for _, obj := range resp.Items {
 		baseName := (*obj.Key)[len(prefix):]
+		if isInvalidName(baseName) {
+			continue
+		}
 
 		slash := strings.Index(baseName, "/")
 		if slash == -1 {
-			if len(baseName) == 0 {
-				// shouldn't happen
-				continue
-			}
-
 			inode := parent.findChildUnlocked(baseName)
 			if inode != nil {
 				inode.SetFromBlobItem(&obj)
