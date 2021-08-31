@@ -225,7 +225,6 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int32, copyData 
 				b.length = offset - b.offset
 			} else {
 				// middle
-				b.ptr.refs++
 				startBuf := FileBuffer{
 					offset: b.offset,
 					dirtyID: b.dirtyID,
@@ -243,6 +242,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int32, copyData 
 					ptr: b.ptr,
 				}
 				if !b.zero {
+					b.ptr.refs++
 					startBuf.data = b.data[0 : offset-b.offset]
 					endBuf.data = b.data[endOffset-b.offset : ]
 				}
