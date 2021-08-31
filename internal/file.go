@@ -302,7 +302,9 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 			buf := &inode.buffers[end-1]
 			if buf.offset + buf.length > newSize {
 				buf.length = newSize - buf.offset
-				buf.data = buf.data[0 : buf.length]
+				if buf.data != nil {
+					buf.data = buf.data[0 : buf.length]
+				}
 			}
 		}
 	}
