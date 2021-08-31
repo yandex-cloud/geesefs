@@ -1,3 +1,10 @@
+geesefs (0.25.3) stable; urgency=medium
+
+  * Skip objects with invalid names to not crash on them
+  * Fix two possible crashes on parallel write
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 31 Aug 2021 21:24:19 +0300
+
 geesefs (0.25.2) stable; urgency=medium
 
   * Fix a possible hang
