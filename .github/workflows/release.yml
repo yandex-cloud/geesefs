@@ -26,6 +26,16 @@ jobs:
     - name: Build Mac arm64
       run: env GOOS=darwin GOARCH=arm64 go build -o geesefs-mac-arm64 -v
 
+    - name: Publish to S3
+      run: |
+        sudo apt-get -y install s3cmd
+        s3cmd ${{secrets.S3CMD}} put geesefs-linux-amd64 s3://${{secrets.S3BUCKET}}/geesefs-linux-amd64
+        s3cmd ${{secrets.S3CMD}} put geesefs-mac-amd64 s3://${{secrets.S3BUCKET}}/geesefs-mac-amd64
+        s3cmd ${{secrets.S3CMD}} put geesefs-mac-arm64 s3://${{secrets.S3BUCKET}}/geesefs-mac-arm64
+        s3cmd ${{secrets.S3CMD}} put geesefs-linux-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-linux-amd64
+        s3cmd ${{secrets.S3CMD}} put geesefs-mac-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-mac-amd64
+        s3cmd ${{secrets.S3CMD}} put geesefs-mac-arm64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-mac-arm64
+
     - name: Test
       continue-on-error: true
       run: ln -s geesefs-linux-amd64 geesefs && make run-test
