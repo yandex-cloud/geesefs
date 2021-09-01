@@ -1,3 +1,10 @@
+geesefs (0.26.0) stable; urgency=medium
+
+  * Implement basic on-disk cache
+  * Improve linear read and write performance by avoiding extra memory copying
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 01 Sep 2021 18:52:14 +0300
+
 geesefs (0.25.3) stable; urgency=medium
 
   * Skip objects with invalid names to not crash on them
