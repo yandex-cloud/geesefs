@@ -4,14 +4,13 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-: ${BUCKET:="goofys-bench"}
-: ${GOOFYS_BUCKET:="$BUCKET"}
-: ${FAST:="false"}
-: ${CACHE:="false"}
+: ${BUCKET:="geesefs-bench"}
+: ${FAST:=""}
+: ${CACHE:=""}
 : ${ENDPOINT:="http://s3-us-west-2.amazonaws.com/"}
 : ${AWS_ACCESS_KEY_ID:=""}
 : ${AWS_SECRET_ACCESS_KEY:=""}
-: ${PROG:="s3fs"}
+: ${PROG:="geesefs"}
 
 if [ $# = 1 ]; then
     t=$1
@@ -19,143 +18,103 @@ else
     t=
 fi
 
-dir=$(dirname $0)
-
-mkdir bench-mnt
-
-S3FS_CACHE="-ouse_cache=/tmp/cache"
-GOOFYS_CACHE="--cache /tmp/cache -o allow_other"
-
-if [ "$CACHE" == "false" ]; then
-    S3FS_CACHE=""
-    GOOFYS_CACHE=""
-fi
-
-S3FS_ENDPOINT="-ourl=$ENDPOINT"
-GOOFYS_ENDPOINT="--endpoint $ENDPOINT"
-
-if test "${AWS_ACCESS_KEY_ID}" = "" && echo "${ENDPOINT}" | fgrep -q amazonaws.com; then
-    S3FS_ENDPOINT="${S3FS_ENDPOINT} -oiam_role=auto"
-else
-    echo "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" > /etc/passwd-s3fs
-    chmod 0400 /etc/passwd-s3fs
-    S3FS_ENDPOINT="${S3FS_ENDPOINT} -ouse_path_request_style -osigv2"
-    # s3proxy is broken https://github.com/andrewgaul/s3proxy/issues/240
-    #GOOFYS_ENDPOINT="${GOOFYS_ENDPOINT} --cheap"
-fi
-
-if [ -f /usr/local/bin/blobfuse ]; then
+if [ "$PROG" = "s3fs" ]; then
+    export AWSACCESSKEYID=$AWS_ACCESS_KEY_ID
+    export AWSSECRETACCESSKEY=$AWS_SECRET_ACCESS_KEY
+    OPT="-ourl=$ENDPOINT -ouse_path_request_style -osigv2"
+    if [ "$CACHE" != "" ]; then
+        OPT="$OPT -ouse_cache=$CACHE"
+    fi
+    MOUNTER="s3fs -ostat_cache_expire=1 $OPT $BUCKET bench-mnt"
+elif [ "$PROG" = "geesefs" ]; then
+    OPT="--endpoint $ENDPOINT"
+    if [ "$CACHE" != "" ]; then
+        OPT="$OPT --cache $CACHE -o allow_other"
+    fi
+    MOUNTER="geesefs --stat-cache-ttl 1s $OPT $BUCKET bench-mnt"
+elif [ "$PROG" = "goofys" ]; then
+    OPT="--endpoint $ENDPOINT"
+    if [ "$CACHE" != "" ]; then
+        OPT="$OPT --cache $CACHE -o allow_other"
+    fi
+    MOUNTER="goofys --stat-cache-ttl 1s --type-cache-ttl 1s $OPT $BUCKET bench-mnt"
+elif [ "$PROG" = "blobfuse" ]; then
     export AZURE_STORAGE_ACCESS_KEY=${AZURE_STORAGE_KEY}
-    PROG="blobfuse"
-    GOOFYS_BUCKET="wasb://${BUCKET}"
-    GOOFYS_ENDPOINT=""
+    MOUNTER="blobfuse bench-mnt --container-name=$BUCKET --tmp-path=/tmp/cache"
+elif [ "$PROG" = "local" ]; then
+    MOUNTER=""
+else
+    echo "Unknown mounter: $PROG"
+    exit 1
 fi
 
-rm -f $dir/bench.goofys $dir/bench.$PROG $dir/bench.png $dir/bench-cached.png
-
-export BUCKET
-export ENDPOINT
-
-S3FS="s3fs -f -ostat_cache_expire=1 ${S3FS_CACHE} ${S3FS_ENDPOINT} $BUCKET bench-mnt"
-GOOFYS="goofys -f --stat-cache-ttl 1s ${GOOFYS_CACHE} ${GOOFYS_ENDPOINT} ${GOOFYS_BUCKET} bench-mnt"
-BLOBFUSE="blobfuse bench-mnt --container-name=$BUCKET --tmp-path=/tmp/cache"
-LOCAL="cat"
+dir=$(dirname $0)
+mkdir -p bench-mnt
+rm -f $dir/bench.$PROG $dir/bench.png $dir/bench-cached.png
 
 iter=10
-if [ "$FAST" != "false" ]; then
+if [ "$FAST" != "" ]; then
     iter=1
 fi
 
 function cleanup {
-    $GOOFYS >/dev/null &
-    PID=$!
-
-    sleep 5
-
-    for f in $dir/bench.goofys $dir/bench.$PROG $dir/bench.data $dir/bench.png $dir/bench-cached.png; do
-	if [ -e $f ]; then
-	    cp $f bench-mnt/
-	fi
-    done
-
-    kill $PID
+    kill $(jobs -p) &>/dev/null || true
     fusermount -u bench-mnt || true
     sleep 1
     rmdir bench-mnt
 }
 trap cleanup EXIT
 
-for fs in $PROG goofys; do
-    if [ "$fs" == "-" ]; then
-	continue
-    fi
-
-    if mountpoint -q bench-mnt; then
-	echo "bench-mnt is still mounted"
-	exit 1
-    fi
-
-    case $fs in
-        s3fs)
-            FS=$S3FS
-            CREATE_FS=$FS
-            ;;
-        goofys)
-            FS=$GOOFYS
-            CREATE_FS=$FS
-            ;;
-	blobfuse)
-	    FS=$BLOBFUSE
-	    CREATE_FS=$FS
-	    ;;
-        cat)
-            FS=$LOCAL
-            CREATE_FS=$FS
-            ;;
-    esac
-
-    if [ -e $dir/bench.$fs ]; then
-	rm $dir/bench.$fs
-    fi
-
-    if [ "$t" = "" ]; then
-        for tt in create create_parallel io; do
-            $dir/bench.sh "$FS" bench-mnt $tt |& tee -a $dir/bench.$fs
-            $dir/bench.sh "$FS" bench-mnt cleanup |& tee -a $dir/bench.$fs
-        done
-
-        $dir/bench.sh "$CREATE_FS"  bench-mnt ls_create
-
-        for i in $(seq 1 $iter); do
-            $dir/bench.sh "$FS" bench-mnt ls_ls |& tee -a $dir/bench.$fs
-        done
-
-        $dir/bench.sh "$FS" bench-mnt ls_rm
-
-        $dir/bench.sh "$CREATE_FS" bench-mnt find_create |& tee -a $dir/bench.$fs
-        $dir/bench.sh "$FS" bench-mnt find_find |& tee -a $dir/bench.$fs
-        $dir/bench.sh "$FS" bench-mnt cleanup |& tee -a $dir/bench.$fs
+function mount_and_bench {
+    if [ "$MOUNTER" != "" ]; then
+        $MOUNTER
+        $dir/bench.sh $1 $2
+        fusermount -u $1
     else
-        if [ "$t" = "find" ]; then
-            $dir/bench.sh "$CREATE_FS" bench-mnt find_create |& tee -a $dir/bench.$fs
-            $dir/bench.sh "$FS" bench-mnt find_find |& tee -a $dir/bench.$fs
-            $dir/bench.sh "$FS" bench-mnt cleanup |& tee -a $dir/bench.$fs
-	elif [ "$t" = "cleanup" ]; then
-            $dir/bench.sh "$FS" bench-mnt cleanup |& tee -a $dir/bench.$fs
-        else
-            $dir/bench.sh "$FS" bench-mnt $t |& tee $dir/bench.$fs
-        fi
+        $dir/bench.sh $1 $2
     fi
-done
+}
 
-$dir/bench_format.py <(paste $dir/bench.goofys $dir/bench.$PROG) > $dir/bench.data
-
-if [ "$CACHE" = "true" ]; then
-    gnuplot -c $dir/bench_graph.gnuplot $dir/bench.data $dir/bench-cached.png \
-	    'goofys+cache' $PROG && \
-	convert -rotate 90 $dir/bench-cached.png $dir/bench-cached.png
-else
-    gnuplot -c $dir/bench_graph.gnuplot $dir/bench.data $dir/bench.png goofys $PROG \
-	&& convert -rotate 90 $dir/bench.png $dir/bench.png
+if mountpoint -q bench-mnt; then
+    echo "bench-mnt is still mounted"
+    exit 1
 fi
 
+if [ -e $dir/bench.$PROG ]; then
+    rm $dir/bench.$PROG
+fi
+
+if [ "$t" = "" ]; then
+    for tt in create create_parallel io; do
+        mount_and_bench bench-mnt $tt |& tee -a $dir/bench.$PROG
+        mount_and_bench bench-mnt cleanup |& tee -a $dir/bench.$PROG
+    done
+    mount_and_bench bench-mnt ls_create
+    for i in $(seq 1 $iter); do
+        mount_and_bench bench-mnt ls_ls |& tee -a $dir/bench.$PROG
+    done
+    mount_and_bench bench-mnt ls_rm
+    mount_and_bench bench-mnt find_create |& tee -a $dir/bench.$PROG
+    mount_and_bench bench-mnt find_find |& tee -a $dir/bench.$PROG
+    mount_and_bench bench-mnt cleanup |& tee -a $dir/bench.$PROG
+else
+    if [ "$t" = "find" ]; then
+        mount_and_bench bench-mnt find_create |& tee -a $dir/bench.$PROG
+        mount_and_bench bench-mnt find_find |& tee -a $dir/bench.$PROG
+        mount_and_bench bench-mnt cleanup |& tee -a $dir/bench.$PROG
+    elif [ "$t" = "cleanup" ]; then
+        mount_and_bench bench-mnt cleanup |& tee -a $dir/bench.$PROG
+    else
+        mount_and_bench bench-mnt $t |& tee $dir/bench.$PROG
+    fi
+fi
+
+$dir/bench_format.py <(paste $dir/bench.geesefs $dir/bench.$PROG) > $dir/bench.data
+
+if [ "$CACHE" != "" ]; then
+    gnuplot -c $dir/bench_graph.gnuplot $dir/bench.data $dir/bench-cached.png geesefs "$PROG+cache" \
+        && convert -rotate 90 $dir/bench-cached.png $dir/bench-cached.png
+else
+    gnuplot -c $dir/bench_graph.gnuplot $dir/bench.data $dir/bench.png geesefs "$PROG" \
+        && convert -rotate 90 $dir/bench.png $dir/bench.png
+fi

@@ -18,7 +18,7 @@ if [ $# -lt 1 ]; then
 fi
 
 mnt=$1
-if [ $# -gt 2 ]; then
+if [ $# -gt 1 ]; then
     t=$2
 else
     t=
@@ -43,6 +43,10 @@ mkdir -p "$prefix"
 cd "$prefix"
 
 export TIMEFORMAT=%R
+
+function fsync_dir {
+    python -c "import sys, os; os.fsync(os.open('.', os.O_RDONLY))"
+}
 
 function run_test {
     test=$1
@@ -70,6 +74,7 @@ function create_files {
     for i in $(seq 1 $howmany); do
         echo $i > file$i
     done
+    fsync_dir
 }
 
 function ls_files {
@@ -88,6 +93,7 @@ function rm_files {
     for i in $(seq 1 $howmany); do
         rm file$i >&/dev/null || true
     done
+    fsync_dir
 }
 
 function find_files {
@@ -112,21 +118,24 @@ function create_tree_parallel {
          done
     done
     wait)
+    fsync_dir
 }
 
 function rm_tree {
     for i in $(seq 1 9); do
         rm -Rf $i
     done
+    fsync_dir
 }
 
 function create_files_parallel {
     get_howmany $@
 
     (for i in $(seq 1 $howmany); do
-        (echo $i > file$i && echo "created file$i") & true
+        echo $i > file$i & true
     done
     wait)
+    fsync_dir
 }
 
 function rm_files_parallel {
@@ -136,6 +145,7 @@ function rm_files_parallel {
         rm file$i & true
     done
     wait)
+    fsync_dir
 }
 
 function write_large_file {
@@ -143,15 +153,16 @@ function write_large_file {
     if [ "$FAST" == "true" ]; then
         count=100
     fi
-    dd if=/dev/zero of=largefile bs=1MB count=$count oflag=nocache status=none
+    dd if=/dev/zero of=largefile bs=1MB count=$count oflag=direct status=none
+    fsync_dir
 }
 
 function read_large_file {
-    dd if=largefile of=/dev/null bs=1MB iflag=nocache status=none
+    dd if=largefile of=/dev/null bs=1MB iflag=direct status=none
 }
 
 function read_first_byte {
-    dd if=largefile of=/dev/null bs=1 count=1 iflag=nocache status=none
+    dd if=largefile of=/dev/null bs=1 count=1 iflag=direct status=none
 }
 
 if [ "$t" = "" -o "$t" = "create" ]; then
@@ -175,15 +186,15 @@ function write_md5 {
     if [ "$FAST" == "true" ]; then
         count=100
     fi
-    MD5=$(dd if=/dev/zero bs=1MB count=$count status=none | $random_cmd | \
-        tee >(md5sum) >(dd of=largefile bs=1MB oflag=nocache status=none) >/dev/null | cut -f 1 '-d ')
+    MD5=$(dd if=/dev/zero bs=1M count=$count status=none | $random_cmd | \
+        tee >(md5sum) >(dd of=largefile bs=1M oflag=direct status=none) >/dev/null | cut -f 1 '-d ')
+    fsync_dir
 }
 
 function read_md5 {
     READ_MD5=$(md5sum largefile | cut -f 1 '-d ')
     if [ "$READ_MD5" != "$MD5" ]; then
         echo "$READ_MD5 != $MD5" >&2
-        rm largefile
         exit 1
     fi
 }
@@ -272,7 +283,7 @@ fi
 if [ "$t" = "disable" -o "$t" = "issue64" ]; then
     # setup the files
     (for i in $(seq 0 9); do
-        dd if=/dev/zero of=file$i bs=1MB count=300 oflag=nocache status=none & true
+        dd if=/dev/zero of=file$i bs=1MB count=300 oflag=direct status=none & true
     done
     wait)
     if [ $? != 0 ]; then
@@ -281,7 +292,7 @@ if [ "$t" = "disable" -o "$t" = "issue64" ]; then
 
     # 200 files and 5 concurrent transfer means 40 times, do 50 times for good measure
     (for i in $(seq 0 9); do
-        dd if=file$i of=/dev/null bs=1MB iflag=nocache status=none &
+        dd if=file$i of=/dev/null bs=1MB iflag=direct status=none &
     done
 
     for i in $(seq 10 300); do
@@ -290,7 +301,7 @@ if [ "$t" = "disable" -o "$t" = "issue64" ]; then
         running=$(ps -ef | grep ' dd if=' | grep -v grep | sed 's/.*dd if=file\([0-9]\).*/\1/')
         for i in $(seq 0 9); do
             if echo $running | grep -v -q $i; then
-                dd if=file$i of=/dev/null bs=1MB iflag=nocache status=none &
+                dd if=file$i of=/dev/null bs=1MB iflag=direct status=none &
                 break
             fi
         done
