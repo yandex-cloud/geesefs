@@ -1,3 +1,9 @@
+geesefs (0.26.1) stable; urgency=medium
+
+  * Fix several buffer-management bugs which could lead to crashes or corrupted reads
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 03 Sep 2021 23:48:34 +0300
+
 geesefs (0.26.0) stable; urgency=medium
 
   * Implement basic on-disk cache
