@@ -51,7 +51,7 @@ set lmargin
 
 set origin 0.255,0.1
 set size 0.5,0.8
-set xrange [-1:5.8]
+set xrange [-0.5:5.5]
 
 plot ARG1 using 2:3:4 title ARG3, \
      '' using 5:6:7 title ARG4, \
