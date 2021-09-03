@@ -45,7 +45,7 @@ cd "$prefix"
 export TIMEFORMAT=%R
 
 function fsync_dir {
-    python -c "import sys, os; os.fsync(os.open('.', os.O_RDONLY))"
+    python3 -c "import sys, os; os.fsync(os.open('.', os.O_RDONLY))"
 }
 
 function run_test {
@@ -53,16 +53,12 @@ function run_test {
     shift
     sleep 2
     echo -n "$test "
-    if [ $# -gt 1 ]; then
-        time $test $@
-    else
-        time $test
-    fi
+    time $test $@
 }
 
 function get_howmany {
-    if [ $# == 2 ]; then
-        howmany=$2
+    if [ $# -ge 1 ]; then
+        howmany=$1
     else
         howmany=10
     fi
@@ -212,12 +208,12 @@ if [ "$t" = "" -o "$t" = "ls" ]; then
     rm -rf bench_ls
     mkdir bench_ls
     cd bench_ls
-    create_files_parallel 2000 2000
+    create_files_parallel 2000
     for i in $(seq 1 $iter); do
-        run_test ls_files 2000 2000
+        run_test ls_files 2000
     done
     if [ "$CLEANUP" = "true" ]; then
-        rm_files 2000 2000
+        rm_files 2000
     fi
     cd ..
 fi
@@ -229,7 +225,7 @@ if [ "$t" = "ls_create" ]; then
 fi
 
 if [ "$t" = "ls_ls" ]; then
-    run_test ls_files 1000 1000
+    run_test ls_files 1000
 fi
 
 if [ "$t" = "ls_rm" ]; then
