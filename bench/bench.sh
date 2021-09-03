@@ -60,7 +60,7 @@ function get_howmany {
     if [ $# -ge 1 ]; then
         howmany=$1
     else
-        howmany=10
+        howmany=100
     fi
 }
 
@@ -158,7 +158,7 @@ function read_large_file {
 }
 
 function read_first_byte {
-    dd if=largefile of=/dev/null bs=1 count=1 iflag=direct status=none
+    dd if=largefile of=/dev/null bs=512 count=1 iflag=direct status=none
 }
 
 if [ "$t" = "" -o "$t" = "create" ]; then

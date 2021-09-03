@@ -6,7 +6,7 @@ import sys
 def filter_outliers(numbers, mean, std):
     if len(numbers) == 1:
         return numbers
-    return filter(lambda x: abs(x - mean) < 2 * std, numbers)
+    return list(filter(lambda x: abs(x - mean) < 2 * std, numbers))
 
 op_str = {
     'create_files' : 'Create 100 files',
@@ -43,13 +43,14 @@ has_data = {}
 print('#operation,time')
 for l in data:
     dataset = l.strip().split('\t')
+    while len(table) < len(dataset):
+        table.append({})
     for d in range(0, len(dataset)):
         op, num = dataset[d].split(' ')
         if not op in table[d]:
             table[d][op] = []
         table[d][op] += [float(num)]
         has_data[op] = True
-
 
 for c in outputOrder:
     if c in has_data:

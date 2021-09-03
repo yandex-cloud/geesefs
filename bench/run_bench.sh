@@ -108,13 +108,3 @@ else
         mount_and_bench bench-mnt $t |& tee $dir/bench.$PROG
     fi
 fi
-
-$dir/bench_format.py <(paste $dir/bench.geesefs $dir/bench.$PROG) > $dir/bench.data
-
-if [ "$CACHE" != "" ]; then
-    gnuplot -c $dir/bench_graph.gnuplot $dir/bench.data $dir/bench-cached.png geesefs "$PROG+cache" \
-        && convert -rotate 90 $dir/bench-cached.png $dir/bench-cached.png
-else
-    gnuplot -c $dir/bench_graph.gnuplot $dir/bench.data $dir/bench.png geesefs "$PROG" \
-        && convert -rotate 90 $dir/bench.png $dir/bench.png
-fi
