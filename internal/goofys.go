@@ -469,6 +469,10 @@ func (fs *Goofys) WakeupFlusher() {
 // 3) Fsync triggered => intermediate full flush (same algorithm)
 // 4) Dirty memory limit reached => without on-disk cache we have to flush the whole object.
 //    With on-disk cache we can unload some dirty buffers to disk.
+//
+// FIXME There's still room for optimisations: now flusher scans all inodes
+// and tries to flush any of them and it wastes a lot of time scanning.
+// A queue of "ready to flush" items could be much better.
 func (fs *Goofys) Flusher() {
 	var inodes []fuseops.InodeID
 	again := false

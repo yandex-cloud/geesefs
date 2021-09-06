@@ -374,9 +374,9 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 	fh.inode.lastWriteEnd = end
 	if fh.inode.CacheState == ST_CACHED {
 		fh.inode.SetCacheState(ST_MODIFIED)
-		// FIXME: Don't activate the flusher immediately for small writes
-		fh.inode.fs.WakeupFlusher()
 	}
+	// FIXME: Don't activate the flusher immediately for small writes
+	fh.inode.fs.WakeupFlusher()
 	fh.inode.Attributes.Mtime = time.Now()
 
 	fh.inode.mu.Unlock()
