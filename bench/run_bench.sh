@@ -38,6 +38,17 @@ elif [ "$PROG" = "goofys" ]; then
         OPT="$OPT --cache $CACHE -o allow_other"
     fi
     MOUNTER="goofys --stat-cache-ttl 1s --type-cache-ttl 1s $OPT $BUCKET bench-mnt"
+elif [ "$PROG" = "rclone" ]; then
+    OPT=""
+    if [ "$CACHE" != "" ]; then
+        OPT="$OPT --vfs-cache-mode full --cache-dir $CACHE"
+    fi
+    export RCLONE_CONFIG_X_TYPE=s3
+    export RCLONE_CONFIG_X_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+    export RCLONE_CONFIG_X_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+    export RCLONE_CONFIG_X_ENDPOINT=$ENDPOINT
+    export RCLONE_CONFIG_X_FORCE_PATH_STYLE=true
+    MOUNTER="rclone mount x:$BUCKET bench-mnt --transfers 16 $OPT --daemon && sleep 2"
 elif [ "$PROG" = "blobfuse" ]; then
     export AZURE_STORAGE_ACCESS_KEY=${AZURE_STORAGE_KEY}
     MOUNTER="blobfuse bench-mnt --container-name=$BUCKET --tmp-path=/tmp/cache"
@@ -67,7 +78,7 @@ trap cleanup EXIT
 
 function mount_and_bench {
     if [ "$MOUNTER" != "" ]; then
-        $MOUNTER
+        eval $MOUNTER
         $dir/bench.sh $1 $2
         fusermount -u $1
     else
