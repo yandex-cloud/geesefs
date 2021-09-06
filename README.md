@@ -51,12 +51,14 @@ In addition to the items above, the following are supportable but not yet implem
 | Asynchronous write             |    +    |    +   |    -   |   -  |    -    |
 | Asynchronous delete            |    +    |    -   |    -   |   -  |    -    |
 | Asynchronous rename            |    +    |    -   |    -   |   -  |    -    |
-| Disk cache for reads           |    +    |    +   |    -   |   +  |    +    |
-| Disk cache for writes          |    +    |    +   |    -   |   +  |    -    |
+| Disk cache for reads           |    +    |    *   |    -   |   +  |    +    |
+| Disk cache for writes          |    +    |    *   |    -   |   +  |    -    |
 
 \* Recursive listing optimisation in Goofys is buggy and may skip files under certain conditions
 
 \* S3FS uses server-side copy, but it still downloads the whole file to update it. And it's buggy too :-)
+
+\* rclone mount has VFS cache, but it can only cache whole files. And it's also buggy - it often hangs on write.
 
 # Installation
 
@@ -91,6 +93,10 @@ geesefs#bucket   /mnt/mountpoint        fuse     _netdev,allow_other,--file-mode
 ```
 
 See also: [Instruction for Azure Blob Storage](https://github.com/yandex-cloud/geesefs/blob/master/README-azure.md).
+
+# Benchmarks
+
+See [bench/README.md](bench/README.md).
 
 # Configuration
 
