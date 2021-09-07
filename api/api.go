@@ -145,7 +145,7 @@ func Mount(
 
 // expose Goofys related functions and types for extending and mounting elsewhere
 var (
-	MassageMountFlags = internal.MassageMountFlags
+	MessageMountFlags = internal.MessageMountFlags
 	NewGoofys         = internal.NewGoofys
 	TryUnmount        = internal.TryUnmount
 	MyUserAndGroup    = internal.MyUserAndGroup

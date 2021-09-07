@@ -619,7 +619,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 	return flags
 }
 
-func MassageMountFlags(args []string) (ret []string) {
+func MessageMountFlags(args []string) (ret []string) {
 	if len(args) == 5 && args[3] == "-o" {
 		// looks like it's coming from fstab!
 		mountOptions := ""

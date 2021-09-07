@@ -109,7 +109,7 @@ func mount(
 	return geesefs.Mount(ctx, bucketName, flags)
 }
 
-func massagePath() {
+func messagePath() {
 	for _, e := range os.Environ() {
 		if strings.HasPrefix(e, "PATH=") {
 			return
@@ -121,7 +121,7 @@ func massagePath() {
 	os.Setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 }
 
-func massageArg0() {
+func messageArg0() {
 	var err error
 	os.Args[0], err = osext.Executable()
 	if err != nil {
@@ -140,7 +140,7 @@ func main() {
 		}()
 	}
 
-	massagePath()
+	messagePath()
 
 	app := NewApp()
 
@@ -175,7 +175,7 @@ func main() {
 			var wg sync.WaitGroup
 			waitForSignal(&wg)
 
-			massageArg0()
+			messageArg0()
 
 			ctx := new(daemon.Context)
 			child, err = ctx.Reborn()
@@ -240,7 +240,7 @@ func main() {
 		return
 	}
 
-	err := app.Run(MassageMountFlags(os.Args))
+	err := app.Run(MessageMountFlags(os.Args))
 	if err != nil {
 		if flags != nil && !flags.Foreground && child != nil {
 			log.Fatalln("Unable to mount file system, see syslog for details")
