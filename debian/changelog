@@ -1,3 +1,10 @@
+geesefs (0.26.2) stable; urgency=medium
+
+  * Slightly speed up the beginning of upload of files sized between 5 MB and 1 GB
+  * Allow to log to stderr in daemon mode
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 07 Sep 2021 13:38:24 +0300
+
 geesefs (0.26.1) stable; urgency=medium
 
   * Fix several buffer-management bugs which could lead to crashes or corrupted reads
