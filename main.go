@@ -178,13 +178,24 @@ func main() {
 			messageArg0()
 
 			ctx := new(daemon.Context)
+			if flags.LogFile == "stderr" || flags.LogFile == "/dev/stderr" {
+				ctx.LogFileName = "/dev/stderr"
+			}
 			child, err = ctx.Reborn()
 
 			if err != nil {
 				panic(fmt.Sprintf("unable to daemonize: %v", err))
 			}
 
-			InitLoggers(!flags.Foreground && child == nil, flags.LogFile)
+			if flags.LogFile == "" {
+				if flags.Foreground || child != nil {
+					flags.LogFile = "stderr"
+				} else {
+					flags.LogFile = "syslog"
+				}
+			}
+
+			InitLoggers(flags.LogFile)
 
 			if child != nil {
 				// attempt to wait for child to notify parent
@@ -202,7 +213,7 @@ func main() {
 			}
 
 		} else {
-			InitLoggers(!flags.Foreground, flags.LogFile)
+			InitLoggers(flags.LogFile)
 		}
 
 		// Mount the file system.

@@ -436,7 +436,7 @@ func NewApp() (app *cli.App) {
 
 		cli.StringFlag{
 			Name:  "log-file",
-			Usage: "Redirect logs to file instead of stderr (default for foreground) or syslog (default for background).",
+			Usage: "Redirect logs to file, 'stderr' (default for foreground) or 'syslog' (default for background).",
 			Value: "",
 		},
 	}

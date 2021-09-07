@@ -36,8 +36,21 @@ var cloudLogLevel = logrus.InfoLevel
 
 var syslogHook *logrus_syslog.SyslogHook
 
-func InitLoggers(logToSyslog bool, logFile string) {
-	if logFile != "" {
+func InitLoggers(logFile string) {
+	if logFile == "syslog" {
+		var err error
+		syslogHook, err = logrus_syslog.NewSyslogHook("", "", syslog.LOG_DEBUG, "")
+		if err != nil {
+			// we are the child process and we cannot connect to syslog,
+			// probably because we are in a container without syslog
+			// nothing much we can do here, printing to stderr doesn't work
+			return
+		}
+
+		for _, l := range loggers {
+			l.Hooks.Add(syslogHook)
+		}
+	} else if logFile != "stderr" && logFile != "/dev/stderr" && logFile != "" {
 		file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			log.Errorf("Couldn't open file %v for writing logs", logFile)
@@ -50,19 +63,6 @@ func InitLoggers(logToSyslog bool, logFile string) {
 		if err != nil {
 			log.Errorf("Couldn't redirect STDERR to the log file %v", logFile)
 			return
-		}
-	} else if logToSyslog {
-		var err error
-		syslogHook, err = logrus_syslog.NewSyslogHook("", "", syslog.LOG_DEBUG, "")
-		if err != nil {
-			// we are the child process and we cannot connect to syslog,
-			// probably because we are in a container without syslog
-			// nothing much we can do here, printing to stderr doesn't work
-			return
-		}
-
-		for _, l := range loggers {
-			l.Hooks.Add(syslogHook)
 		}
 	}
 }
