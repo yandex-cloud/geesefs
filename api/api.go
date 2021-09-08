@@ -41,6 +41,7 @@ func Mount(
 	// Mount the file system.
 	mountCfg := &fuse.MountConfig{
 		FSName:                  bucketName,
+		Subtype:                 "geesefs",
 		Options:                 flags.MountOptions,
 		ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
 		DisableWritebackCaching: true,

@@ -1841,6 +1841,7 @@ func (s *GoofysTest) mountSame(t *C, mountPoint string, sameProc bool) {
 		// Mount the file system.
 		mountCfg := &fuse.MountConfig{
 			FSName:                  s.fs.bucket,
+			Subtype:                 "geesefs",
 			Options:                 s.fs.flags.MountOptions,
 			ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
 			DisableWritebackCaching: true,
