@@ -89,7 +89,7 @@ To mount an S3 bucket on startup, make sure the credential is
 configured for `root`, and can add this to `/etc/fstab`:
 
 ```
-geesefs#bucket   /mnt/mountpoint        fuse     _netdev,allow_other,--file-mode=0666,--dir-mode=0777    0       0
+bucket    /mnt/mountpoint    fuse.geesefs    _netdev,allow_other,--file-mode=0666,--dir-mode=0777    0    0
 ```
 
 See also: [Instruction for Azure Blob Storage](https://github.com/yandex-cloud/geesefs/blob/master/README-azure.md).
