@@ -1008,6 +1008,50 @@ func (parent *Inode) MkDir(
 // LOCKS_REQUIRED(fs.mu)
 // Returns locked inode (!)
 func (parent *Inode) doMkDir(name string) (inode *Inode) {
+	if parent.dir.DeletedChildren != nil {
+		if oldInode, ok := parent.dir.DeletedChildren[name]; ok {
+			if oldInode.isDir() {
+				// We should resurrect the old directory when creating a directory
+				// over a removed directory instead of recreating it.
+				//
+				// Because otherwise the following race may become possible:
+				// - A large directory with files is removed
+				// - We don't have time to flush all changes so some files remain in S3
+				// - We create a new directory in place of the removed one
+				// - And we recreate some files in it
+				// - The new directory won't be flushed until the old one is removed
+				//   because flusher checks "overDeleted"
+				// - However, the files in it don't check if they are created in
+				//   a directory that is created over a removed one
+				// - So we can first flush some new files to S3
+				// - ...and then delete some of them as we flush "older" deletes with the same key
+				delete(parent.dir.DeletedChildren, name)
+				inode = NewInode(parent.fs, parent, name)
+				inode.ToDir()
+				inode.Id = oldInode.Id
+				// We leave the older inode in place only for forget() calls
+				inode.refcnt = oldInode.refcnt
+				parent.fs.inodes[oldInode.Id] = inode
+				oldInode.mu.Lock()
+				oldInode.Id = parent.fs.allocateInodeId()
+				parent.fs.inodes[oldInode.Id] = oldInode
+				oldInode.userMetadataDirty = false
+				oldInode.userMetadata = make(map[string][]byte)
+				oldInode.touch()
+				oldInode.refcnt = 0
+				oldInode.Ref()
+				oldInode.SetCacheState(ST_MODIFIED)
+				oldInode.Attributes.Mtime = time.Now()
+				if parent.Attributes.Mtime.Before(oldInode.Attributes.Mtime) {
+					parent.Attributes.Mtime = oldInode.Attributes.Mtime
+				}
+				parent.insertChildUnlocked(oldInode)
+				oldInode.dir.Children[0].Id = inode.Id // "."
+				oldInode.dir.Children[1].Id = parent.Id // ".."
+				return oldInode
+			}
+		}
+	}
 	inode = NewInode(parent.fs, parent, name)
 	inode.mu.Lock()
 	inode.userMetadata = make(map[string][]byte)
