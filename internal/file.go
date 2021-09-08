@@ -1015,13 +1015,10 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 }
 
 func (fh *FileHandle) Release() {
-	fh.inode.mu.Lock()
-	defer fh.inode.mu.Unlock()
-
 	// LookUpInode accesses fileHandles without mutex taken, so use atomics for now
 	n := atomic.AddInt32(&fh.inode.fileHandles, -1)
 	if n == -1 {
-		panic(fh.inode.fileHandles)
+		panic(fmt.Sprintf("Released more file handles than acquired, n = %v", n))
 	}
 
 	fh.inode.fs.WakeupFlusher()
