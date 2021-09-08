@@ -1130,14 +1130,16 @@ func (inode *Inode) isEmptyDir() (bool, error) {
 func (inode *Inode) doUnlink() {
 	parent := inode.Parent
 
-	// resetCache will clear all buffers and abort the multipart upload
-	inode.resetCache()
 	if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
+		// resetCache will clear all buffers and abort the multipart upload
+		inode.resetCache()
 		inode.SetCacheState(ST_DELETED)
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[inode.Name] = inode
+	} else {
+		inode.resetCache()
 	}
 
 	parent.removeChildUnlocked(inode)
@@ -1337,10 +1339,14 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 		}
 		parent.dir.DeletedChildren[fromInode.Name] = fromInode
 		if fromInode.CacheState == ST_CACHED && fromInode.oldParent == nil {
+			// Was not modified and we remove it => add modified
 			parent.addModified(1)
 		}
 		fromInode.oldParent = parent
 		fromInode.oldName = fromInode.Name
+	} else {
+		// Was just created and we moved it immediately, or was already moved => remove modified
+		parent.addModified(-1)
 	}
 	// Rename on-disk cache entry
 	if fromInode.OnDisk {
@@ -1366,8 +1372,10 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	fromInode.Name = to
 	fromInode.Parent = newParent
 	if fromInode.CacheState == ST_CACHED {
+		// Was not modified => we make it modified
 		fromInode.SetCacheState(ST_MODIFIED)
 	} else {
+		// Was already modified => stays modified
 		newParent.addModified(1)
 	}
 	newParent.insertChildUnlocked(fromInode)
