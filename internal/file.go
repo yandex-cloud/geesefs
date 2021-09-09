@@ -1126,7 +1126,7 @@ func (inode *Inode) TryFlush() bool {
 			inode.SendDelete()
 			return true
 		}
-	} else if inode.CacheState == ST_CREATED && inode.isDir() {
+	} else if (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) && inode.isDir() {
 		if inode.IsFlushing == 0 && !overDeleted {
 			inode.SendMkDir()
 			return true

@@ -1130,9 +1130,10 @@ func (dir *Inode) SendMkDir() {
 		key += "/"
 	}
 	params := &PutBlobInput{
-		Key:     key,
-		Body:    nil,
-		DirBlob: true,
+		Key:      key,
+		Body:     nil,
+		DirBlob:  true,
+		Metadata: escapeMetadata(dir.userMetadata),
 	}
 	dir.IsFlushing += dir.fs.flags.MaxParallelParts
 	atomic.AddInt64(&dir.fs.activeFlushers, 1)
