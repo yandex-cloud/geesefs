@@ -1306,7 +1306,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		// will still send forget ops to us
 		toInode.mu.Lock()
 		defer toInode.mu.Unlock()
-		toInode.SetCacheState(ST_CACHED)
+		toInode.resetCache()
 		newParent.removeChildUnlocked(toInode)
 	}
 
