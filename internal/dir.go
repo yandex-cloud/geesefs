@@ -900,6 +900,14 @@ func (parent *Inode) Unlink(name string) (err error) {
 func (inode *Inode) SendDelete() {
 	cloud, key := inode.Parent.cloud()
 	key = appendChildName(key, inode.Name)
+	oldParent := inode.oldParent
+	oldName := inode.oldName
+	if oldParent != nil {
+		_, key = oldParent.cloud()
+		key = appendChildName(key, oldName)
+		inode.oldParent = nil
+		inode.oldName = ""
+	}
 	if inode.isDir() && !cloud.Capabilities().DirBlob {
 		key += "/"
 	}
@@ -938,6 +946,12 @@ func (inode *Inode) SendDelete() {
 			}
 		}
 		inode.mu.Unlock()
+		if oldParent != nil {
+			oldParent.mu.Lock()
+			delete(oldParent.dir.DeletedChildren, oldName)
+			oldParent.addModified(-1)
+			oldParent.mu.Unlock()
+		}
 		inode.Parent.mu.Lock()
 		delete(inode.Parent.dir.DeletedChildren, inode.Name)
 		inode.Parent.mu.Unlock()
@@ -1175,7 +1189,10 @@ func (inode *Inode) isEmptyDir() (bool, error) {
 func (inode *Inode) doUnlink() {
 	parent := inode.Parent
 
-	if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
+	if inode.oldParent != nil {
+		inode.resetCache()
+		inode.SetCacheState(ST_DELETED)
+	} else if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
 		// resetCache will clear all buffers and abort the multipart upload
 		inode.resetCache()
 		inode.SetCacheState(ST_DELETED)
