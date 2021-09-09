@@ -1164,7 +1164,7 @@ func (inode *Inode) SendUpload() bool {
 		}
 		go func() {
 			var err error
-			if !inode.fs.flags.NoDirObject {
+			if !inode.isDir() || !inode.fs.flags.NoDirObject {
 				err = RenameObject(cloud, from, key, nil)
 				mappedErr := mapAwsError(err)
 				if mappedErr == syscall.ENOENT && skipRename {
