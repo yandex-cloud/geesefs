@@ -1162,7 +1162,7 @@ func (dir *Inode) SendMkDir() {
 			log.Errorf("Failed to create directory object %v: %v", key, err)
 			return
 		}
-		if dir.CacheState == ST_CREATED {
+		if dir.CacheState == ST_CREATED || dir.CacheState == ST_MODIFIED {
 			dir.SetCacheState(ST_CACHED)
 		}
 		dir.fs.WakeupFlusher()
