@@ -1099,15 +1099,17 @@ func (fs *Goofys) ReleaseDirHandle(
 	ctx context.Context,
 	op *fuseops.ReleaseDirHandleOp) (err error) {
 
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
+	fs.mu.RLock()
 	dh := fs.dirHandles[op.Handle]
+	fs.mu.RUnlock()
+
 	dh.CloseDir()
 
 	fuseLog.Debugln("ReleaseDirHandle", dh.inode.FullName())
 
+	fs.mu.Lock()
 	delete(fs.dirHandles, op.Handle)
+	fs.mu.Unlock()
 
 	return
 }
