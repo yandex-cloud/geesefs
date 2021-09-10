@@ -1109,15 +1109,19 @@ func (inode *Inode) recordFlushError(err error) {
 
 func (inode *Inode) TryFlush() bool {
 	overDeleted := false
-	if inode.Parent != nil {
-		inode.Parent.mu.Lock()
-		if inode.Parent.dir.DeletedChildren != nil {
-			_, overDeleted = inode.Parent.dir.DeletedChildren[inode.Name]
+	parent := inode.Parent
+	if parent != nil {
+		parent.mu.Lock()
+		if parent.dir.DeletedChildren != nil {
+			_, overDeleted = parent.dir.DeletedChildren[inode.Name]
 		}
-		inode.Parent.mu.Unlock()
+		parent.mu.Unlock()
 	}
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
+	if inode.Parent != parent {
+		return false
+	}
 	if inode.flushError != nil && inode.flushErrorTime.Sub(time.Now()) < inode.fs.flags.RetryInterval {
 		return false
 	}
