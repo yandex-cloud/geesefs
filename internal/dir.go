@@ -1263,7 +1263,10 @@ func (inode *Inode) SetCacheState(state int32) {
 
 func (parent *Inode) addModified(inc int64) {
 	for parent != nil {
-		atomic.AddInt64(&parent.dir.ModifiedChildren, inc)
+		n := atomic.AddInt64(&parent.dir.ModifiedChildren, inc)
+		if n < 0 {
+			log.Errorf("BUG: ModifiedChildren of %v < 0", parent.FullName())
+		}
 		parent = parent.Parent
 	}
 }
@@ -1408,21 +1411,28 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 			// Was not modified and we remove it => add modified
 			parent.addModified(1)
 		}
-		fromInode.oldParent = parent
-		fromInode.oldName = fromInode.Name
+		if fromInode.oldParent == newParent && fromInode.oldName == to {
+			// Moved back. Unrename! :D
+			fromInode.oldParent = nil
+			fromInode.oldName = ""
+		} else {
+			fromInode.oldParent = parent
+			fromInode.oldName = fromInode.Name
+		}
 	} else {
 		// Was just created and we moved it immediately, or was already moved => remove modified
 		parent.addModified(-1)
+		if newParent != parent && fromInode.oldParent == newParent && fromInode.oldName == to {
+			// Moved back. Unrename! :D
+			fromInode.oldParent.addModified(-1)
+			fromInode.oldParent = nil
+			fromInode.oldName = ""
+		}
 	}
 	if newParent.dir.DeletedChildren != nil &&
 		newParent.dir.DeletedChildren[to] == fromInode {
 		// Moved back. Undelete!
 		delete(newParent.dir.DeletedChildren, to)
-	}
-	if fromInode.oldParent == newParent && fromInode.oldName == to {
-		// Moved back. Unrename! :D
-		fromInode.oldParent = nil
-		fromInode.oldName = ""
 	}
 	// Rename on-disk cache entry
 	if fromInode.OnDisk {
