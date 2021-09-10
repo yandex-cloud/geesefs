@@ -1323,9 +1323,8 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		// it just yet, because the kernel
 		// will still send forget ops to us
 		toInode.mu.Lock()
-		defer toInode.mu.Unlock()
-		toInode.resetCache()
-		newParent.removeChildUnlocked(toInode)
+		toInode.doUnlink()
+		toInode.mu.Unlock()
 	}
 
 	if fromInode.isDir() {
