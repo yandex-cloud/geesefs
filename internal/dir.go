@@ -1399,7 +1399,12 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[fromInode.Name] = fromInode
-		if fromInode.CacheState == ST_CACHED && fromInode.oldParent == nil {
+		if fromInode.oldParent != nil {
+			// File is *probably* in progress of completing a multipart upload
+			// Rename will be flushed only after the write is flushed
+			fromInode.oldParent.addModified(-1)
+		}
+		if fromInode.CacheState == ST_CACHED {
 			// Was not modified and we remove it => add modified
 			parent.addModified(1)
 		}
@@ -1408,6 +1413,16 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	} else {
 		// Was just created and we moved it immediately, or was already moved => remove modified
 		parent.addModified(-1)
+	}
+	if newParent.dir.DeletedChildren != nil &&
+		newParent.dir.DeletedChildren[to] == fromInode {
+		// Moved back. Undelete!
+		delete(newParent.dir.DeletedChildren, to)
+	}
+	if fromInode.oldParent == newParent && fromInode.oldName == to {
+		// Moved back. Unrename! :D
+		fromInode.oldParent = nil
+		fromInode.oldName = ""
 	}
 	// Rename on-disk cache entry
 	if fromInode.OnDisk {
