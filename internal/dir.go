@@ -1530,16 +1530,9 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 				inode.SetFromBlobItem(obj)
 			}
 		} else {
-			// our locking order is most specific lock
-			// first, ie: lock a/b before a/. But here we
-			// already have a/ and also global lock. For
-			// new inode we don't care about that
-			// violation because no one else will take
-			// that lock anyway
+			// our locking order is parent before child, inode before fs. try to respect it
 			fs.mu.Unlock()
-			parent.mu.Unlock()
 			inode.SetFromBlobItem(obj)
-			parent.mu.Lock()
 			fs.mu.Lock()
 		}
 		sealPastDirs(dirs, parent)
@@ -1567,9 +1560,7 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 					// don't change modified file item to directory
 				} else {
 					fs.mu.Unlock()
-					parent.mu.Unlock()
 					inode.SetFromBlobItem(obj)
-					parent.mu.Lock()
 					fs.mu.Lock()
 				}
 			}
@@ -1609,13 +1600,11 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 				dirs[inode] = false
 
 				fs.mu.Unlock()
-				parent.mu.Unlock()
 				inode.mu.Lock()
 				fs.mu.Lock()
 				inode.insertSubTree(path, obj, dirs)
-				inode.mu.Unlock()
 				fs.mu.Unlock()
-				parent.mu.Lock()
+				inode.mu.Unlock()
 				fs.mu.Lock()
 			}
 		}
