@@ -1429,10 +1429,12 @@ func (inode *Inode) resetCache() {
 	// And abort multipart upload, too
 	if inode.mpu != nil {
 		cloud, key := inode.cloud()
-		_, abortErr := cloud.MultipartBlobAbort(inode.mpu)
-		if abortErr != nil {
-			log.Errorf("Failed to abort multi-part upload of object %v: %v", key, abortErr)
-		}
+		go func(mpu *MultipartBlobCommitInput) {
+			_, abortErr := cloud.MultipartBlobAbort(mpu)
+			if abortErr != nil {
+				log.Errorf("Failed to abort multi-part upload of object %v: %v", key, abortErr)
+			}
+		}(inode.mpu)
 		inode.mpu = nil
 	}
 	inode.SetCacheState(ST_CACHED)
@@ -1491,6 +1493,17 @@ func (inode *Inode) FlushSmallObject() {
 		inode.userMetadataDirty = false
 	}
 
+	if inode.mpu != nil {
+		// Abort and forget abort multipart upload, because otherwise we may
+		// not be able to proceed to rename - it waits until inode.mpu == nil
+		go func(mpu *MultipartBlobCommitInput) {
+			_, abortErr := cloud.MultipartBlobAbort(mpu)
+			if abortErr != nil {
+				log.Errorf("Failed to abort multi-part upload of object %v: %v", key, abortErr)
+			}
+		}(inode.mpu)
+		inode.mpu = nil
+	}
 	inode.mu.Unlock()
 	resp, err := cloud.PutBlob(params)
 	inode.mu.Lock()
