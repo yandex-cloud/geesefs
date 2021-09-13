@@ -303,7 +303,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData 
 	return allocated
 }
 
-func (inode *Inode) ResizeUnlocked(newSize uint64) {
+func (inode *Inode) ResizeUnlocked(newSize uint64, zeroFill bool) {
 	// Truncate or extend
 	if inode.Attributes.Size > newSize && len(inode.buffers) > 0 {
 		// Truncate - remove extra buffers
@@ -331,7 +331,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64) {
 			}
 		}
 	}
-	if inode.Attributes.Size < newSize {
+	if zeroFill && inode.Attributes.Size < newSize {
 		// Zero fill extended region
 		inode.buffers = append(inode.buffers, &FileBuffer{
 			offset: inode.Attributes.Size,
@@ -366,7 +366,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 
 	if fh.inode.Attributes.Size < end {
 		// Extend and zero fill
-		fh.inode.ResizeUnlocked(end)
+		fh.inode.ResizeUnlocked(end, true)
 	}
 
 	allocated := fh.inode.addBuffer(uint64(offset), data, BUF_DIRTY, copyData)

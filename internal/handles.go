@@ -182,9 +182,12 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	if item.ETag != nil && inode.knownETag != "" && inode.knownETag != *item.ETag ||
 		item.Size != inode.knownSize && inode.knownSize != 0 {
 		inode.resetCache()
+		inode.ResizeUnlocked(item.Size, false)
+		inode.knownSize = item.Size
+		if item.Metadata != nil {
+			inode.userMetadata = unescapeMetadata(item.Metadata)
+		}
 	}
-	inode.Attributes.Size = item.Size
-	inode.knownSize = item.Size
 	if item.LastModified != nil {
 		if inode.Attributes.Mtime.Before(*item.LastModified) {
 			inode.Attributes.Mtime = *item.LastModified
@@ -207,9 +210,6 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// don't want to update time if this inode is setup to never expire
 	if inode.AttrTime.Before(now) {
 		inode.AttrTime = now
-	}
-	if item.Metadata != nil {
-		inode.userMetadata = unescapeMetadata(item.Metadata)
 	}
 }
 
