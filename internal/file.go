@@ -951,6 +951,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 		mappedErr := mapAwsError(requestErr)
 		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
+			log.Warnf("File %v is deleted or resized remotely, discarding local changes", fh.inode.FullName())
 			fh.inode.resetCache()
 			err = requestErr
 			return
@@ -1249,6 +1250,7 @@ func (inode *Inode) SendUpload() bool {
 					inode.userMetadataDirty = true
 					if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 						// Object is deleted or resized remotely (416). Discard local version
+						log.Warnf("File %v is deleted or resized remotely, discarding local changes", inode.FullName())
 						inode.resetCache()
 					}
 					log.Errorf("Error flushing metadata using COPY for %v: %v", key, err)
@@ -1464,6 +1466,7 @@ func (inode *Inode) FlushSmallObject() {
 		mappedErr := mapAwsError(err)
 		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
+			log.Warnf("File %v is deleted or resized remotely, discarding local changes", inode.FullName())
 			inode.resetCache()
 			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
@@ -1647,6 +1650,7 @@ func (inode *Inode) FlushPart(part uint64) {
 		mappedErr := mapAwsError(err)
 		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
+			log.Warnf("File %v is deleted or resized remotely, discarding local changes", inode.FullName())
 			inode.resetCache()
 			return
 		}
@@ -1714,6 +1718,7 @@ func (inode *Inode) completeMultipart() {
 	mappedErr := mapAwsError(err)
 	if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 		// Object is deleted or resized remotely (416). Discard local version
+		log.Warnf("File %v is deleted or resized remotely, discarding local changes", inode.FullName())
 		inode.resetCache()
 		return
 	}
