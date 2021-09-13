@@ -1,0 +1,39 @@
+diff --git a/common/config b/common/config
+index 164381b7..8a512fda 100644
+--- a/common/config
++++ b/common/config
+@@ -122,6 +122,7 @@ export MOUNT_PROG="$(type -P mount)"
+ 
+ export UMOUNT_PROG="$(type -P umount)"
+ [ "$UMOUNT_PROG" = "" ] && _fatal "umount not found"
++export UMOUNT_PROG="./sync_unmount"
+ 
+ export FSSTRESS_PROG="./ltp/fsstress"
+ [ ! -x $FSSTRESS_PROG ] && _fatal "fsstress not found or executable"
+diff --git a/common/rc b/common/rc
+index 154bc2dd..1563f87b 100644
+--- a/common/rc
++++ b/common/rc
+@@ -1798,6 +1798,12 @@ _require_test()
+ 			_notrun "this test requires a valid \$TEST_DIR"
+ 		fi
+ 		;;
++	fuse*)
++		if [ ! -d "$TEST_DIR" ]
++		then
++		     _notrun "this test requires a valid \$TEST_DIR"
++		fi
++		;;
+ 	*)
+ 		 if [ -z "$TEST_DEV" ] || [ "`_is_block_dev "$TEST_DEV"`" = "" ]
+ 		 then
+diff --git a/sync_unmount b/sync_unmount
+new file mode 100755
+index 00000000..f277ba6b
+--- /dev/null
++++ b/sync_unmount
+@@ -0,0 +1,4 @@
++#!/bin/bash
++
++python3 -c 'import sys, os; os.fsync(os.open(sys.argv[1], os.O_RDONLY))' $(findmnt -f -o TARGET $1 | tail -n 1)
++/bin/umount $1
