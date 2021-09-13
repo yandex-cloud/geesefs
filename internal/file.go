@@ -1655,7 +1655,7 @@ func (inode *Inode) FlushPart(part uint64) {
 			return
 		}
 		if err != nil {
-			log.Errorf("Failed to flush part %v of object %v: %v", part, key, err)
+			log.Errorf("Failed to load part %v of object %v to flush it: %v", part, key, err)
 			return
 		}
 		// File size may have been changed again
