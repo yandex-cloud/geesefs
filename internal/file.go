@@ -1159,9 +1159,6 @@ func (inode *Inode) SendUpload() bool {
 		from = appendChildName(from, inode.oldName)
 		oldParent := inode.oldParent
 		oldName := inode.oldName
-		// Set to nil so another rename will move it again
-		inode.oldParent = nil
-		inode.oldName = ""
 		skipRename := false
 		if inode.isDir() {
 			from += "/"
@@ -1180,7 +1177,7 @@ func (inode *Inode) SendUpload() bool {
 				}
 			}
 
-			if err == nil {
+			if err == nil && inode.oldParent == oldParent && inode.oldName == oldName {
 				// Remove from DeletedChildren of the old parent
 				oldParent.mu.Lock()
 				delete(oldParent.dir.DeletedChildren, oldName)
@@ -1199,9 +1196,15 @@ func (inode *Inode) SendUpload() bool {
 				unmoveName = inode.oldName
 				inode.oldParent = oldParent
 				inode.oldName = oldName
-			} else if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
-				!inode.isStillDirty() {
-				inode.SetCacheState(ST_CACHED)
+			} else {
+				if inode.oldParent == oldParent && inode.oldName == oldName {
+					inode.oldParent = nil
+					inode.oldName = ""
+				}
+				if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
+					!inode.isStillDirty() {
+					inode.SetCacheState(ST_CACHED)
+				}
 			}
 			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
