@@ -1,3 +1,9 @@
+geesefs (0.27.0) stable; urgency=medium
+
+  * Fix bugs found by FS stress-tests (xfstests: generic/011, generic/013). More coming :-)
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 14 Sep 2021 13:39:53 +0300
+
 geesefs (0.26.2) stable; urgency=medium
 
   * Slightly speed up the beginning of upload of files sized between 5 MB and 1 GB
