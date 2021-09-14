@@ -179,8 +179,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// We always just drop our local cache when inode size or etag changes remotely
 	// It's the simplest method of conflict resolution
 	// Otherwise we may not be able to make a correct object version
-	if item.ETag != nil && inode.knownETag != "" && inode.knownETag != *item.ETag ||
-		item.Size != inode.knownSize && inode.knownSize != 0 {
+	if item.ETag == nil && inode.knownETag == "" || inode.knownETag != *item.ETag || item.Size != inode.knownSize {
 		inode.resetCache()
 		inode.ResizeUnlocked(item.Size, false)
 		inode.knownSize = item.Size
