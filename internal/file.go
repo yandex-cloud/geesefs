@@ -1098,14 +1098,7 @@ func (inode *Inode) GetMultiReader(offset uint64, size uint64) (reader *MultiRea
 func (inode *Inode) recordFlushError(err error) {
 	inode.flushError = err
 	inode.flushErrorTime = time.Now()
-	if atomic.CompareAndSwapInt32(&inode.fs.flushRetrySet, 0, 1) {
-		fs := inode.fs
-		time.AfterFunc(fs.flags.RetryInterval, func() {
-			atomic.StoreInt32(&fs.flushRetrySet, 0)
-			// Wakeup flusher after retry interval
-			fs.WakeupFlusher()
-		})
-	}
+	inode.fs.ScheduleRetryFlush()
 }
 
 func (inode *Inode) TryFlush() bool {
@@ -1123,7 +1116,8 @@ func (inode *Inode) TryFlush() bool {
 	if inode.Parent != parent {
 		return false
 	}
-	if inode.flushError != nil && inode.flushErrorTime.Sub(time.Now()) < inode.fs.flags.RetryInterval {
+	if inode.flushError != nil && time.Now().Sub(inode.flushErrorTime) < inode.fs.flags.RetryInterval {
+		inode.fs.ScheduleRetryFlush()
 		return false
 	}
 	if inode.CacheState == ST_DELETED {

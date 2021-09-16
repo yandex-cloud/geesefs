@@ -454,6 +454,16 @@ func (fs *Goofys) WakeupFlusher() {
 	fs.flusherMu.Unlock()
 }
 
+func (fs *Goofys) ScheduleRetryFlush() {
+	if atomic.CompareAndSwapInt32(&fs.flushRetrySet, 0, 1) {
+		time.AfterFunc(fs.flags.RetryInterval, func() {
+			atomic.StoreInt32(&fs.flushRetrySet, 0)
+			// Wakeup flusher after retry interval
+			fs.WakeupFlusher()
+		})
+	}
+}
+
 // Flusher goroutine.
 // Overall algorithm:
 // 1) File opened => reads and writes just populate cache
