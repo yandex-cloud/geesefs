@@ -1181,8 +1181,23 @@ func (inode *Inode) SendUpload() bool {
 					if mappedErr == syscall.ENOENT && skipRename {
 						err = nil
 						notFoundIgnore = true
+					} else {
+						inode.mu.Lock()
+						inode.recordFlushError(err)
+						if inode.Parent == oldParent && inode.Name == oldName {
+							// Someone renamed the inode back to the original name
+							// ...while we failed to copy it :)
+							inode.oldParent = nil
+							inode.oldName = ""
+							inode.renamingTo = false
+							inode.Parent.addModified(-1)
+							if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
+								!inode.isStillDirty() {
+								inode.SetCacheState(ST_CACHED)
+							}
+						}
+						inode.mu.Unlock()
 					}
-					inode.recordFlushError(err)
 				}
 				if err == nil {
 					log.Debugf("Copied %v to %v (rename)", from, key)
