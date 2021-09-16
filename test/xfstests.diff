@@ -1,20 +1,45 @@
 diff --git a/common/config b/common/config
-index 164381b7..8a512fda 100644
+index 164381b7..2e7790d6 100644
 --- a/common/config
 +++ b/common/config
 @@ -122,6 +122,7 @@ export MOUNT_PROG="$(type -P mount)"
  
  export UMOUNT_PROG="$(type -P umount)"
  [ "$UMOUNT_PROG" = "" ] && _fatal "umount not found"
-+export UMOUNT_PROG="./sync_unmount"
++export UMOUNT_PROG=$(realpath $(dirname $0)/..)"/sync_unmount"
  
  export FSSTRESS_PROG="./ltp/fsstress"
  [ ! -x $FSSTRESS_PROG ] && _fatal "fsstress not found or executable"
 diff --git a/common/rc b/common/rc
-index 154bc2dd..1563f87b 100644
+index 154bc2dd..588ed598 100644
 --- a/common/rc
 +++ b/common/rc
-@@ -1798,6 +1798,12 @@ _require_test()
+@@ -774,7 +774,7 @@ _scratch_mkfs()
+ 	local mkfs_status
+ 
+ 	case $FSTYP in
+-	nfs*|cifs|ceph|overlay|glusterfs|pvfs2|9p|virtiofs)
++	nfs*|cifs|ceph|fuse.geesefs|overlay|glusterfs|pvfs2|9p|virtiofs)
+ 		# unable to re-create this fstyp, just remove all files in
+ 		# $SCRATCH_MNT to avoid EEXIST caused by the leftover files
+ 		# created in previous runs
+@@ -1601,6 +1601,15 @@ _require_scratch_nocheck()
+ 			_notrun "this test requires a valid \$SCRATCH_MNT"
+ 		fi
+ 		;;
++	fuse.geesefs)
++		echo $SCRATCH_DEV | grep -q ":" > /dev/null 2>&1
++		if [ -z "$SCRATCH_DEV" -o "$?" != "0" ]; then
++			_notrun "this test requires a valid \$SCRATCH_DEV"
++		fi
++		if [ ! -d "$SCRATCH_MNT" ]; then
++			_notrun "this test requires a valid \$SCRATCH_MNT"
++		fi
++		;;
+ 	pvfs2)
+ 		echo $SCRATCH_DEV | grep -q "://" > /dev/null 2>&1
+ 		if [ -z "$SCRATCH_DEV" -o "$?" != "0" ]; then
+@@ -1798,6 +1807,12 @@ _require_test()
  			_notrun "this test requires a valid \$TEST_DIR"
  		fi
  		;;
