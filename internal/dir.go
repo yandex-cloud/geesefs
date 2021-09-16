@@ -1189,7 +1189,7 @@ func (inode *Inode) isEmptyDir() (bool, error) {
 func (inode *Inode) doUnlink() {
 	parent := inode.Parent
 
-	if inode.oldParent != nil {
+	if inode.oldParent != nil && !inode.renamingTo {
 		inode.resetCache()
 		inode.SetCacheState(ST_DELETED)
 	} else if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
@@ -1282,7 +1282,7 @@ func (parent *Inode) addModified(inc int64) {
 // LOCKS_REQUIRED(parent.mu)
 // LOCKS_REQUIRED(newParent.mu)
 func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error) {
-	parent.logFuse("Rename", from, newParent.getChildName(to))
+	fuseLog.Debugf("Rename %v to %v", parent.getChildName(from), newParent.getChildName(to))
 
 	fromCloud, fromPath := parent.cloud()
 	toCloud, toPath := newParent.cloud()
@@ -1394,40 +1394,40 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	// 6) rename then modify then rename => either rename then modify or modify then rename
 	// and etc...
 	parent := fromInode.Parent
-	if fromInode.IsFlushing > 0 || fromInode.mpu != nil ||
-		fromInode.CacheState != ST_CREATED && fromInode.oldParent == nil {
+	if fromInode.CacheState == ST_CREATED && fromInode.IsFlushing == 0 && fromInode.mpu == nil ||
+		fromInode.oldParent != nil {
+		// File is either just created or already renamed
+		// In both cases we can move it without changing oldParent
+		// ...and, in fact, we CAN'T change oldParent the second time
+		if fromInode.renamingTo {
+			// File is already being copied to the new name
+			// So it may appear in an extra place if we just change the location
+			if parent.dir.DeletedChildren == nil {
+				parent.dir.DeletedChildren = make(map[string]*Inode)
+			}
+			parent.dir.DeletedChildren[fromInode.Name] = fromInode
+			fromInode.renamingTo = false
+		} else {
+			parent.addModified(-1)
+			if fromInode.oldParent == newParent && fromInode.oldName == fromInode.Name {
+				// Moved back. Unrename! :D
+				fromInode.oldParent = nil
+				fromInode.oldName = ""
+			}
+		}
+	} else {
 		// Remember that the original file is "deleted"
 		// We can skip this step if the file is new and isn't being flushed yet
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[fromInode.Name] = fromInode
-		if fromInode.oldParent != nil {
-			// File is *probably* in progress of completing a multipart upload
-			// Rename will be flushed only after the write is flushed
-			fromInode.oldParent.addModified(-1)
-		}
 		if fromInode.CacheState == ST_CACHED {
-			// Was not modified and we remove it => add modified
+			// Was not modified and we remove it from current parent => add modified
 			parent.addModified(1)
 		}
-		if fromInode.oldParent == newParent && fromInode.oldName == to {
-			// Moved back. Unrename! :D
-			fromInode.oldParent = nil
-			fromInode.oldName = ""
-		} else {
-			fromInode.oldParent = parent
-			fromInode.oldName = fromInode.Name
-		}
-	} else {
-		// Was just created and we moved it immediately, or was already moved => remove modified
-		parent.addModified(-1)
-		if newParent != parent && fromInode.oldParent == newParent && fromInode.oldName == to {
-			// Moved back. Unrename! :D
-			fromInode.oldParent.addModified(-1)
-			fromInode.oldParent = nil
-			fromInode.oldName = ""
-		}
+		fromInode.oldParent = parent
+		fromInode.oldName = fromInode.Name
 	}
 	if newParent.dir.DeletedChildren != nil &&
 		newParent.dir.DeletedChildren[to] == fromInode {
@@ -1466,35 +1466,6 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	}
 	newParent.insertChildUnlocked(fromInode)
 	fromInode.DeRef(1)
-}
-
-func RenameObject(cloud StorageBackend, fromFullName string, toFullName string, size *uint64) (err error) {
-	_, err = cloud.RenameBlob(&RenameBlobInput{
-		Source:      fromFullName,
-		Destination: toFullName,
-	})
-	if err == nil || err != syscall.ENOTSUP {
-		return
-	}
-
-	_, err = cloud.CopyBlob(&CopyBlobInput{
-		Source:      fromFullName,
-		Destination: toFullName,
-		Size:        size,
-	})
-	if err != nil {
-		return
-	}
-
-	_, err = cloud.DeleteBlob(&DeleteBlobInput{
-		Key: fromFullName,
-	})
-	if err != nil {
-		return
-	}
-	s3Log.Debugf("Deleted %v", fromFullName)
-
-	return
 }
 
 // if I had seen a/ and a/b, and now I get a/c, that means a/b is

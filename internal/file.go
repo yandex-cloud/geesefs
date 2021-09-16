@@ -1153,6 +1153,9 @@ func (inode *Inode) SendUpload() bool {
 		from = appendChildName(from, inode.oldName)
 		oldParent := inode.oldParent
 		oldName := inode.oldName
+		newParent := inode.Parent
+		newName := inode.Name
+		inode.renamingTo = true
 		skipRename := false
 		if inode.isDir() {
 			from += "/"
@@ -1161,59 +1164,92 @@ func (inode *Inode) SendUpload() bool {
 		go func() {
 			var err error
 			if !inode.isDir() || !inode.fs.flags.NoDirObject {
-				err = RenameObject(cloud, from, key, nil)
-				mappedErr := mapAwsError(err)
-				if mappedErr == syscall.ENOENT && skipRename {
+				// We don't use RenameBlob here even for hypothetical clouds that support it (not S3),
+				// because if we used it we'd have to do it under the inode lock. Because otherwise
+				// a parallel read could hit a non-existing name. So, with S3, we do it in 2 passes.
+				// First we copy the object, change the inode name, and then we delete the old copy.
+				_, err = cloud.CopyBlob(&CopyBlobInput{
+					Source:      from,
+					Destination: key,
+				})
+				notFoundIgnore := false
+				if err != nil {
+					mappedErr := mapAwsError(err)
 					// Rename the old directory object to copy xattrs from it if it has them
-					// We're almost never sure if the directory is implicit so we always try
-					// to rename the directory object
-					err = nil
+					// We're almost never sure if the directory is implicit or not so we
+					// always try to rename the directory object, but ignore NotFound errors
+					if mappedErr == syscall.ENOENT && skipRename {
+						err = nil
+						notFoundIgnore = true
+					}
+					inode.recordFlushError(err)
+				}
+				if err == nil {
+					log.Debugf("Copied %v to %v (rename)", from, key)
+					delKey := from
+					delParent := oldParent
+					delName := oldName
+					inode.mu.Lock()
+					// Now we know that the object is accessible by the new name
+					if inode.Parent == newParent && inode.Name == newName {
+						// Just clear the old path
+						inode.oldParent = nil
+						inode.oldName = ""
+					} else if inode.Parent == oldParent && inode.Name == oldName {
+						// Someone renamed the inode back to the original name(!)
+						inode.oldParent = nil
+						inode.oldName = ""
+						// Delete the new key instead of the old one (?)
+						delKey = key
+						delParent = newParent
+						delName = newName
+					} else {
+						// Someone renamed the inode again(!)
+						inode.oldParent = newParent
+						inode.oldName = newName
+					}
+					if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
+						!inode.isStillDirty() {
+						inode.SetCacheState(ST_CACHED)
+					}
+					inode.renamingTo = false
+					inode.mu.Unlock()
+					// Now delete the old key
+					if !notFoundIgnore {
+						_, err = cloud.DeleteBlob(&DeleteBlobInput{
+							Key: delKey,
+						})
+					}
+					if err != nil {
+						log.Debugf("Failed to delete %v during rename, will retry later", delKey)
+						// Emulate a deleted file
+						delParent.mu.Lock()
+						delParent.fs.mu.Lock()
+						tomb := NewInode(delParent.fs, delParent, delName)
+						tomb.Id = delParent.fs.allocateInodeId()
+						tomb.fs.inodes[tomb.Id] = tomb
+						tomb.userMetadata = make(map[string][]byte)
+						tomb.CacheState = ST_DELETED
+						tomb.recordFlushError(err)
+						delParent.dir.DeletedChildren[delName] = tomb
+						delParent.fs.mu.Unlock()
+						delParent.mu.Unlock()
+					} else {
+						log.Debugf("Deleted %v - rename completed", from)
+						// Remove from DeletedChildren of the old parent
+						delParent.mu.Lock()
+						delete(delParent.dir.DeletedChildren, delName)
+						delParent.mu.Unlock()
+						// And track ModifiedChildren because rename is special - it takes two parents
+						delParent.addModified(-1)
+					}
 				}
 			}
-
-			if err == nil && inode.oldParent == oldParent && inode.oldName == oldName {
-				// Remove from DeletedChildren of the old parent
-				oldParent.mu.Lock()
-				delete(oldParent.dir.DeletedChildren, oldName)
-				oldParent.mu.Unlock()
-				// And track ModifiedChildren because rename is special - it takes two parents
-				oldParent.addModified(-1)
-			}
-
 			inode.mu.Lock()
-			inode.recordFlushError(err)
-			var unmoveParent *Inode
-			var unmoveName string
-			if err != nil {
-				log.Errorf("Error renaming object from %v to %v: %v", from, key, err)
-				if inode.oldParent != oldParent || inode.oldName != oldName {
-					unmoveParent = inode.oldParent
-					unmoveName = inode.oldName
-					inode.oldParent = oldParent
-					inode.oldName = oldName
-				}
-			} else {
-				if inode.oldParent == oldParent && inode.oldName == oldName {
-					inode.oldParent = nil
-					inode.oldName = ""
-				}
-				if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
-					!inode.isStillDirty() {
-					inode.SetCacheState(ST_CACHED)
-				}
-			}
 			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
 			inode.fs.WakeupFlusher()
 			inode.mu.Unlock()
-
-			// "Undo" the second move
-			if unmoveParent != nil {
-				unmoveParent.mu.Lock()
-				delete(unmoveParent.dir.DeletedChildren, unmoveName)
-				unmoveParent.mu.Unlock()
-				unmoveParent.addModified(-1)
-			}
 		}()
 		return true
 	}
@@ -1295,6 +1331,7 @@ func (inode *Inode) SendUpload() bool {
 			if err != nil {
 				log.Errorf("Failed to initiate multipart upload for %v: %v", key, err)
 			} else {
+				log.Debugf("Started multi-part upload of object %v", key)
 				inode.mpu = resp
 			}
 			inode.IsFlushing -= inode.fs.flags.MaxParallelParts

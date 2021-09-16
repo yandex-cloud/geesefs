@@ -138,6 +138,8 @@ type Inode struct {
 	// renamed from: parent, name
 	oldParent *Inode
 	oldName string
+	// is already being renamed to the current name
+	renamingTo bool
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput

@@ -1,12 +1,18 @@
 diff --git a/common/config b/common/config
-index 164381b7..2e7790d6 100644
+index 164381b7..88ae95b6 100644
 --- a/common/config
 +++ b/common/config
-@@ -122,6 +122,7 @@ export MOUNT_PROG="$(type -P mount)"
+@@ -120,8 +120,11 @@ export MKFS_PROG="$(type -P mkfs)"
+ export MOUNT_PROG="$(type -P mount)"
+ [ "$MOUNT_PROG" = "" ] && _fatal "mount not found"
  
- export UMOUNT_PROG="$(type -P umount)"
- [ "$UMOUNT_PROG" = "" ] && _fatal "umount not found"
-+export UMOUNT_PROG=$(realpath $(dirname $0)/..)"/sync_unmount"
+-export UMOUNT_PROG="$(type -P umount)"
+-[ "$UMOUNT_PROG" = "" ] && _fatal "umount not found"
++if [ -z "$UMOUNT_PROG" ]; then
++    UMOUNT_PROG="$(type -P umount)"
++    [ "$UMOUNT_PROG" = "" ] && _fatal "umount not found"
++fi
++export UMOUNT_PROG
  
  export FSSTRESS_PROG="./ltp/fsstress"
  [ ! -x $FSSTRESS_PROG ] && _fatal "fsstress not found or executable"
