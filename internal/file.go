@@ -1186,10 +1186,12 @@ func (inode *Inode) SendUpload() bool {
 			var unmoveName string
 			if err != nil {
 				log.Errorf("Error renaming object from %v to %v: %v", from, key, err)
-				unmoveParent = inode.oldParent
-				unmoveName = inode.oldName
-				inode.oldParent = oldParent
-				inode.oldName = oldName
+				if inode.oldParent != oldParent || inode.oldName != oldName {
+					unmoveParent = inode.oldParent
+					unmoveName = inode.oldName
+					inode.oldParent = oldParent
+					inode.oldName = oldName
+				}
 			} else {
 				if inode.oldParent == oldParent && inode.oldName == oldName {
 					inode.oldParent = nil
