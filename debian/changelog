@@ -1,3 +1,9 @@
+geesefs (0.28.0) stable; urgency=medium
+
+  * GeeseFS is now stable enough to pass most applicable tests from xfstests
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 17 Sep 2021 13:55:48 +0300
+
 geesefs (0.27.1) stable; urgency=medium
 
   * Fix inode metadata getting broken in 0.27.0
