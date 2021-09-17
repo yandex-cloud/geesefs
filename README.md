@@ -37,6 +37,11 @@ List of non-POSIX behaviors/limitations for GeeseFS:
 In addition to the items above, the following are supportable but not yet implemented:
 * creating files larger than 1TB
 
+# Stability
+
+GeeseFS is stable enough to pass most of `xfstests` which are applicable,
+including dirstress/fsstress stress-tests (generic/007, generic/011, generic/013).
+
 # Performance Features
 
 |                                | GeeseFS | rclone | Goofys | S3FS | gcsfuse |
