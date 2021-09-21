@@ -120,6 +120,7 @@ type Inode struct {
 	dir *DirInodeData
 
 	ImplicitDir bool
+	refreshed int32
 
 	fileHandles int32
 	lastWriteEnd uint64

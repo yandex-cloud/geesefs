@@ -539,6 +539,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		dh.inode.dir.listDone = false
 		dh.inode.dir.lastFromCloud = nil
 		// Remove unmodified stale inodes when we start listing
+		// FIXME: It's probably better to remove only inodes that don't exist in listing anymore
 		for i := 2; i < len(parent.dir.Children); i++ {
 			// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
 			childTmp := parent.dir.Children[i]
@@ -546,6 +547,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 				atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
 				(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
 				childTmp.mu.Lock()
+				atomic.StoreInt32(&childTmp.refreshed, -1)
 				if childTmp.isDir() {
 					childTmp.removeAllChildrenUnlocked()
 				}

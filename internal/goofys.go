@@ -674,6 +674,11 @@ func (fs *Goofys) GetInodeAttributes(
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
 
+	if atomic.LoadInt32(&inode.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
 	attr, err := inode.GetAttributes()
 	err = mapAwsError(err)
 	if err == nil {
@@ -689,6 +694,11 @@ func (fs *Goofys) GetXattr(ctx context.Context,
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
+
+	if atomic.LoadInt32(&inode.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
 
 	value, err := inode.GetXattr(op.Name)
 	err = mapAwsError(err)
@@ -713,6 +723,11 @@ func (fs *Goofys) ListXattr(ctx context.Context,
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
+
+	if atomic.LoadInt32(&inode.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
 
 	xattrs, err := inode.ListXattr()
 	err = mapAwsError(err)
@@ -745,6 +760,11 @@ func (fs *Goofys) RemoveXattr(ctx context.Context,
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
 
+	if atomic.LoadInt32(&inode.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
 	err = inode.RemoveXattr(op.Name)
 	err = mapAwsError(err)
 	if err == syscall.EPERM {
@@ -761,6 +781,11 @@ func (fs *Goofys) SetXattr(ctx context.Context,
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
 
+	if atomic.LoadInt32(&inode.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
 	err = inode.SetXattr(op.Name, op.Value, op.Flags)
 	err = mapAwsError(err)
 	if err == syscall.EPERM {
@@ -776,6 +801,11 @@ func (fs *Goofys) CreateSymlink(ctx context.Context,
 	parent := fs.getInodeOrDie(op.Parent)
 	fs.mu.RUnlock()
 
+	if atomic.LoadInt32(&parent.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
 	inode := parent.CreateSymlink(op.Name, op.Target)
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
@@ -789,6 +819,11 @@ func (fs *Goofys) ReadSymlink(ctx context.Context,
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
+
+	if atomic.LoadInt32(&inode.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
 
 	op.Target, err = inode.ReadSymlink()
 	err = mapAwsError(err)
@@ -1015,13 +1050,22 @@ func (fs *Goofys) ForgetInode(
 func (fs *Goofys) OpenDir(
 	ctx context.Context,
 	op *fuseops.OpenDirOp) (err error) {
-	fs.mu.Lock()
 
+	fs.mu.Lock()
+	in := fs.getInodeOrDie(op.Inode)
+	if atomic.LoadInt32(&in.refreshed) == -1 {
+		// Stale inode
+		fs.mu.Unlock()
+		return syscall.ESTALE
+	}
 	handleID := fs.nextHandleID
 	fs.nextHandleID++
-
-	in := fs.getInodeOrDie(op.Inode)
 	fs.mu.Unlock()
+
+	if atomic.LoadInt32(&in.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
 
 	dh := in.OpenDir()
 
@@ -1131,6 +1175,11 @@ func (fs *Goofys) OpenFile(
 	in := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
 
+	if atomic.LoadInt32(&in.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
 	fh, err := in.OpenFile()
 	if err != nil {
 		err = mapAwsError(err)
@@ -1233,6 +1282,11 @@ func (fs *Goofys) CreateFile(
 	parent := fs.getInodeOrDie(op.Parent)
 	fs.mu.RUnlock()
 
+	if atomic.LoadInt32(&parent.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
 	inode, fh := parent.Create(op.Name)
 
 	// Always take inode locks after fs lock if you need both...
@@ -1265,6 +1319,11 @@ func (fs *Goofys) MkDir(
 	parent := fs.getInodeOrDie(op.Parent)
 	fs.mu.RUnlock()
 
+	if atomic.LoadInt32(&parent.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
 	// ignore op.Mode for now
 	inode, err := parent.MkDir(op.Name)
 	if err != nil {
@@ -1288,6 +1347,11 @@ func (fs *Goofys) RmDir(
 	parent := fs.getInodeOrDie(op.Parent)
 	fs.mu.RUnlock()
 
+	if atomic.LoadInt32(&parent.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
 	err = parent.RmDir(op.Name)
 	err = mapAwsError(err)
 	parent.logFuse("<-- RmDir", op.Name, err)
@@ -1301,6 +1365,11 @@ func (fs *Goofys) SetInodeAttributes(
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
+
+	if atomic.LoadInt32(&inode.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
 
 	if op.Size != nil {
 		inode.mu.Lock()
@@ -1351,6 +1420,11 @@ func (fs *Goofys) Unlink(
 	parent := fs.getInodeOrDie(op.Parent)
 	fs.mu.RUnlock()
 
+	if atomic.LoadInt32(&parent.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
 	err = parent.Unlink(op.Name)
 	err = mapAwsError(err)
 	return
@@ -1366,6 +1440,12 @@ func (fs *Goofys) Rename(
 	parent := fs.getInodeOrDie(op.OldParent)
 	newParent := fs.getInodeOrDie(op.NewParent)
 	fs.mu.RUnlock()
+
+	if atomic.LoadInt32(&parent.refreshed) == -1 ||
+		atomic.LoadInt32(&newParent.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
 
 	if op.OldParent == op.NewParent {
 		parent.mu.Lock()
