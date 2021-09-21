@@ -1,3 +1,9 @@
+geesefs (0.28.1) stable; urgency=medium
+
+  * Fix a bug where (ls subdir; ls; ls subdir) could lead to empty listing of the subdir
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 21 Sep 2021 16:43:31 +0300
+
 geesefs (0.28.0) stable; urgency=medium
 
   * GeeseFS is now stable enough to pass most applicable tests from xfstests
