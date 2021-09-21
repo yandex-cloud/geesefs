@@ -448,7 +448,7 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	cloud, prefix := dh.inode.cloud()
 	if cloud == nil {
 		// Stale inode
-		return fuse.ENOENT
+		return syscall.ESTALE
 	}
 	if dh.inode.oldParent != nil {
 		_, prefix = dh.inode.oldParent.cloud()
@@ -1254,7 +1254,7 @@ func (inode *Inode) SetCacheState(state int32) {
 	wasModified := inode.CacheState == ST_CREATED || inode.CacheState == ST_DELETED || inode.CacheState == ST_MODIFIED
 	willBeModified := state == ST_CREATED || state == ST_DELETED || state == ST_MODIFIED
 	atomic.StoreInt32(&inode.CacheState, state)
-	if wasModified != willBeModified {
+	if wasModified != willBeModified && (inode.isDir() || inode.fileHandles == 0) {
 		inc := int64(1)
 		if wasModified {
 			inc = -1
@@ -1424,7 +1424,7 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[fromInode.Name] = fromInode
-		if fromInode.CacheState == ST_CACHED {
+		if fromInode.CacheState == ST_CACHED && (fromInode.isDir() || fromInode.fileHandles == 0) {
 			// Was not modified and we remove it from current parent => add modified
 			parent.addModified(1)
 		}
@@ -1459,7 +1459,7 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	parent.removeChildUnlocked(fromInode)
 	fromInode.Name = to
 	fromInode.Parent = newParent
-	if fromInode.CacheState == ST_CACHED {
+	if fromInode.CacheState == ST_CACHED && (fromInode.isDir() || fromInode.fileHandles == 0) {
 		// Was not modified => we make it modified
 		fromInode.SetCacheState(ST_MODIFIED)
 	} else {
