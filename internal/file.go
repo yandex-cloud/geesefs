@@ -1734,6 +1734,10 @@ func (inode *Inode) FlushPart(part uint64) {
 	resp, err := cloud.MultipartBlobAdd(&partInput)
 	inode.mu.Lock()
 
+	if inode.CacheState == ST_DELETED {
+		// File was deleted while we were flushing it
+		return
+	}
 	inode.recordFlushError(err)
 	if err != nil {
 		log.Errorf("Failed to flush part %v of object %v: %v", part, key, err)
