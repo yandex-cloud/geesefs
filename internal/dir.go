@@ -883,13 +883,12 @@ func (parent *Inode) getChildName(name string) string {
 }
 
 func (parent *Inode) Unlink(name string) (err error) {
-	parent.logFuse("Unlink", name)
-
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
 
 	inode := parent.findChildUnlocked(name)
 	if inode != nil {
+		fuseLog.Debugf("Unlink %v", inode.FullName())
 		inode.mu.Lock()
 		inode.doUnlink()
 		inode.mu.Unlock()
@@ -1284,8 +1283,6 @@ func (parent *Inode) addModified(inc int64) {
 // LOCKS_REQUIRED(parent.mu)
 // LOCKS_REQUIRED(newParent.mu)
 func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error) {
-	fuseLog.Debugf("Rename %v to %v", parent.getChildName(from), newParent.getChildName(to))
-
 	fromCloud, fromPath := parent.cloud()
 	toCloud, toPath := newParent.cloud()
 	if fromCloud != toCloud {
@@ -1387,6 +1384,7 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 }
 
 func renameInCache(fromInode *Inode, newParent *Inode, to string) {
+	fuseLog.Debugf("Rename %v to %v", fromInode.FullName(), newParent.getChildName(to))
 	// There's a lot of edge cases with the asynchronous rename to handle:
 	// 1) rename a new file => we can just upload it with the new name
 	// 2) rename a new file that's already being flushed => rename after flush
