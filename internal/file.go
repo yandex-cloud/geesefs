@@ -1184,6 +1184,7 @@ func (inode *Inode) SendUpload() bool {
 						err = nil
 						notFoundIgnore = true
 					} else {
+						log.Debugf("Failed to copy %v to %v (rename): %v", from, key, err)
 						inode.mu.Lock()
 						inode.recordFlushError(err)
 						if inode.Parent == oldParent && inode.Name == oldName {
