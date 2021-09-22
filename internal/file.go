@@ -1608,6 +1608,11 @@ func (inode *Inode) FlushSmallObject() {
 
 func (inode *Inode) copyUnmodifiedRange(partNum, offset, size uint64) error {
 	cloud, key := inode.cloud()
+	if inode.oldParent != nil {
+		// Modify the object in the old place, move it when we're done with modifications
+		_, key = inode.oldParent.cloud()
+		key = appendChildName(key, inode.oldName)
+	}
 	log.Debugf("Copying unmodified range %v-%v MB of object %v", offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key)
 	resp, err := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
 		Commit:     inode.mpu,
