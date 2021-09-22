@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"net/url"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -86,6 +87,10 @@ type Goofys struct {
 	//
 	// GUARDED_BY(mu)
 	inodes map[fuseops.InodeID]*Inode
+
+	inflightListingId int
+	inflightListings []int
+	inflightListDeletes []string
 
 	nextHandleID fuseops.HandleID
 	dirHandles   map[fuseops.HandleID]*DirHandle
@@ -1147,6 +1152,46 @@ func (fs *Goofys) ReadDir(
 
 	dh.mu.Unlock()
 	return
+}
+
+func (fs *Goofys) addInflightListing() int {
+	fs.inflightListingId++
+	myList := fs.inflightListingId
+	fs.inflightListings = append(fs.inflightListings, myList, len(fs.inflightListDeletes))
+	return myList
+}
+
+func (fs *Goofys) getDeleteOverrides(myList int) map[string]bool {
+	var forceDelete map[string]bool
+	listPos := 2 * sort.Search(len(fs.inflightListings)/2, func(i int) bool {
+		return fs.inflightListings[i*2] >= myList
+	})
+	if fs.inflightListings[listPos] != myList {
+		panic("listing disappeared")
+	}
+	for i := fs.inflightListings[listPos+1]; i < len(fs.inflightListDeletes); i++ {
+		if forceDelete == nil {
+			forceDelete = make(map[string]bool)
+		}
+		forceDelete[fs.inflightListDeletes[i]] = true
+	}
+	fs.inflightListings = append(
+		fs.inflightListings[0 : listPos],
+		fs.inflightListings[listPos+2 : ]...
+	)
+	minPos := len(fs.inflightListDeletes)
+	for i := 1; i < len(fs.inflightListings); i += 2 {
+		if fs.inflightListings[i] < minPos {
+			minPos = fs.inflightListings[i]
+		}
+	}
+	if minPos > 0 {
+		fs.inflightListDeletes = fs.inflightListDeletes[minPos : ]
+		for i := 1; i < len(fs.inflightListings); i += 2 {
+			fs.inflightListings[i] -= minPos
+		}
+	}
+	return forceDelete
 }
 
 func (fs *Goofys) ReleaseDirHandle(

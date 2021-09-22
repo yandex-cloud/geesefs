@@ -260,6 +260,10 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 		startWith = PString(key+".\xF4\x8F\xBF\xBF")
 	}
 
+	parent.fs.mu.Lock()
+	myList := parent.fs.addInflightListing()
+	parent.fs.mu.Unlock()
+
 	params := &ListBlobsInput{
 		Prefix:     &prefix,
 		StartAfter: startWith,
@@ -275,8 +279,12 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 		parent.mu.Lock()
 	}
 	parent.fs.mu.Lock()
+	forceDelete := parent.fs.getDeleteOverrides(myList)
 	dirs := make(map[*Inode]bool)
 	for _, obj := range resp.Items {
+		if forceDelete != nil && forceDelete[*obj.Key] {
+			continue
+		}
 		baseName := (*obj.Key)[len(prefix):]
 		if !isInvalidName(baseName) {
 			parent.insertSubTree(baseName, &obj, dirs)
@@ -381,11 +389,14 @@ func listBlobsSafe(cloud StorageBackend, param *ListBlobsInput) (*ListBlobsOutpu
 	return res, nil
 }
 
-func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string) {
+func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, forceDelete map[string]bool) {
 	parent := dh.inode
 	fs := parent.fs
 
 	for _, dir := range resp.Prefixes {
+		if forceDelete != nil && forceDelete[*dir.Prefix] {
+			continue
+		}
 		// strip trailing /
 		dirName := (*dir.Prefix)[0 : len(*dir.Prefix)-1]
 		// strip previous prefix
@@ -412,6 +423,9 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string) {
 	}
 
 	for _, obj := range resp.Items {
+		if forceDelete != nil && forceDelete[*obj.Key] {
+			continue
+		}
 		baseName := (*obj.Key)[len(prefix):]
 		if isInvalidName(baseName) {
 			continue
@@ -464,6 +478,11 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 		Prefix:            &prefix,
 	}
 	dh.mu.Unlock()
+
+	dh.inode.fs.mu.Lock()
+	myList := dh.inode.fs.addInflightListing()
+	dh.inode.fs.mu.Unlock()
+
 	resp, err := listBlobsSafe(cloud, params)
 	dh.mu.Lock()
 	if err != nil {
@@ -475,7 +494,8 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	dh.inode.mu.Lock()
 	dh.inode.fs.mu.Lock()
 
-	dh.handleListResult(resp, prefix)
+	forceDelete := dh.inode.fs.getDeleteOverrides(myList)
+	dh.handleListResult(resp, prefix, forceDelete)
 
 	dh.inode.fs.mu.Unlock()
 	dh.inode.mu.Unlock()
@@ -960,6 +980,17 @@ func (inode *Inode) SendDelete() {
 			inode.mu.Lock()
 			inode.DeRef(0)
 			inode.mu.Unlock()
+		}
+		if err == nil {
+			// Delete may race with a parallel listing :-X
+			// Monkey-fix the race :-) I suspect that it wouldn't be needed
+			// if all of the S3-FS sync code was implemented using CRDT or
+			// maybe something even more clever. But for now we use simple things. :-)
+			inode.fs.mu.Lock()
+			if len(inode.fs.inflightListings) > 0 {
+				inode.fs.inflightListDeletes = append(inode.fs.inflightListDeletes, key)
+			}
+			inode.fs.mu.Unlock()
 		}
 		inode.fs.WakeupFlusher()
 	}()
