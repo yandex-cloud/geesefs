@@ -1,3 +1,9 @@
+geesefs (0.28.2) stable; urgency=medium
+
+  * Fix a rare list/delete race, fix incorrect partial flushing of large renamed objects
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 22 Sep 2021 16:16:44 +0300
+
 geesefs (0.28.1) stable; urgency=medium
 
   * Fix a bug where (ls subdir; ls; ls subdir) could lead to empty listing of the subdir
