@@ -58,13 +58,3 @@ index 154bc2dd..588ed598 100644
  	*)
  		 if [ -z "$TEST_DEV" ] || [ "`_is_block_dev "$TEST_DEV"`" = "" ]
  		 then
-diff --git a/sync_unmount b/sync_unmount
-new file mode 100755
-index 00000000..f277ba6b
---- /dev/null
-+++ b/sync_unmount
-@@ -0,0 +1,4 @@
-+#!/bin/bash
-+
-+python3 -c 'import sys, os; os.fsync(os.open(sys.argv[1], os.O_RDONLY))' $(findmnt -f -o TARGET $1 | tail -n 1)
-+/bin/umount $1

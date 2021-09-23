@@ -18,7 +18,7 @@ jobs:
         go-version: 1.16
 
     - name: Build linux amd64
-      run: go build -o geesefs-linux-amd64 -v
+      run: go build -o geesefs-linux-amd64 -v && ln -s geesefs-linux-amd64 geesefs
 
     - name: Build Mac amd64
       run: env GOOS=darwin GOARCH=amd64 go build -o geesefs-mac-amd64 -v
@@ -38,7 +38,12 @@ jobs:
 
     - name: Test
       continue-on-error: true
-      run: ln -s geesefs-linux-amd64 geesefs && make run-test
+      run: make run-test
+
+    - name: Run xfstests
+      # Often crashes in CI due to memory limits
+      continue-on-error: true
+      run: make run-xfstests
 
     - uses: "marvinpinto/action-automatic-releases@latest"
       with:
