@@ -1,3 +1,9 @@
+geesefs (0.28.3) stable; urgency=medium
+
+  * Add an option to override aws-sdk shared config path
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 27 Sep 2021 17:43:30 +0300
+
 geesefs (0.28.2) stable; urgency=medium
 
   * Fix a rare list/delete race, fix incorrect partial flushing of large renamed objects
