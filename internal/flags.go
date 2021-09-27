@@ -179,6 +179,11 @@ func NewApp() (app *cli.App) {
 			Usage: "Use a named profile from $HOME/.aws/credentials instead of \"default\"",
 		},
 
+		cli.StringSliceFlag{
+			Name:  "shared-config",
+			Usage: "Use different shared configuration file(s) instead of $HOME/.aws/credentials and $HOME/.aws/config",
+		},
+
 		cli.BoolFlag{
 			Name:  "use-content-type",
 			Usage: "Set Content-Type according to file extension and /etc/mime.types (default: off)",
@@ -581,6 +586,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.RequesterPays = c.Bool("requester-pays")
 		config.StorageClass  = c.String("storage-class")
 		config.Profile       = c.String("profile")
+		config.SharedConfig  = c.StringSlice("shared-config")
 		config.UseSSE        = c.Bool("sse")
 		config.UseKMS        = c.IsSet("sse-kms")
 		config.KMSKeyID      = c.String("sse-kms")

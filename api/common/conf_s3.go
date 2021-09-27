@@ -31,6 +31,7 @@ import (
 
 type S3Config struct {
 	Profile         string
+	SharedConfig    []string
 	AccessKey       string
 	SecretKey       string
 	RoleArn         string
@@ -109,6 +110,7 @@ func (c *S3Config) ToAwsConfig(flags *FlagStorage) (*aws.Config, error) {
 			var err error
 			s3Session, err = session.NewSessionWithOptions(session.Options{
 				Profile:           c.Profile,
+				SharedConfigFiles: c.SharedConfig,
 				SharedConfigState: session.SharedConfigEnable,
 			})
 			if err != nil {
