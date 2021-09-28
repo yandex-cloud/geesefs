@@ -108,9 +108,14 @@ func (c *S3Config) ToAwsConfig(flags *FlagStorage) (*aws.Config, error) {
 	if c.Session == nil {
 		if s3Session == nil {
 			var err error
+			cfg := c.SharedConfig
+			if len(cfg) == 0 {
+				// aws-sdk doesn't ignore empty slices
+				cfg = nil
+			}
 			s3Session, err = session.NewSessionWithOptions(session.Options{
 				Profile:           c.Profile,
-				SharedConfigFiles: c.SharedConfig,
+				SharedConfigFiles: cfg,
 				SharedConfigState: session.SharedConfigEnable,
 			})
 			if err != nil {
