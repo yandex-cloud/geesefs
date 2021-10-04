@@ -817,11 +817,13 @@ func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []DirHandleEntry
 	t.Assert(err, IsNil)
 	t.Assert(en, NotNil)
 	t.Assert(en.Name, Equals, ".")
+	dh.lastName = "."
 
 	en, err = dh.ReadDir(1, fuseops.DirOffset(1))
 	t.Assert(err, IsNil)
 	t.Assert(en, NotNil)
 	t.Assert(en.Name, Equals, "..")
+	dh.lastName = "."
 
 	for i := 2; ; i++ {
 		en, err = dh.ReadDir(i, fuseops.DirOffset(i))
@@ -833,6 +835,7 @@ func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []DirHandleEntry
 		}
 
 		entries = append(entries, *en)
+		dh.lastName = en.Name
 	}
 
 	dh.mu.Unlock()
@@ -976,20 +979,7 @@ func (s *GoofysTest) TestReadFiles(t *C) {
 	dh := parent.OpenDir()
 	defer dh.CloseDir()
 
-	var entries []*DirHandleEntry
-
-	dh.mu.Lock()
-	for i := 0; ; i++ {
-		en, err := dh.ReadDir(i, fuseops.DirOffset(i))
-		t.Assert(err, IsNil)
-
-		if en == nil {
-			break
-		}
-
-		entries = append(entries, en)
-	}
-	dh.mu.Unlock()
+	entries := s.readDirFully(t, dh)
 
 	for _, en := range entries {
 		if en.Type == fuseutil.DT_File && (en.Name == "file1" || en.Name == "file2" || en.Name == "zero") {

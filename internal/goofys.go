@@ -1113,17 +1113,19 @@ func (fs *Goofys) ReadDir(
 	if op.Offset != 0 && op.Offset != dh.lastExternalOffset {
 		// seekdir() to an arbitrary offset is not supported
 		// jacobsa/fuse says it's not a problem
+		fuseLog.Errorf("Readdir %v at %v instead of expected %v or 0", inode.FullName(), op.Offset, dh.lastExternalOffset)
 		err = syscall.ENOTSUP
 		dh.mu.Unlock()
 		return
 	}
 
-	dh.lastExternalOffset = op.Offset
-	if dh.lastExternalOffset == 0 {
+	if op.Offset == 0 {
+		dh.lastExternalOffset = 0
 		dh.lastInternalOffset = 0
+		dh.lastName = ""
 	}
 
-	for true {
+	for {
 		e, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
 		if err != nil {
 			dh.mu.Unlock()
@@ -1146,8 +1148,12 @@ func (fs *Goofys) ReadDir(
 		dh.inode.logFuse("<-- ReadDir", e.Name, e.Offset)
 
 		op.BytesRead += n
-		dh.lastInternalOffset++
+		// We have to modify it here because WriteDirent MAY not send the entry
+		if dh.lastInternalOffset >= 0 {
+			dh.lastInternalOffset++
+		}
 		dh.lastExternalOffset++
+		dh.lastName = e.Name
 	}
 
 	dh.mu.Unlock()

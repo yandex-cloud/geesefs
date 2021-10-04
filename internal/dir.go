@@ -106,6 +106,7 @@ type DirHandle struct {
 	// or from the previous offset
 	lastExternalOffset fuseops.DirOffset
 	lastInternalOffset int
+	lastName string
 }
 
 func NewDirHandle(inode *Inode) (dh *DirHandle) {
@@ -510,9 +511,6 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 }
 
 func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, ok bool) {
-	dh.inode.mu.Lock()
-	defer dh.inode.mu.Unlock()
-
 	if dh.inode.dir == nil {
 		panic(dh.inode.FullName())
 	}
@@ -541,18 +539,34 @@ func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffs
 }
 
 // LOCKS_REQUIRED(dh.mu)
+// LOCKS_REQUIRED(dh.inode.mu)
+func (dh *DirHandle) checkDirPosition() {
+	if dh.lastInternalOffset < 0 {
+		parent := dh.inode
+		// Directory position invalidated, try to find it again using lastName
+		dh.lastInternalOffset = sort.Search(len(parent.dir.Children), parent.findInodeFunc(dh.lastName))
+		if dh.lastInternalOffset < len(parent.dir.Children) && parent.dir.Children[dh.lastInternalOffset].Name == dh.lastName {
+			dh.lastInternalOffset++
+		}
+	}
+}
+
+// LOCKS_REQUIRED(dh.mu)
 // LOCKS_EXCLUDED(dh.inode.mu)
 // LOCKS_EXCLUDED(dh.inode.fs)
 func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, err error) {
-	en, ok := dh.readDirFromCache(internalOffset, offset)
-	if ok {
-		return
-	}
-
 	parent := dh.inode
 	fs := parent.fs
-
 	parent.mu.Lock()
+
+	dh.lastInternalOffset = internalOffset
+	dh.lastExternalOffset = offset
+	dh.checkDirPosition()
+	en, ok := dh.readDirFromCache(dh.lastInternalOffset, dh.lastExternalOffset)
+	if ok {
+		parent.mu.Unlock()
+		return
+	}
 
 	if !dh.inode.dir.listDone && dh.inode.dir.listMarker == nil {
 		// listMarker is nil => We just started refreshing this directory
@@ -626,18 +640,19 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		parent.mu.Lock()
 	}
 
-	if int(internalOffset) >= len(parent.dir.Children) {
+	dh.checkDirPosition()
+	if int(dh.lastInternalOffset) >= len(parent.dir.Children) {
 		// we've reached the end
 		parent.dir.listDone = false
 		parent.mu.Unlock()
 		return nil, nil
 	}
 
-	child := parent.dir.Children[internalOffset]
+	child := parent.dir.Children[dh.lastInternalOffset]
 	en = &DirHandleEntry{
 		Name:   child.Name,
 		Inode:  child.Id,
-		Offset: offset + 1,
+		Offset: dh.lastExternalOffset + 1,
 	}
 	if child.isDir() {
 		en.Type = fuseutil.DT_Directory
@@ -797,9 +812,7 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 	// POSIX allows parallel readdir() and modifications,
 	// so preserve position of all directory handles
 	for _, dh := range parent.dir.handles {
-		if dh.lastInternalOffset > i {
-			dh.lastInternalOffset--
-		}
+		dh.lastInternalOffset = -1
 	}
 	// >= because we use the "last open dir" as the "next" one
 	if parent.dir.lastOpenDirIdx >= i {
@@ -833,9 +846,7 @@ func (parent *Inode) removeAllChildrenUnlocked() {
 	// POSIX allows parallel readdir() and modifications,
 	// so reset position of all directory handles
 	for _, dh := range parent.dir.handles {
-		if dh.lastInternalOffset > 2 {
-			dh.lastInternalOffset = 2
-		}
+		dh.lastInternalOffset = -1
 	}
 	parent.dir.Children = parent.dir.Children[0 : 2]
 }
@@ -881,9 +892,7 @@ func (parent *Inode) insertChildUnlocked(inode *Inode) {
 		// POSIX allows parallel readdir() and modifications,
 		// so preserve position of all directory handles
 		for _, dh := range parent.dir.handles {
-			if dh.lastInternalOffset > i {
-				dh.lastInternalOffset++
-			}
+			dh.lastInternalOffset = -1
 		}
 		if parent.dir.lastOpenDirIdx >= i {
 			parent.dir.lastOpenDirIdx++
