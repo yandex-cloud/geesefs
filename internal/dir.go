@@ -1564,11 +1564,22 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 				}
 			} else {
 				if !inode.isDir() {
-					if inode.CacheState == ST_CACHED {
+					// replace unmodified file item with a directory
+					if atomic.LoadInt32(&inode.CacheState) == ST_CACHED {
+						fs.mu.Unlock()
+						inode.mu.Lock()
+						atomic.StoreInt32(&inode.refreshed, -1)
+						parent.removeChildUnlocked(inode)
+						inode.mu.Unlock()
+						fs.mu.Lock()
+						// create a directory inode instead
+						inode = NewInode(fs, parent, dir)
 						inode.ToDir()
-						fs.addDotAndDotDot(inode)
+						fs.insertInode(parent, inode)
+						inode.SetFromBlobItem(obj)
+					} else {
+						inode = nil
 					}
-					// don't change modified file item to directory
 				} else {
 					fs.mu.Unlock()
 					inode.SetFromBlobItem(obj)
@@ -1593,12 +1604,24 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 						inode.AttrTime = now
 					}
 				}
-			} else if inode.CacheState == ST_CACHED {
-				// don't update modified items
-				if !inode.isDir() {
+			} else if !inode.isDir() {
+				// replace unmodified file item with a directory
+				if atomic.LoadInt32(&inode.CacheState) == ST_CACHED {
+					fs.mu.Unlock()
+					inode.mu.Lock()
+					atomic.StoreInt32(&inode.refreshed, -1)
+					parent.removeChildUnlocked(inode)
+					inode.mu.Unlock()
+					fs.mu.Lock()
+					// create a directory inode instead
+					inode = NewInode(fs, parent, dir)
 					inode.ToDir()
-					fs.addDotAndDotDot(inode)
+					fs.insertInode(parent, inode)
+					inode.AttrTime = time.Now()
+				} else {
+					inode = nil
 				}
+			} else {
 				now := time.Now()
 				if inode.AttrTime.Before(now) {
 					inode.AttrTime = now
