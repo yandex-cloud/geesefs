@@ -1551,76 +1551,39 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 		dir := path[:slash]
 		path = path[slash+1:]
 
-		if len(path) == 0 {
-			inode := parent.findChildUnlocked(dir)
-			if inode == nil {
-				// don't revive deleted items
-				_, deleted := parent.dir.DeletedChildren[dir]
-				if !deleted {
-					inode = NewInode(fs, parent, dir)
-					inode.ToDir()
-					fs.insertInode(parent, inode)
-					inode.SetFromBlobItem(obj)
-				}
+		// ensure that the potentially implicit dir is added
+		inode := parent.findChildUnlocked(dir)
+		if inode == nil {
+			// don't revive deleted items
+			_, deleted := parent.dir.DeletedChildren[dir]
+			if !deleted {
+				inode = NewInode(fs, parent, dir)
+				inode.ToDir()
+				fs.insertInode(parent, inode)
+			}
+		} else if !inode.isDir() {
+			// replace unmodified file item with a directory
+			if atomic.LoadInt32(&inode.CacheState) == ST_CACHED {
+				fs.mu.Unlock()
+				inode.mu.Lock()
+				atomic.StoreInt32(&inode.refreshed, -1)
+				parent.removeChildUnlocked(inode)
+				inode.mu.Unlock()
+				fs.mu.Lock()
+				// create a directory inode instead
+				inode = NewInode(fs, parent, dir)
+				inode.ToDir()
+				fs.insertInode(parent, inode)
 			} else {
-				if !inode.isDir() {
-					// replace unmodified file item with a directory
-					if atomic.LoadInt32(&inode.CacheState) == ST_CACHED {
-						fs.mu.Unlock()
-						inode.mu.Lock()
-						atomic.StoreInt32(&inode.refreshed, -1)
-						parent.removeChildUnlocked(inode)
-						inode.mu.Unlock()
-						fs.mu.Lock()
-						// create a directory inode instead
-						inode = NewInode(fs, parent, dir)
-						inode.ToDir()
-						fs.insertInode(parent, inode)
-						inode.SetFromBlobItem(obj)
-					} else {
-						inode = nil
-					}
-				} else {
-					fs.mu.Unlock()
-					inode.SetFromBlobItem(obj)
-					fs.mu.Lock()
-				}
+				inode = nil
 			}
-			if inode != nil {
+		}
+
+		if inode != nil {
+			isDirBlob := len(path) == 0
+			if isDirBlob {
+				inode.SetFromBlobItem(obj)
 				sealPastDirs(dirs, inode)
-			}
-		} else {
-			// ensure that the potentially implicit dir is added
-			inode := parent.findChildUnlocked(dir)
-			if inode == nil {
-				// don't revive deleted items
-				_, deleted := parent.dir.DeletedChildren[dir]
-				if !deleted {
-					inode = NewInode(fs, parent, dir)
-					inode.ToDir()
-					fs.insertInode(parent, inode)
-					now := time.Now()
-					if inode.AttrTime.Before(now) {
-						inode.AttrTime = now
-					}
-				}
-			} else if !inode.isDir() {
-				// replace unmodified file item with a directory
-				if atomic.LoadInt32(&inode.CacheState) == ST_CACHED {
-					fs.mu.Unlock()
-					inode.mu.Lock()
-					atomic.StoreInt32(&inode.refreshed, -1)
-					parent.removeChildUnlocked(inode)
-					inode.mu.Unlock()
-					fs.mu.Lock()
-					// create a directory inode instead
-					inode = NewInode(fs, parent, dir)
-					inode.ToDir()
-					fs.insertInode(parent, inode)
-					inode.AttrTime = time.Now()
-				} else {
-					inode = nil
-				}
 			} else {
 				now := time.Now()
 				if inode.AttrTime.Before(now) {
@@ -1628,11 +1591,11 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 				}
 			}
 
-			if inode != nil && inode.isDir() {
-				// mark this dir but don't seal anything else
-				// until we get to the leaf
-				dirs[inode] = false
+			// mark this dir but don't seal anything else
+			// until we get to the leaf
+			dirs[inode] = false
 
+			if !isDirBlob {
 				fs.mu.Unlock()
 				inode.mu.Lock()
 				fs.mu.Lock()
