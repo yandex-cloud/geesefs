@@ -1,3 +1,10 @@
+geesefs (0.28.5) stable; urgency=medium
+
+  * Fix possible duplicates in listing when cache invalidation happens during listing
+  * Fix possible incorrect inode state when both a file and a directory with the same name exist in S3
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 05 Oct 2021 11:43:25 +0300
+
 geesefs (0.28.4) stable; urgency=medium
 
   * Don't ignore ~/.aws/credentials when --shared-config is empty
