@@ -44,6 +44,9 @@ type DirInodeData struct {
 	listMarker *string
 	lastFromCloud *string
 	listDone bool
+	// Time at which we started fetching child entries
+	// from cloud for this handle.
+	refreshStartTime time.Time
 
 	ModifiedChildren int64
 
@@ -553,24 +556,7 @@ func (dh *DirHandle) loadListing() error {
 		// listMarker is nil => We just started refreshing this directory
 		parent.dir.listDone = false
 		parent.dir.lastFromCloud = nil
-		// Remove unmodified stale inodes when we start listing
-		// FIXME: It's probably better to remove only inodes that don't exist in listing anymore
-		for i := 2; i < len(parent.dir.Children); i++ {
-			// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
-			childTmp := parent.dir.Children[i]
-			if atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
-				atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
-				(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
-				childTmp.mu.Lock()
-				atomic.StoreInt32(&childTmp.refreshed, -1)
-				if childTmp.isDir() {
-					childTmp.removeAllChildrenUnlocked()
-				}
-				parent.removeChildUnlocked(childTmp)
-				childTmp.mu.Unlock()
-				i--
-			}
-		}
+		parent.dir.refreshStartTime = time.Now()
 	}
 
 	// We don't want to wait for the whole slurp to finish when we just do 'ls ./dir/subdir'
@@ -646,6 +632,28 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		}
 		dh.checkDirPosition()
 	}
+
+	// Skip stale inodes
+	for i := dh.lastInternalOffset; i < len(parent.dir.Children); i++ {
+		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
+		childTmp := parent.dir.Children[i]
+		if childTmp.AttrTime.Before(parent.dir.refreshStartTime) &&
+			atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
+			atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
+			(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
+			childTmp.mu.Lock()
+			atomic.StoreInt32(&childTmp.refreshed, -1)
+			if childTmp.isDir() {
+				childTmp.removeAllChildrenUnlocked()
+			}
+			parent.removeChildUnlocked(childTmp)
+			childTmp.mu.Unlock()
+			i--
+		}
+	}
+
+	// May be -1 if we remove inodes above
+	dh.checkDirPosition()
 
 	if dh.lastInternalOffset >= len(dh.inode.dir.Children) {
 		// we've reached the end
