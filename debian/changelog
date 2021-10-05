@@ -1,3 +1,9 @@
+geesefs (0.28.6) stable; urgency=medium
+
+  * Do not remove unmodified inodes from cache just to re-add them back when listing
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 05 Oct 2021 15:18:50 +0300
+
 geesefs (0.28.5) stable; urgency=medium
 
   * Fix possible duplicates in listing when cache invalidation happens during listing
