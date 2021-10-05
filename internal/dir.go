@@ -510,31 +510,23 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	return
 }
 
-func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, ok bool) {
-	if dh.inode.dir == nil {
-		panic(dh.inode.FullName())
+func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry) {
+	child := dh.inode.dir.Children[internalOffset]
+	en = &DirHandleEntry{
+		Name:   child.Name,
+		Inode:  child.Id,
+		Offset: offset + 1,
 	}
-	if !expired(dh.inode.dir.DirTime, dh.inode.fs.flags.StatCacheTTL) {
-		ok = true
-
-		if int(internalOffset) >= len(dh.inode.dir.Children) {
-			dh.inode.dir.listDone = false
-			return
-		}
-		child := dh.inode.dir.Children[internalOffset]
-
-		en = &DirHandleEntry{
-			Name:   child.Name,
-			Inode:  child.Id,
-			Offset: offset + 1,
-		}
-		if child.isDir() {
-			en.Type = fuseutil.DT_Directory
-		} else {
-			en.Type = fuseutil.DT_File
-		}
-
+	if child.isDir() {
+		en.Type = fuseutil.DT_Directory
+	} else {
+		en.Type = fuseutil.DT_File
 	}
+
+	if dh.inode.dir.lastFromCloud != nil && en.Name == *dh.inode.dir.lastFromCloud {
+		dh.inode.dir.lastFromCloud = nil
+	}
+
 	return
 }
 
@@ -552,26 +544,15 @@ func (dh *DirHandle) checkDirPosition() {
 }
 
 // LOCKS_REQUIRED(dh.mu)
-// LOCKS_EXCLUDED(dh.inode.mu)
+// LOCKS_REQUIRED(dh.inode.mu)
 // LOCKS_EXCLUDED(dh.inode.fs)
-func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, err error) {
+func (dh *DirHandle) loadListing() error {
 	parent := dh.inode
-	fs := parent.fs
-	parent.mu.Lock()
 
-	dh.lastInternalOffset = internalOffset
-	dh.lastExternalOffset = offset
-	dh.checkDirPosition()
-	en, ok := dh.readDirFromCache(dh.lastInternalOffset, dh.lastExternalOffset)
-	if ok {
-		parent.mu.Unlock()
-		return
-	}
-
-	if !dh.inode.dir.listDone && dh.inode.dir.listMarker == nil {
+	if !parent.dir.listDone && parent.dir.listMarker == nil {
 		// listMarker is nil => We just started refreshing this directory
-		dh.inode.dir.listDone = false
-		dh.inode.dir.lastFromCloud = nil
+		parent.dir.listDone = false
+		parent.dir.lastFromCloud = nil
 		// Remove unmodified stale inodes when we start listing
 		// FIXME: It's probably better to remove only inodes that don't exist in listing anymore
 		for i := 2; i < len(parent.dir.Children); i++ {
@@ -599,7 +580,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 	// we immediately switch to regular listings.
 	// Original implementation in Goofys in fact was similar in this aspect
 	// but it was ugly in several places, so ... sorry, it's reworked. O:-)
-	useSlurp := dh.inode.dir.listMarker == nil && fs.flags.StatCacheTTL != 0
+	useSlurp := parent.dir.listMarker == nil && parent.fs.flags.StatCacheTTL != 0
 
 	// the dir expired, so we need to fetch from the cloud. there
 	// may be static directories that we want to keep, so cloud
@@ -619,8 +600,9 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		dh.mu.Unlock()
 		done, err := parent.slurpOnce(true)
 		dh.mu.Lock()
+		parent.mu.Lock()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if done && !parent.dir.listDone {
 			// Usually subdirs are sealed by slurp
@@ -628,42 +610,51 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 			// For example, in case of a nested mount...
 			parent.sealDir()
 		}
-		parent.mu.Lock()
 	}
 
-	for dh.inode.dir.lastFromCloud == nil && !dh.inode.dir.listDone {
+	for parent.dir.lastFromCloud == nil && !parent.dir.listDone {
 		parent.mu.Unlock()
-		err = dh.listObjectsFlat()
+		err := dh.listObjectsFlat()
+		parent.mu.Lock()
 		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// LOCKS_REQUIRED(dh.mu)
+// LOCKS_EXCLUDED(dh.inode.mu)
+// LOCKS_EXCLUDED(dh.inode.fs)
+func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, err error) {
+	parent := dh.inode
+	if parent.dir == nil {
+		panic("ReadDir non-directory "+parent.FullName())
+	}
+	parent.mu.Lock()
+
+	dh.lastInternalOffset = internalOffset
+	dh.lastExternalOffset = offset
+	dh.checkDirPosition()
+
+	if expired(dh.inode.dir.DirTime, dh.inode.fs.flags.StatCacheTTL) {
+		err = dh.loadListing()
+		if err != nil {
+			parent.mu.Unlock()
 			return nil, err
 		}
-		parent.mu.Lock()
+		dh.checkDirPosition()
 	}
 
-	dh.checkDirPosition()
-	if int(dh.lastInternalOffset) >= len(parent.dir.Children) {
+	if dh.lastInternalOffset >= len(dh.inode.dir.Children) {
 		// we've reached the end
 		parent.dir.listDone = false
 		parent.mu.Unlock()
-		return nil, nil
+		return
 	}
 
-	child := parent.dir.Children[dh.lastInternalOffset]
-	en = &DirHandleEntry{
-		Name:   child.Name,
-		Inode:  child.Id,
-		Offset: dh.lastExternalOffset + 1,
-	}
-	if child.isDir() {
-		en.Type = fuseutil.DT_Directory
-	} else {
-		en.Type = fuseutil.DT_File
-	}
-
-	if parent.dir.lastFromCloud != nil && en.Name == *parent.dir.lastFromCloud {
-		parent.dir.lastFromCloud = nil
-	}
-
+	en = dh.readDirFromCache(dh.lastInternalOffset, dh.lastExternalOffset)
 	parent.mu.Unlock()
 
 	return en, nil
