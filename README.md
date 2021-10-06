@@ -90,12 +90,14 @@ $ $GOPATH/bin/geesefs [--endpoint https://...] <bucket:prefix> <mountpoint> # if
 
 You can also supply credentials via the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables.
 
-To mount an S3 bucket on startup, make sure the credential is
-configured for `root`, and can add this to `/etc/fstab`:
+To mount an S3 bucket on startup make sure the credential is
+configured for `root` and add this to `/etc/fstab`:
 
 ```
 bucket    /mnt/mountpoint    fuse.geesefs    _netdev,allow_other,--file-mode=0666,--dir-mode=0777    0    0
 ```
+
+You can also use a different path to the credentials file by adding `,--shared-config=/path/to/credentials`.
 
 See also: [Instruction for Azure Blob Storage](https://github.com/yandex-cloud/geesefs/blob/master/README-azure.md).
 
