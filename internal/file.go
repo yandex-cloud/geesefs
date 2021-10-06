@@ -1272,7 +1272,7 @@ func (inode *Inode) SendUpload() bool {
 		return true
 	}
 
-	if inode.CacheState == ST_MODIFIED && inode.userMetadataDirty &&
+	if inode.CacheState == ST_MODIFIED && inode.userMetadataDirty != 0 &&
 		inode.oldParent == nil && inode.IsFlushing == 0 {
 		hasDirty := false
 		for i := 0; i < len(inode.buffers); i++ {
@@ -1285,7 +1285,7 @@ func (inode *Inode) SendUpload() bool {
 		if !hasDirty {
 			// Update metadata by COPYing into the same object
 			// It results in the optimized implementation in S3
-			inode.userMetadataDirty = false
+			inode.userMetadataDirty = 0
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, 1)
 			go func() {
@@ -1300,7 +1300,7 @@ func (inode *Inode) SendUpload() bool {
 				inode.recordFlushError(err)
 				if err != nil {
 					mappedErr := mapAwsError(err)
-					inode.userMetadataDirty = true
+					inode.userMetadataDirty = 2
 					if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 						// Object is deleted or resized remotely (416). Discard local version
 						log.Warnf("File %v is deleted or resized remotely, discarding local changes", inode.FullName())
@@ -1340,10 +1340,17 @@ func (inode *Inode) SendUpload() bool {
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
 		go func() {
-			resp, err := cloud.MultipartBlobBegin(&MultipartBlobBeginInput{
+			params := &MultipartBlobBeginInput{
 				Key: key,
 				ContentType: inode.fs.flags.GetMimeType(key),
-			})
+			}
+			if inode.userMetadataDirty != 0 {
+				params.Metadata = escapeMetadata(inode.userMetadata)
+				// userMetadataDirty == 1 indicates that metadata wasn't changed
+				// since the multipart upload was initiated
+				inode.userMetadataDirty = 1
+			}
+			resp, err := cloud.MultipartBlobBegin(params)
 			inode.mu.Lock()
 			inode.recordFlushError(err)
 			if err != nil {
@@ -1442,7 +1449,7 @@ func (inode *Inode) SendUpload() bool {
 }
 
 func (inode *Inode) isStillDirty() bool {
-	if inode.userMetadataDirty || inode.oldParent != nil {
+	if inode.userMetadataDirty != 0 || inode.oldParent != nil {
 		return true
 	}
 	for i := 0; i < len(inode.buffers); i++ {
@@ -1545,9 +1552,9 @@ func (inode *Inode) FlushSmallObject() {
 		Size:        PUInt64(uint64(bufReader.Len())),
 		ContentType: inode.fs.flags.GetMimeType(inode.FullName()),
 	}
-	if inode.userMetadataDirty {
+	if inode.userMetadataDirty != 0 {
 		params.Metadata = escapeMetadata(inode.userMetadata)
-		inode.userMetadataDirty = false
+		inode.userMetadataDirty = 0
 	}
 
 	if inode.mpu != nil {
@@ -1569,11 +1576,11 @@ func (inode *Inode) FlushSmallObject() {
 	if err != nil {
 		log.Errorf("Failed to flush small file %v: %v", key, err)
 		if params.Metadata != nil {
-			inode.userMetadataDirty = true
+			inode.userMetadataDirty = 2
 		}
 	} else {
 		log.Debugf("Flushed small file %v", key)
-		stillDirty := inode.userMetadataDirty || inode.oldParent != nil
+		stillDirty := inode.userMetadataDirty != 0 || inode.oldParent != nil
 		for i := 0; i < len(inode.buffers); i++ {
 			b := inode.buffers[i]
 			if b.dirtyID != 0 {
@@ -1795,10 +1802,6 @@ func (inode *Inode) completeMultipart() {
 		}
 		// Finalize the upload
 		inode.mpu.NumParts = uint32(numParts)
-		if inode.userMetadataDirty {
-			inode.mpu.Metadata = escapeMetadata(inode.userMetadata)
-			inode.userMetadataDirty = false
-		}
 		inode.mu.Unlock()
 		resp, err := cloud.MultipartBlobCommit(inode.mpu)
 		inode.mu.Lock()
@@ -1807,13 +1810,16 @@ func (inode *Inode) completeMultipart() {
 			if err != nil {
 				log.Errorf("Failed to finalize multi-part upload of object %v: %v", key, err)
 				if inode.mpu.Metadata != nil {
-					inode.userMetadataDirty = true
+					inode.userMetadataDirty = 2
 				}
 			} else {
 				log.Debugf("Finalized multi-part upload of object %v", key)
+				if inode.mpu.Metadata != nil && inode.userMetadataDirty == 1 {
+					inode.userMetadataDirty = 0
+				}
 				inode.mpu = nil
 				inode.updateFromFlush(inode.Attributes.Size, resp.ETag, resp.LastModified, resp.StorageClass)
-				stillDirty := inode.userMetadataDirty || inode.oldParent != nil
+				stillDirty := inode.userMetadataDirty != 0 || inode.oldParent != nil
 				for i := 0; i < len(inode.buffers); {
 					if inode.buffers[i].state == BUF_FL_CLEARED {
 						inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)

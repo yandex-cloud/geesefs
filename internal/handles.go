@@ -145,7 +145,7 @@ type Inode struct {
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
 
-	userMetadataDirty bool
+	userMetadataDirty int
 	userMetadata map[string][]byte
 	s3Metadata   map[string][]byte
 
@@ -507,7 +507,7 @@ func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
 	}
 
 	meta[name] = Dup(value)
-	inode.userMetadataDirty = true
+	inode.userMetadataDirty = 2
 	if inode.CacheState == ST_CACHED {
 		inode.SetCacheState(ST_MODIFIED)
 		inode.fs.WakeupFlusher()
@@ -528,7 +528,7 @@ func (inode *Inode) RemoveXattr(name string) error {
 
 	if _, ok := meta[name]; ok {
 		delete(meta, name)
-		inode.userMetadataDirty = true
+		inode.userMetadataDirty = 2
 		if inode.CacheState == ST_CACHED {
 			inode.SetCacheState(ST_MODIFIED)
 			inode.fs.WakeupFlusher()

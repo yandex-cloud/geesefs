@@ -1089,7 +1089,7 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 				oldInode.mu.Lock()
 				oldInode.Id = parent.fs.allocateInodeId()
 				parent.fs.inodes[oldInode.Id] = oldInode
-				oldInode.userMetadataDirty = false
+				oldInode.userMetadataDirty = 0
 				oldInode.userMetadata = make(map[string][]byte)
 				oldInode.touch()
 				oldInode.refcnt = 0
@@ -1145,7 +1145,7 @@ func (parent *Inode) CreateSymlink(
 	inode = NewInode(fs, parent, name)
 	inode.userMetadata = make(map[string][]byte)
 	inode.userMetadata[inode.fs.flags.SymlinkAttr] = []byte(target)
-	inode.userMetadataDirty = true
+	inode.userMetadataDirty = 2
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 	inode.Attributes = InodeAttributes{

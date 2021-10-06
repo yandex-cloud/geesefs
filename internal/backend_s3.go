@@ -952,6 +952,8 @@ func (s *S3Backend) MultipartBlobBegin(param *MultipartBlobBeginInput) (*Multipa
 		mpu.ACL = &s.config.ACL
 	}
 
+	mpu.Metadata = metadataToLower(param.Metadata)
+
 	resp, err := s.CreateMultipartUpload(&mpu)
 	if err != nil {
 		s3Log.Errorf("CreateMultipartUpload %v = %v", param.Key, err)
@@ -960,7 +962,7 @@ func (s *S3Backend) MultipartBlobBegin(param *MultipartBlobBeginInput) (*Multipa
 
 	return &MultipartBlobCommitInput{
 		Key:      &param.Key,
-		Metadata: metadataToLower(param.Metadata),
+		Metadata: mpu.Metadata,
 		UploadId: resp.UploadId,
 		Parts:    make([]*string, 10000), // at most 10K parts
 	}, nil
