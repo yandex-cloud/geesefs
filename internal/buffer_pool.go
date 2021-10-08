@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"github.com/shirou/gopsutil/mem"
 )
 
@@ -189,16 +190,23 @@ func NewBufferPool(limit int64) *BufferPool {
 }
 
 func (pool *BufferPool) recomputeBufferLimit() {
-	pool.max = maxMemToUse(pool.cur)
+	pool.max = maxMemToUse(atomic.LoadInt64(&pool.cur))
 	if pool.limit > 0 && pool.max > pool.limit {
 		pool.max = pool.limit
 	}
 }
 
 func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) {
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-	pool.UseUnlocked(size, ignoreMemoryLimit)
+	if size <= 0 {
+		atomic.AddInt64(&pool.cur, size)
+		if pool.wantFree > 0 {
+			pool.cond.Broadcast()
+		}
+	} else {
+		pool.mu.Lock()
+		pool.UseUnlocked(size, ignoreMemoryLimit)
+		pool.mu.Unlock()
+	}
 }
 
 func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) {
@@ -211,31 +219,31 @@ func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) {
 		}
 	}
 
-	if size > 0 && pool.cur+size > pool.max {
+	newSize := atomic.AddInt64(&pool.cur, size)
+
+	if size > 0 && newSize > pool.max {
 		// Try to free clean buffers, then flush dirty buffers
-		freed, canFreeMoreAsync := pool.FreeSomeCleanBuffers(pool.cur+size - pool.max)
-		bufferLog.Debugf("Freed %v, now: %v %v %v", freed, pool.cur, size, pool.max)
-		for pool.cur+size > pool.max && canFreeMoreAsync && !ignoreMemoryLimit {
+		freed, canFreeMoreAsync := pool.FreeSomeCleanBuffers(newSize - pool.max)
+		bufferLog.Debugf("Freed %v, now: %v/%v", freed, newSize, pool.max)
+		for atomic.LoadInt64(&pool.cur) > pool.max && canFreeMoreAsync && !ignoreMemoryLimit {
 			pool.wantFree++
 			pool.cond.Wait()
 			pool.wantFree--
-			freed, canFreeMoreAsync = pool.FreeSomeCleanBuffers(pool.cur+size - pool.max)
-			bufferLog.Debugf("Freed %v, now: %v %v %v", freed, pool.cur, size, pool.max)
+			freed, canFreeMoreAsync = pool.FreeSomeCleanBuffers(atomic.LoadInt64(&pool.cur) - pool.max)
+			bufferLog.Debugf("Freed %v, now: %v/%v", freed, atomic.LoadInt64(&pool.cur), pool.max)
 		}
-		if pool.cur+size > pool.max && !ignoreMemoryLimit {
+		if atomic.LoadInt64(&pool.cur) > pool.max && !ignoreMemoryLimit {
 			debug.FreeOSMemory()
 			pool.recomputeBufferLimit()
-			if pool.cur+size > pool.max {
+			if atomic.LoadInt64(&pool.cur) > pool.max {
 				// we can't free anything else asynchronously, and we've made attempts to
 				// free memory AND correct our limits, yet we still can't allocate.
 				// it's likely that we are simply asking for too much
-				log.Errorf("Unable to allocate %d bytes, used %d bytes, limit is %d bytes", size, pool.cur, pool.max)
+				log.Errorf("Unable to allocate %d bytes, used %d bytes, limit is %d bytes", size, atomic.LoadInt64(&pool.cur)-size, pool.max)
 				panic("OOM")
 			}
 		}
 	}
-
-	pool.cur += size
 
 	if size < 0 && pool.wantFree > 0 {
 		pool.cond.Broadcast()
