@@ -44,6 +44,7 @@ jobs:
       # Often crashes in CI due to memory limits
       continue-on-error: true
       run: make run-xfstests
+      timeout-minutes: 10
 
     - uses: "marvinpinto/action-automatic-releases@latest"
       with:
