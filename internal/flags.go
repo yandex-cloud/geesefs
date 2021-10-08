@@ -29,7 +29,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-const GEESEFS_VERSION = "0.28.6"
+const GEESEFS_VERSION = "0.28.7"
 
 var flagCategories map[string]string
 

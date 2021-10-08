@@ -1,3 +1,10 @@
+geesefs (0.28.7) stable; urgency=medium
+
+  * Fix multipart file xattrs not being saved to S3
+  * Fix compatibility with [closed-source :-(] macfuse 4.x
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 08 Oct 2021 16:27:36 +0300
+
 geesefs (0.28.6) stable; urgency=medium
 
   * Do not remove unmodified inodes from cache just to re-add them back when listing
