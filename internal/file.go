@@ -674,7 +674,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 				refs: 1,
 			}
 			if ib.state == BUF_FL_CLEARED {
-				ib.state = BUF_FLUSHED
+				ib.state = BUF_FLUSHED_FULL
 			}
 			loadedFromDisk += requestSize
 		}
@@ -1429,7 +1429,6 @@ func (inode *Inode) SendUpload() bool {
 		partLocked = partLocked || inode.IsRangeLocked(buf.offset, buf.length, true)
 		partEvicted = partEvicted || buf.state == BUF_FL_CLEARED
 	}
-
 	if canComplete && (inode.fileHandles == 0 || inode.forceFlush ||
 		inode.fs.bufferPool.wantFree > 0 && hasEvictedParts) {
 		// Complete the multipart upload
@@ -1693,6 +1692,7 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 func (inode *Inode) FlushPart(part uint64) {
 
 	partOffset, partSize := inode.fs.partRange(part)
+	partFullSize := partSize
 
 	cloud, key := inode.cloud()
 	if inode.oldParent != nil {
@@ -1736,11 +1736,12 @@ func (inode *Inode) FlushPart(part uint64) {
 
 	// Finally upload it
 	bufReader, bufIds := inode.GetMultiReader(partOffset, partSize)
+	bufLen := bufReader.Len()
 	partInput := MultipartBlobAddInput{
 		Commit:     inode.mpu,
 		PartNumber: uint32(part+1),
 		Body:       bufReader,
-		Size:       bufReader.Len(),
+		Size:       bufLen,
 		Offset:     partOffset,
 	}
 	inode.mu.Unlock()
@@ -1759,6 +1760,10 @@ func (inode *Inode) FlushPart(part uint64) {
 			// It could become nil if the file was deleted remotely in the meantime
 			inode.mpu.Parts[part] = resp.PartId
 		}
+		doneState := BUF_FLUSHED_FULL
+		if bufLen < partFullSize {
+			doneState = BUF_FLUSHED_CUT
+		}
 		log.Debugf("Flushed part %v of object %v", part, key)
 		for i := 0; i < len(inode.buffers); i++ {
 			b := inode.buffers[i]
@@ -1766,7 +1771,7 @@ func (inode *Inode) FlushPart(part uint64) {
 				if bufIds[b.dirtyID] {
 					// Still dirty because the upload is not completed yet,
 					// but flushed to the server
-					b.state = BUF_FLUSHED
+					b.state = doneState
 				}
 			}
 		}
@@ -1824,7 +1829,8 @@ func (inode *Inode) completeMultipart() {
 					if inode.buffers[i].state == BUF_FL_CLEARED {
 						inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)
 					} else {
-						if inode.buffers[i].state == BUF_FLUSHED {
+						if inode.buffers[i].state == BUF_FLUSHED_FULL ||
+							inode.buffers[i].state == BUF_FLUSHED_CUT {
 							inode.buffers[i].dirtyID = 0
 							inode.buffers[i].state = BUF_CLEAN
 						}

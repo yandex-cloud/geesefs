@@ -65,10 +65,19 @@ type MPUPart struct {
 }
 
 const (
+	// Buffer is clean
 	BUF_CLEAN int16 = 1
+	// Buffer is modified locally
 	BUF_DIRTY int16 = 2
-	BUF_FLUSHED int16 = 3
-	BUF_FL_CLEARED int16 = 4
+	// Buffer is flushed to the server as a full part, but multipart upload is not finalized yet
+	BUF_FLUSHED_FULL int16 = 3
+	// Buffer is flushed to the server as an undersized part
+	// (and multipart upload is not finalized yet)
+	BUF_FLUSHED_CUT int16 = 4
+	// Buffer is flushed to the server and then removed from memory
+	// (which is only possible for BUF_FLUSHED_FULL buffers)
+	// (and multipart upload is not finalized yet)
+	BUF_FL_CLEARED int16 = 5
 )
 
 type FileBuffer struct {

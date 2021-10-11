@@ -367,7 +367,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 				break
 			}
 			buf := inode.buffers[i]
-			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED {
+			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED_FULL {
 				if buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) {
 					if fs.flags.CachePath != "" && !buf.onDisk {
 						if toFs == -1 {
@@ -406,7 +406,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 							del = i
 						}
 						continue
-					} else if buf.state == BUF_FLUSHED {
+					} else if buf.state == BUF_FLUSHED_FULL {
 						// A flushed buffer can be removed at a cost of finalizing multipart upload
 						// to read it back later. However it's likely not a problem if we're uploading
 						// a large file because we may never need to read it back.
