@@ -1,3 +1,9 @@
+geesefs (0.29.0) stable; urgency=medium
+
+  * Fix several bugs which were leading to crashes under parallel workloads
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 11 Oct 2021 20:04:23 +0300
+
 geesefs (0.28.7) stable; urgency=medium
 
   * Fix multipart file xattrs not being saved to S3
