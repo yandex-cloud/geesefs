@@ -353,18 +353,7 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 	}
 	inode.logFuse("DeRef", n, res)
 	if res == 0 && inode.CacheState == ST_CACHED {
-		// Clear buffers
-		for i := 0; i < len(inode.buffers); i++ {
-			b := inode.buffers[i]
-			if !b.zero {
-				b.ptr.refs--
-				if b.ptr.refs == 0 {
-					inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
-				}
-				b.ptr = nil
-				b.data = nil
-			}
-		}
+		inode.resetCache()
 		inode.fs.mu.Lock()
 		delete(inode.fs.inodes, inode.Id)
 		inode.fs.forgotCnt += 1
