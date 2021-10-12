@@ -1,3 +1,9 @@
+geesefs (0.29.1) stable; urgency=medium
+
+  * Implement MkNodeOp to fix file creation via the nfs-kernel-server
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 12 Oct 2021 14:59:23 +0300
+
 geesefs (0.29.0) stable; urgency=medium
 
   * Fix several bugs which were leading to crashes under parallel workloads
