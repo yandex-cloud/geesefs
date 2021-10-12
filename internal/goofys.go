@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/url"
+	"os"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -1358,6 +1359,49 @@ func (fs *Goofys) CreateFile(
 	op.Handle = handleID
 
 	inode.logFuse("<-- CreateFile")
+
+	return
+}
+
+// MkNode is required for NFS even with regular files
+// because kernel nfsd uses vfs_create() -> fuse_create() -> fuse_mknod()
+// and then separate fuse_open() for file creation instead of fuse_create_open()
+func (fs *Goofys) MkNode(
+	ctx context.Context,
+	op *fuseops.MkNodeOp) (err error) {
+
+	if (op.Mode & os.ModeType) != os.ModeDir &&
+		(op.Mode & os.ModeType) != 0 {
+		// Special files are not supported yet
+		return syscall.ENOTSUP
+	}
+
+	fs.mu.RLock()
+	parent := fs.getInodeOrDie(op.Parent)
+	fs.mu.RUnlock()
+
+	if atomic.LoadInt32(&parent.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
+	var inode *Inode
+	if (op.Mode & os.ModeType) == os.ModeDir {
+		inode, err = parent.MkDir(op.Name)
+		if err != nil {
+			err = mapAwsError(err)
+			return err
+		}
+	} else {
+		var fh *FileHandle
+		inode, fh = parent.Create(op.Name)
+		fh.Release()
+	}
+
+	op.Entry.Child = inode.Id
+	op.Entry.Attributes = inode.InflateAttributes()
+	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 
 	return
 }
