@@ -1,3 +1,9 @@
+geesefs (0.29.2) stable; urgency=medium
+
+  * Implement best-effort support for directory seeks, required for nfs-kernel-server
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 15 Oct 2021 16:56:24 +0300
+
 geesefs (0.29.1) stable; urgency=medium
 
   * Implement MkNodeOp to fix file creation via the nfs-kernel-server
