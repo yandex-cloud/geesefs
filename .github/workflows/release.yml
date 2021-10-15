@@ -40,12 +40,6 @@ jobs:
       continue-on-error: true
       run: make run-test
 
-    - name: Run xfstests
-      # Often crashes in CI due to memory limits
-      continue-on-error: true
-      run: make run-xfstests
-      timeout-minutes: 10
-
     - uses: "marvinpinto/action-automatic-releases@latest"
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
@@ -54,3 +48,9 @@ jobs:
           geesefs-linux-amd64
           geesefs-mac-amd64
           geesefs-mac-arm64
+
+    - name: Run xfstests
+      # Often crashes in CI due to memory limits
+      continue-on-error: true
+      run: make run-xfstests
+      timeout-minutes: 10
