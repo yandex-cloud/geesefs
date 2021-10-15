@@ -1112,15 +1112,26 @@ func (fs *Goofys) ReadDir(
 	dh.mu.Lock()
 
 	if op.Offset != 0 && op.Offset != dh.lastExternalOffset {
-		// seekdir() to an arbitrary offset is not supported
-		// jacobsa/fuse says it's not a problem
-		fuseLog.Errorf("Readdir %v at %v instead of expected %v or 0", inode.FullName(), op.Offset, dh.lastExternalOffset)
-		err = syscall.ENOTSUP
-		dh.mu.Unlock()
-		return
-	}
-
-	if op.Offset == 0 {
+		// Do our best to support directory seeks even though we can't guarantee
+		// consistent listings in this case (i.e. files may be duplicated or skipped on changes)
+		// 'Normal' software doesn't seek within the directory.
+		// nfs-kernel-server, though, does: it closes the dir between paged listing calls.
+		fuseLog.Debugf("Directory seek from %v to %v in %v", op.Offset, dh.lastExternalOffset, inode.FullName())
+		inode.mu.Lock()
+		dh.lastExternalOffset = op.Offset
+		dh.lastInternalOffset = int(op.Offset)
+		if dh.lastInternalOffset > len(inode.dir.Children) {
+			dh.lastInternalOffset = len(inode.dir.Children)
+		}
+		if len(inode.dir.Children) > 0 {
+			inode.dir.Children[dh.lastInternalOffset-1].mu.Lock()
+			dh.lastName = inode.dir.Children[dh.lastInternalOffset-1].Name
+			inode.dir.Children[dh.lastInternalOffset-1].mu.Unlock()
+		} else {
+			dh.lastName = ""
+		}
+		inode.mu.Unlock()
+	} else if op.Offset == 0 {
 		dh.lastExternalOffset = 0
 		dh.lastInternalOffset = 0
 		dh.lastName = ""
