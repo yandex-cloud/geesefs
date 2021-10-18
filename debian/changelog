@@ -1,3 +1,9 @@
+geesefs (0.29.3) stable; urgency=medium
+
+  * Fix files disappearing from listings for short time after upload
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 18 Oct 2021 15:34:29 +0300
+
 geesefs (0.29.2) stable; urgency=medium
 
   * Implement best-effort support for directory seeks, required for nfs-kernel-server
