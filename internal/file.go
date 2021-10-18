@@ -1873,6 +1873,7 @@ func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *tim
 	}
 	inode.knownSize = size
 	inode.knownETag = *etag
+	inode.AttrTime = time.Now()
 }
 
 func (inode *Inode) SyncFile() (err error) {
