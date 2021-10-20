@@ -31,7 +31,7 @@ var bufferLog = GetLogger("buffer")
 type BufferPool struct {
 	mu   sync.Mutex
 	cond *sync.Cond
-	wantFree int
+	wantFree int32
 
 	curDirtyID uint64
 
@@ -199,7 +199,7 @@ func (pool *BufferPool) recomputeBufferLimit() {
 func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) {
 	if size <= 0 {
 		atomic.AddInt64(&pool.cur, size)
-		if pool.wantFree > 0 {
+		if atomic.LoadInt32(&pool.wantFree) > 0 {
 			pool.cond.Broadcast()
 		}
 	} else {
@@ -226,9 +226,9 @@ func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) {
 		freed, canFreeMoreAsync := pool.FreeSomeCleanBuffers(newSize - pool.max)
 		bufferLog.Debugf("Freed %v, now: %v/%v", freed, newSize, pool.max)
 		for atomic.LoadInt64(&pool.cur) > pool.max && canFreeMoreAsync && !ignoreMemoryLimit {
-			pool.wantFree++
+			atomic.AddInt32(&pool.wantFree, 1)
 			pool.cond.Wait()
-			pool.wantFree--
+			atomic.AddInt32(&pool.wantFree, -1)
 			freed, canFreeMoreAsync = pool.FreeSomeCleanBuffers(atomic.LoadInt64(&pool.cur) - pool.max)
 			bufferLog.Debugf("Freed %v, now: %v/%v", freed, atomic.LoadInt64(&pool.cur), pool.max)
 		}
@@ -245,7 +245,7 @@ func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) {
 		}
 	}
 
-	if size < 0 && pool.wantFree > 0 {
+	if size < 0 && atomic.LoadInt32(&pool.wantFree) > 0 {
 		pool.cond.Broadcast()
 	}
 }
