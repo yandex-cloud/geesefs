@@ -1383,64 +1383,78 @@ func (inode *Inode) SendUpload() bool {
 	partZero := false
 	hasEvictedParts := false
 	canComplete := true
-	for i := 0; i <= len(inode.buffers); i++ {
-		var buf *FileBuffer
-		var part uint64
-		if i < len(inode.buffers) {
-			buf = inode.buffers[i]
-			part = inode.fs.partNum(buf.offset)
-		} else {
-			part = 1+inode.fs.partNum(inode.Attributes.Size-1)
-		}
-		for lastPart < part {
-			// Don't flush parts that are being currently flushed
-			if partLocked {
-				canComplete = false
-			// Don't flush empty ranges when we're not under pressure
-			} else if partZero && !flushInode {
-				canComplete = false
-			// Don't flush parts that require RMW with evicted buffers
-			} else if partDirty && !partEvicted {
-				canComplete = false
-				// Don't write out the last part that's still written to (if not under memory pressure)
-				if flushInode || lastPart != inode.fs.partNum(inode.lastWriteEnd) {
-					// Found
-					partOffset, partSize := inode.fs.partRange(lastPart)
-					// Guard part against eviction
-					inode.LockRange(partOffset, partSize, true)
-					inode.IsFlushing++
-					atomic.AddInt64(&inode.fs.activeFlushers, 1)
-					go func(lastPart, partOffset, partSize uint64) {
-						inode.mu.Lock()
-						inode.FlushPart(lastPart)
-						inode.UnlockRange(partOffset, partSize, true)
-						inode.IsFlushing--
-						inode.mu.Unlock()
-						atomic.AddInt64(&inode.fs.activeFlushers, -1)
-						inode.fs.WakeupFlusher()
-					}(lastPart, partOffset, partSize)
-					initiated = true
-					if atomic.LoadInt64(&inode.fs.activeFlushers) >= inode.fs.flags.MaxFlushers ||
-						inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
-						return true
-					}
+	processPart := func() bool {
+		// Don't flush parts that are being currently flushed
+		if partLocked {
+			canComplete = false
+		// Don't flush empty ranges when we're not under pressure
+		} else if partZero && !flushInode {
+			canComplete = false
+		// Don't flush parts that require RMW with evicted buffers
+		} else if partDirty && !partEvicted {
+			canComplete = false
+			// Don't write out the last part that's still written to (if not under memory pressure)
+			if flushInode || lastPart != inode.fs.partNum(inode.lastWriteEnd) {
+				partOffset, partSize := inode.fs.partRange(lastPart)
+				// Guard part against eviction
+				inode.LockRange(partOffset, partSize, true)
+				inode.IsFlushing++
+				atomic.AddInt64(&inode.fs.activeFlushers, 1)
+				go func(lastPart, partOffset, partSize uint64) {
+					inode.mu.Lock()
+					inode.FlushPart(lastPart)
+					inode.UnlockRange(partOffset, partSize, true)
+					inode.IsFlushing--
+					inode.mu.Unlock()
+					atomic.AddInt64(&inode.fs.activeFlushers, -1)
+					inode.fs.WakeupFlusher()
+				}(lastPart, partOffset, partSize)
+				initiated = true
+				if atomic.LoadInt64(&inode.fs.activeFlushers) >= inode.fs.flags.MaxFlushers ||
+					inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
+					return true
 				}
-			} else if partDirty && partEvicted {
-				hasEvictedParts = true
 			}
-			lastPart++
+		} else if partDirty && partEvicted {
+			hasEvictedParts = true
+		}
+		return false
+	}
+	for i := 0; i < len(inode.buffers); i++ {
+		buf := inode.buffers[i]
+		startPart := inode.fs.partNum(buf.offset)
+		endPart := inode.fs.partNum(buf.offset + buf.length - 1)
+		if i == 0 || startPart != lastPart {
+			if i > 0 {
+				if processPart() {
+					return true
+				}
+			}
 			partDirty = false
 			partLocked = false
 			partEvicted = false
 			partZero = false
-		}
-		if i >= len(inode.buffers) {
-			break
+			lastPart = startPart
 		}
 		partDirty = partDirty || buf.state == BUF_DIRTY
 		partLocked = partLocked || inode.IsRangeLocked(buf.offset, buf.length, true)
 		partEvicted = partEvicted || buf.state == BUF_FL_CLEARED
 		partZero = partZero || buf.zero
+		for lastPart < endPart {
+			if processPart() {
+				return true
+			}
+			partDirty = buf.state == BUF_DIRTY
+			partLocked = inode.IsRangeLocked(buf.offset, buf.length, true)
+			partEvicted = buf.state == BUF_FL_CLEARED
+			partZero = buf.zero
+			lastPart++
+		}
+	}
+	if len(inode.buffers) > 0 {
+		if processPart() {
+			return true
+		}
 	}
 	if canComplete && (inode.fileHandles == 0 || inode.forceFlush ||
 		atomic.LoadInt32(&inode.fs.bufferPool.wantFree) > 0 && hasEvictedParts) {
