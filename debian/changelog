@@ -1,3 +1,9 @@
+geesefs (0.29.6) stable; urgency=medium
+
+  * Fix part picking for flush
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 20 Oct 2021 21:49:08 +0300
+
 geesefs (0.29.5) stable; urgency=medium
 
   * Do not accidentally forget files after flushing mkdir, rename and metadata change
