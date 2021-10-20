@@ -1377,6 +1377,7 @@ func (inode *Inode) SendUpload() bool {
 	partDirty := false
 	partLocked := false
 	partEvicted := false
+	partZero := false
 	hasEvictedParts := false
 	canComplete := true
 	for i := 0; i <= len(inode.buffers); i++ {
@@ -1389,9 +1390,13 @@ func (inode *Inode) SendUpload() bool {
 			part = 1+inode.fs.partNum(inode.Attributes.Size-1)
 		}
 		for lastPart < part {
-			// Don't flush parts that require RMW with evicted buffers
+			// Don't flush parts that are being currently flushed
 			if partLocked {
 				canComplete = false
+			// Don't flush empty ranges when we're not under pressure
+			} else if partZero && !flushInode {
+				canComplete = false
+			// Don't flush parts that require RMW with evicted buffers
 			} else if partDirty && !partEvicted {
 				canComplete = false
 				// Don't write out the last part that's still written to (if not under memory pressure)
@@ -1424,6 +1429,7 @@ func (inode *Inode) SendUpload() bool {
 			partDirty = false
 			partLocked = false
 			partEvicted = false
+			partZero = false
 		}
 		if i >= len(inode.buffers) {
 			break
@@ -1431,6 +1437,7 @@ func (inode *Inode) SendUpload() bool {
 		partDirty = partDirty || buf.state == BUF_DIRTY
 		partLocked = partLocked || inode.IsRangeLocked(buf.offset, buf.length, true)
 		partEvicted = partEvicted || buf.state == BUF_FL_CLEARED
+		partZero = partZero || buf.zero
 	}
 	if canComplete && (inode.fileHandles == 0 || inode.forceFlush ||
 		inode.fs.bufferPool.wantFree > 0 && hasEvictedParts) {
