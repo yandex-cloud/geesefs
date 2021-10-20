@@ -368,6 +368,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 				break
 			}
 			buf := inode.buffers[i]
+			// Never evict buffers flushed in an incomplete (last) part
 			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED_FULL {
 				if buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) {
 					if fs.flags.CachePath != "" && !buf.onDisk {

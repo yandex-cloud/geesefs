@@ -1322,7 +1322,7 @@ func (inode *Inode) SendUpload() bool {
 		}
 	}
 
-	if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 {
+	if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 && inode.mpu == nil {
 		// Don't flush small files with active file handles (if not under memory pressure)
 		if inode.IsFlushing == 0 && (inode.fileHandles == 0 || inode.forceFlush || inode.fs.bufferPool.wantFree > 0) {
 			// Don't accidentally trigger a parallel multipart flush
@@ -1525,7 +1525,7 @@ func (inode *Inode) FlushSmallObject() {
 	inode.LockRange(0, sz, true)
 
 	if inode.CacheState == ST_MODIFIED {
-		err := inode.CheckLoadRange(0, sz, 0, true)
+		err := inode.LoadRange(0, sz, 0, true)
 		mappedErr := mapAwsError(err)
 		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
@@ -1715,7 +1715,11 @@ func (inode *Inode) FlushPart(part uint64) {
 		// Ignore memory limit to not produce a deadlock when we need to free some memory
 		// by flushing objects, but we can't flush a part without allocating more memory
 		// for read-modify-write...
-		err := inode.CheckLoadRange(partOffset, partSize, 0, true)
+		err := inode.LoadRange(partOffset, partSize, 0, true)
+		if err == syscall.ESPIPE {
+			// Part is partly evicted, we can't flush it
+			return
+		}
 		mappedErr := mapAwsError(err)
 		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
