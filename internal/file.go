@@ -1200,6 +1200,7 @@ func (inode *Inode) SendUpload() bool {
 							if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
 								!inode.isStillDirty() {
 								inode.SetCacheState(ST_CACHED)
+								inode.AttrTime = time.Now()
 							}
 						}
 						inode.mu.Unlock()
@@ -1232,6 +1233,7 @@ func (inode *Inode) SendUpload() bool {
 					if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
 						!inode.isStillDirty() {
 						inode.SetCacheState(ST_CACHED)
+						inode.AttrTime = time.Now()
 					}
 					inode.renamingTo = false
 					inode.mu.Unlock()
@@ -1312,6 +1314,7 @@ func (inode *Inode) SendUpload() bool {
 					log.Errorf("Error flushing metadata using COPY for %v: %v", key, err)
 				} else if inode.CacheState == ST_MODIFIED && !inode.isStillDirty() {
 					inode.SetCacheState(ST_CACHED)
+					inode.AttrTime = time.Now()
 				}
 				inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 				atomic.AddInt64(&inode.fs.activeFlushers, -1)

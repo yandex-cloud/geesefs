@@ -1125,6 +1125,7 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 	} else {
 		inode.ImplicitDir = true
 	}
+	inode.AttrTime = time.Now()
 	return
 }
 
@@ -1204,6 +1205,7 @@ func (dir *Inode) SendMkDir() {
 		}
 		if dir.CacheState == ST_CREATED || dir.CacheState == ST_MODIFIED {
 			dir.SetCacheState(ST_CACHED)
+			dir.AttrTime = time.Now()
 		}
 		dir.fs.WakeupFlusher()
 	}()
