@@ -1639,31 +1639,6 @@ func (inode *Inode) FlushSmallObject() {
 	inode.mu.Unlock()
 }
 
-func (inode *Inode) copyUnmodifiedRange(partNum, offset, size uint64) error {
-	cloud, key := inode.cloud()
-	if inode.oldParent != nil {
-		// Modify the object in the old place, move it when we're done with modifications
-		_, key = inode.oldParent.cloud()
-		key = appendChildName(key, inode.oldName)
-	}
-	log.Debugf("Copying unmodified range %v-%v MB of object %v", offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key)
-	resp, err := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
-		Commit:     inode.mpu,
-		PartNumber: uint32(partNum+1),
-		CopySource: key,
-		Offset:     offset,
-		Size:       size,
-	})
-	if err != nil {
-		log.Errorf("Failed to copy unmodified range %v-%v MB of object %v: %v", offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key, err)
-	} else {
-		inode.mu.Lock()
-		inode.mpu.Parts[partNum] = resp.PartId
-		inode.mu.Unlock()
-	}
-	return err
-}
-
 func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 	maxMerge := inode.fs.flags.MaxMergeCopyMB * 1024*1024
 
@@ -1695,16 +1670,46 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 		ranges = append(ranges, startPart, startOffset, endOffset-startOffset)
 	}
 	if len(ranges) > 0 {
+		cloud, key := inode.cloud()
+		if inode.oldParent != nil {
+			// Modify the object in the old place, move it when we're done with modifications
+			_, key = inode.oldParent.cloud()
+			key = appendChildName(key, inode.oldName)
+		}
+		mpu := inode.mpu
 		guard := make(chan int, inode.fs.flags.MaxParallelCopy)
 		var wg sync.WaitGroup
 		inode.mu.Unlock()
 		for i := 0; i < len(ranges); i += 3 {
 			guard <- i
+			if err != nil {
+				break
+			}
 			wg.Add(1)
-			go func(part, offset, size uint64) {
-				requestErr := inode.copyUnmodifiedRange(part, offset, size)
-				if requestErr != nil {
-					err = requestErr
+			go func(partNum, offset, size uint64) {
+				inode.mu.Lock()
+				if inode.mpu == nil {
+					// Upload was canceled (file deleted)
+					inode.mu.Unlock()
+					err = fuse.ENOENT
+				} else {
+					inode.mu.Unlock()
+					log.Debugf("Copying unmodified range %v-%v MB of object %v",
+						offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key)
+					resp, requestErr := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
+						Commit:     mpu,
+						PartNumber: uint32(partNum+1),
+						CopySource: key,
+						Offset:     offset,
+						Size:       size,
+					})
+					if requestErr != nil {
+						log.Errorf("Failed to copy unmodified range %v-%v MB of object %v: %v",
+							offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key, requestErr)
+						err = requestErr
+					} else {
+						mpu.Parts[partNum] = resp.PartId
+					}
 				}
 				wg.Done()
 				<- guard
@@ -1821,6 +1826,10 @@ func (inode *Inode) completeMultipart() {
 		numParts++
 	}
 	err := inode.copyUnmodifiedParts(numParts)
+	if !(inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
+		// State changed, abort this flush (even if we get ENOENT)
+		return
+	}
 	mappedErr := mapAwsError(err)
 	if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 		// Object is deleted or resized remotely (416). Discard local version
