@@ -1152,6 +1152,7 @@ func (inode *Inode) SendUpload() bool {
 	}
 
 	if inode.oldParent != nil && inode.IsFlushing == 0 && inode.mpu == nil {
+		// Send rename
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
 		_, from := inode.oldParent.cloud()
@@ -1173,10 +1174,12 @@ func (inode *Inode) SendUpload() bool {
 				// because if we used it we'd have to do it under the inode lock. Because otherwise
 				// a parallel read could hit a non-existing name. So, with S3, we do it in 2 passes.
 				// First we copy the object, change the inode name, and then we delete the old copy.
+				inode.fs.addInflightChange(key)
 				_, err = cloud.CopyBlob(&CopyBlobInput{
 					Source:      from,
 					Destination: key,
 				})
+				inode.fs.completeInflightChange(key)
 				notFoundIgnore := false
 				if err != nil {
 					mappedErr := mapAwsError(err)
@@ -1239,9 +1242,11 @@ func (inode *Inode) SendUpload() bool {
 					inode.mu.Unlock()
 					// Now delete the old key
 					if !notFoundIgnore {
+						inode.fs.addInflightChange(delKey)
 						_, err = cloud.DeleteBlob(&DeleteBlobInput{
 							Key: delKey,
 						})
+						inode.fs.completeInflightChange(delKey)
 					}
 					if err != nil {
 						log.Debugf("Failed to delete %v during rename, will retry later", delKey)
@@ -1294,6 +1299,7 @@ func (inode *Inode) SendUpload() bool {
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, 1)
 			go func() {
+				inode.fs.addInflightChange(key)
 				_, err := cloud.CopyBlob(&CopyBlobInput{
 					Source:      key,
 					Destination: key,
@@ -1301,6 +1307,7 @@ func (inode *Inode) SendUpload() bool {
 					ETag:        PString(inode.knownETag),
 					Metadata:    escapeMetadata(inode.userMetadata),
 				})
+				inode.fs.completeInflightChange(key)
 				inode.mu.Lock()
 				inode.recordFlushError(err)
 				if err != nil {
@@ -1595,7 +1602,9 @@ func (inode *Inode) FlushSmallObject() {
 		inode.mpu = nil
 	}
 	inode.mu.Unlock()
+	inode.fs.addInflightChange(key)
 	resp, err := cloud.PutBlob(params)
+	inode.fs.completeInflightChange(key)
 	inode.mu.Lock()
 
 	inode.recordFlushError(err)
@@ -1848,7 +1857,9 @@ func (inode *Inode) completeMultipart() {
 		// Finalize the upload
 		inode.mpu.NumParts = uint32(numParts)
 		inode.mu.Unlock()
+		inode.fs.addInflightChange(key)
 		resp, err := cloud.MultipartBlobCommit(inode.mpu)
+		inode.fs.completeInflightChange(key)
 		inode.mu.Lock()
 		if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
 			inode.recordFlushError(err)

@@ -24,7 +24,6 @@ import (
 	"net/url"
 	"os"
 	"runtime/debug"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,9 +88,11 @@ type Goofys struct {
 	// GUARDED_BY(mu)
 	inodes map[fuseops.InodeID]*Inode
 
+	// Inflight changes are tracked to skip them in parallel listings
+	// Required because we don't have guarantees about listing & change ordering
 	inflightListingId int
-	inflightListings []int
-	inflightListDeletes []string
+	inflightListings map[int]map[string]bool
+	inflightChanges map[string]int
 
 	nextHandleID fuseops.HandleID
 	dirHandles   map[fuseops.HandleID]*DirHandle
@@ -192,6 +193,8 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		umask:  0122,
 		lfru:   NewLFRU(flags.CachePopularThreshold, flags.CacheMaxHits, flags.CacheAgeInterval, flags.CacheAgeDecrement),
 		zeroBuf: make([]byte, 1048576),
+		inflightChanges: make(map[string]int),
+		inflightListings: make(map[int]map[string]bool),
 	}
 
 	var prefix string
@@ -1173,44 +1176,48 @@ func (fs *Goofys) ReadDir(
 	return
 }
 
-func (fs *Goofys) addInflightListing() int {
-	fs.inflightListingId++
-	myList := fs.inflightListingId
-	fs.inflightListings = append(fs.inflightListings, myList, len(fs.inflightListDeletes))
-	return myList
+// LOCKS_EXCLUDED(fs.mu)
+func (fs *Goofys) addInflightChange(key string) {
+	fs.mu.Lock()
+	fs.inflightChanges[key]++
+	for _, v := range fs.inflightListings {
+		v[key] = true
+	}
+	fs.mu.Unlock()
 }
 
-func (fs *Goofys) getDeleteOverrides(myList int) map[string]bool {
-	var forceDelete map[string]bool
-	listPos := 2 * sort.Search(len(fs.inflightListings)/2, func(i int) bool {
-		return fs.inflightListings[i*2] >= myList
-	})
-	if fs.inflightListings[listPos] != myList {
-		panic("listing disappeared")
+// LOCKS_EXCLUDED(fs.mu)
+func (fs *Goofys) completeInflightChange(key string) {
+	fs.mu.Lock()
+	fs.inflightChanges[key]--
+	if fs.inflightChanges[key] <= 0 {
+		delete(fs.inflightChanges, key)
 	}
-	for i := fs.inflightListings[listPos+1]; i < len(fs.inflightListDeletes); i++ {
-		if forceDelete == nil {
-			forceDelete = make(map[string]bool)
-		}
-		forceDelete[fs.inflightListDeletes[i]] = true
+	fs.mu.Unlock()
+}
+
+// LOCKS_EXCLUDED(fs.mu)
+func (fs *Goofys) addInflightListing() int {
+	fs.mu.Lock()
+	fs.inflightListingId++
+	id := fs.inflightListingId
+	m := make(map[string]bool)
+	for k, _ := range fs.inflightChanges {
+		m[k] = true
 	}
-	fs.inflightListings = append(
-		fs.inflightListings[0 : listPos],
-		fs.inflightListings[listPos+2 : ]...
-	)
-	minPos := len(fs.inflightListDeletes)
-	for i := 1; i < len(fs.inflightListings); i += 2 {
-		if fs.inflightListings[i] < minPos {
-			minPos = fs.inflightListings[i]
-		}
-	}
-	if minPos > 0 {
-		fs.inflightListDeletes = fs.inflightListDeletes[minPos : ]
-		for i := 1; i < len(fs.inflightListings); i += 2 {
-			fs.inflightListings[i] -= minPos
-		}
-	}
-	return forceDelete
+	fs.inflightListings[id] = m
+	fs.mu.Unlock()
+	return id
+}
+
+// For any listing, we forcibly exclude all objects modifications of which were
+// started before the completion of the listing, but were not completed before
+// the beginning of the listing.
+// LOCKS_REQUIRED(fs.mu)
+func (fs *Goofys) completeInflightListingUnlocked(id int) map[string]bool {
+	m := fs.inflightListings[id]
+	delete(fs.inflightListings, id)
+	return m
 }
 
 func (fs *Goofys) ReleaseDirHandle(

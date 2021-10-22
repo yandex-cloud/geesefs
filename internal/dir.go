@@ -264,9 +264,7 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 		startWith = PString(key+".\xF4\x8F\xBF\xBF")
 	}
 
-	parent.fs.mu.Lock()
 	myList := parent.fs.addInflightListing()
-	parent.fs.mu.Unlock()
 
 	params := &ListBlobsInput{
 		Prefix:     &prefix,
@@ -283,10 +281,10 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 		parent.mu.Lock()
 	}
 	parent.fs.mu.Lock()
-	forceDelete := parent.fs.getDeleteOverrides(myList)
+	skipListing := parent.fs.completeInflightListingUnlocked(myList)
 	dirs := make(map[*Inode]bool)
 	for _, obj := range resp.Items {
-		if forceDelete != nil && forceDelete[*obj.Key] {
+		if skipListing != nil && skipListing[*obj.Key] {
 			continue
 		}
 		baseName := (*obj.Key)[len(prefix):]
@@ -393,12 +391,12 @@ func listBlobsSafe(cloud StorageBackend, param *ListBlobsInput) (*ListBlobsOutpu
 	return res, nil
 }
 
-func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, forceDelete map[string]bool) {
+func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, skipListing map[string]bool) {
 	parent := dh.inode
 	fs := parent.fs
 
 	for _, dir := range resp.Prefixes {
-		if forceDelete != nil && forceDelete[*dir.Prefix] {
+		if skipListing != nil && skipListing[*dir.Prefix] {
 			continue
 		}
 		// strip trailing /
@@ -427,7 +425,7 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, forc
 	}
 
 	for _, obj := range resp.Items {
-		if forceDelete != nil && forceDelete[*obj.Key] {
+		if skipListing != nil && skipListing[*obj.Key] {
 			continue
 		}
 		baseName := (*obj.Key)[len(prefix):]
@@ -476,16 +474,14 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 		prefix += "/"
 	}
 
+	myList := dh.inode.fs.addInflightListing()
+
 	params := &ListBlobsInput{
 		Delimiter:         aws.String("/"),
 		ContinuationToken: dh.inode.dir.listMarker,
 		Prefix:            &prefix,
 	}
 	dh.mu.Unlock()
-
-	dh.inode.fs.mu.Lock()
-	myList := dh.inode.fs.addInflightListing()
-	dh.inode.fs.mu.Unlock()
 
 	resp, err := listBlobsSafe(cloud, params)
 	dh.mu.Lock()
@@ -498,8 +494,7 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	dh.inode.mu.Lock()
 	dh.inode.fs.mu.Lock()
 
-	forceDelete := dh.inode.fs.getDeleteOverrides(myList)
-	dh.handleListResult(resp, prefix, forceDelete)
+	dh.handleListResult(resp, prefix, dh.inode.fs.completeInflightListingUnlocked(myList))
 
 	dh.inode.fs.mu.Unlock()
 	dh.inode.mu.Unlock()
@@ -944,11 +939,14 @@ func (inode *Inode) SendDelete() {
 	inode.IsFlushing += inode.fs.flags.MaxParallelParts
 	implicit := inode.ImplicitDir
 	go func() {
+		// Delete may race with a parallel listing
 		var err error
 		if !implicit {
+			inode.fs.addInflightChange(key)
 			_, err = cloud.DeleteBlob(&DeleteBlobInput{
 				Key: key,
 			})
+			inode.fs.completeInflightChange(key)
 		}
 		inode.mu.Lock()
 		atomic.AddInt64(&inode.Parent.fs.activeFlushers, -1)
@@ -988,17 +986,6 @@ func (inode *Inode) SendDelete() {
 			inode.mu.Lock()
 			inode.DeRef(0)
 			inode.mu.Unlock()
-		}
-		if err == nil {
-			// Delete may race with a parallel listing :-X
-			// Monkey-fix the race :-) I suspect that it wouldn't be needed
-			// if all of the S3-FS sync code was implemented using CRDT or
-			// maybe something even more clever. But for now we use simple things. :-)
-			inode.fs.mu.Lock()
-			if len(inode.fs.inflightListings) > 0 {
-				inode.fs.inflightListDeletes = append(inode.fs.inflightListDeletes, key)
-			}
-			inode.fs.mu.Unlock()
 		}
 		inode.fs.WakeupFlusher()
 	}()
