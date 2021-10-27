@@ -272,6 +272,9 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 	}
 	resp, err := cloud.ListBlobs(params)
 	if err != nil {
+		parent.fs.mu.Lock()
+		parent.fs.completeInflightListingUnlocked(myList)
+		parent.fs.mu.Unlock()
 		s3Log.Errorf("ListObjects %v = %v", params, err)
 		return
 	}
@@ -486,6 +489,9 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	resp, err := listBlobsSafe(cloud, params)
 	dh.mu.Lock()
 	if err != nil {
+		dh.inode.fs.mu.Lock()
+		dh.inode.fs.completeInflightListingUnlocked(myList)
+		dh.inode.fs.mu.Unlock()
 		return
 	}
 
@@ -1613,8 +1619,12 @@ func (parent *Inode) findChildMaxTime() time.Time {
 }
 
 func (parent *Inode) LookUp(name string) (*Inode, error) {
+	myList := parent.fs.addInflightListing()
 	blob, err := parent.LookUpInodeMaybeDir(name)
 	if err != nil {
+		parent.fs.mu.Lock()
+		parent.fs.completeInflightListingUnlocked(myList)
+		parent.fs.mu.Unlock()
 		return nil, err
 	}
 	dirs := make(map[*Inode]bool)
@@ -1625,7 +1635,10 @@ func (parent *Inode) LookUp(name string) (*Inode, error) {
 	}
 	parent.mu.Lock()
 	parent.fs.mu.Lock()
-	parent.insertSubTree((*blob.Key)[prefixLen : ], blob, dirs)
+	skipListing := parent.fs.completeInflightListingUnlocked(myList)
+	if skipListing == nil || !skipListing[*blob.Key] {
+		parent.insertSubTree((*blob.Key)[prefixLen : ], blob, dirs)
+	}
 	parent.fs.mu.Unlock()
 	inode := parent.findChildUnlocked(name)
 	parent.mu.Unlock()
