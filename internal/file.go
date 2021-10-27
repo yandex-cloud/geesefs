@@ -1614,7 +1614,7 @@ func (inode *Inode) FlushSmallObject() {
 			inode.userMetadataDirty = 2
 		}
 	} else {
-		log.Debugf("Flushed small file %v", key)
+		log.Debugf("Flushed small file %v: etag=%v, size=%v", key, NilStr(resp.ETag), sz)
 		stillDirty := inode.userMetadataDirty != 0 || inode.oldParent != nil
 		for i := 0; i < len(inode.buffers); i++ {
 			b := inode.buffers[i]
@@ -1829,9 +1829,10 @@ func (inode *Inode) FlushPart(part uint64) {
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) completeMultipart() {
 	// Server-size copy unmodified parts
-	numParts := inode.fs.partNum(inode.Attributes.Size)
+	finalSize := inode.Attributes.Size
+	numParts := inode.fs.partNum(finalSize)
 	numPartOffset, _ := inode.fs.partRange(numParts)
-	if numPartOffset < inode.Attributes.Size {
+	if numPartOffset < finalSize {
 		numParts++
 	}
 	err := inode.copyUnmodifiedParts(numParts)
@@ -1869,12 +1870,12 @@ func (inode *Inode) completeMultipart() {
 					inode.userMetadataDirty = 2
 				}
 			} else {
-				log.Debugf("Finalized multi-part upload of object %v", key)
+				log.Debugf("Finalized multi-part upload of object %v: etag=%v, size=%v", key, NilStr(resp.ETag), finalSize)
 				if inode.mpu.Metadata != nil && inode.userMetadataDirty == 1 {
 					inode.userMetadataDirty = 0
 				}
 				inode.mpu = nil
-				inode.updateFromFlush(inode.Attributes.Size, resp.ETag, resp.LastModified, resp.StorageClass)
+				inode.updateFromFlush(finalSize, resp.ETag, resp.LastModified, resp.StorageClass)
 				stillDirty := inode.userMetadataDirty != 0 || inode.oldParent != nil
 				for i := 0; i < len(inode.buffers); {
 					if inode.buffers[i].state == BUF_FL_CLEARED {

@@ -192,9 +192,11 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// It's the simplest method of conflict resolution
 	// Otherwise we may not be able to make a correct object version
 	if item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize {
-		s3Log.Warnf("Conflict detected: server-side ETag or size of %v"+
-			" (%v, %v) differ from local (%v, %v). File is changed remotely, dropping cache",
-			NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
+		if inode.knownETag != "" || inode.knownSize > 0 {
+			s3Log.Warnf("Conflict detected: server-side ETag or size of %v"+
+				" (%v, %v) differ from local (%v, %v). File is changed remotely, dropping cache",
+				inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
+		}
 		inode.resetCache()
 		inode.ResizeUnlocked(item.Size, false)
 		inode.knownSize = item.Size
