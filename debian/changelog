@@ -1,4 +1,10 @@
-geesefs (0.29.7ubuntu1) unstable; urgency=medium
+geesefs (0.29.9) unstable; urgency=medium
+
+  * Fix the same race in one more place (in lookups, contrary to listings)
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 27 Oct 2021 16:13:44 +0300
+
+geesefs (0.29.8) unstable; urgency=medium
 
   * Fix a (rather rare) race between multipart upload completion and listing
     (similar to the delete/list race)
