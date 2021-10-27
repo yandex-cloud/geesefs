@@ -37,7 +37,6 @@ jobs:
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-arm64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-mac-arm64
 
     - name: Test
-      continue-on-error: true
       run: make run-test
 
     - uses: "marvinpinto/action-automatic-releases@latest"
