@@ -191,12 +191,16 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// We always just drop our local cache when inode size or etag changes remotely
 	// It's the simplest method of conflict resolution
 	// Otherwise we may not be able to make a correct object version
-	if item.ETag == nil && inode.knownETag == "" || inode.knownETag != *item.ETag || item.Size != inode.knownSize {
+	if item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize {
+		s3Log.Warnf("Conflict detected: server-side ETag or size of %v"+
+			" (%v, %v) differ from local (%v, %v). File is changed remotely, dropping cache",
+			NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
 		inode.resetCache()
 		inode.ResizeUnlocked(item.Size, false)
 		inode.knownSize = item.Size
 		if item.Metadata != nil {
 			inode.userMetadata = unescapeMetadata(item.Metadata)
+			inode.userMetadataDirty = 0
 		}
 	}
 	if item.LastModified != nil {
