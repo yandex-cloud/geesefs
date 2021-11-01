@@ -407,8 +407,9 @@ func (inode *Inode) fillXattr() (err error) {
 		if inode.isDir() {
 			key += "/"
 		}
-		params := &HeadBlobInput{Key: key}
-		resp, err := cloud.HeadBlob(params)
+		inode.mu.Unlock()
+		resp, err := cloud.HeadBlob(&HeadBlobInput{Key: key})
+		inode.mu.Lock()
 		if err != nil {
 			err = mapAwsError(err)
 			if err == fuse.ENOENT {
@@ -418,7 +419,7 @@ func (inode *Inode) fillXattr() (err error) {
 				}
 			}
 			return err
-		} else {
+		} else if inode.userMetadata == nil {
 			inode.fillXattrFromHead(resp)
 		}
 	}
@@ -464,6 +465,9 @@ func (inode *Inode) getXattrMap(name string, userOnly bool) (
 }
 
 func escapeMetadata(meta map[string][]byte) (metadata map[string]*string) {
+	if meta == nil {
+		return
+	}
 	metadata = make(map[string]*string)
 	for k, v := range meta {
 		k = strings.ToLower(xattrEscape(k))
