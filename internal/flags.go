@@ -225,6 +225,12 @@ func NewApp() (app *cli.App) {
 			Value: "48h",
 		},
 
+		cli.IntFlag{
+			Name:  "multipart-copy-threshold",
+			Usage: "Threshold for switching from single-part to multipart object copy in MB. Maximum for AWS S3 is 5 GB (default: 128 MB)",
+			Value: 128,
+		},
+
 		/// http://docs.aws.amazon.com/AmazonS3/latest/dev/acl-overview.html#canned-acl
 		cli.StringFlag{
 			Name:  "acl",
@@ -600,6 +606,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		listType := c.String("list-type")
 		config.ListV1Ext     = listType == "ext-v1"
 		config.ListV2        = listType == "2"
+
+		config.MultipartCopyThreshold = uint64(c.Int("multipart-copy-threshold")) * 1024 * 1024
 
 		// KMS implies SSE
 		if config.UseKMS {

@@ -61,6 +61,9 @@ type S3Backend struct {
 }
 
 func NewS3(bucket string, flags *FlagStorage, config *S3Config) (*S3Backend, error) {
+	if config.MultipartCopyThreshold == 0 {
+		config.MultipartCopyThreshold = 128*1024*1024
+	}
 	awsConfig, err := config.ToAwsConfig(flags)
 	if err != nil {
 		return nil, err
@@ -741,11 +744,9 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 		metadataDirective = s3.MetadataDirectiveReplace
 	}
 
-	COPY_LIMIT := uint64(5 * 1024 * 1024 * 1024)
-
 	// FIXME Remove additional HEAD query
 
-	if param.Size == nil || param.ETag == nil || (*param.Size > COPY_LIMIT &&
+	if param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
 		(param.Metadata == nil || param.StorageClass == nil)) {
 
 		params := &HeadBlobInput{Key: param.Source}
@@ -772,7 +773,7 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 
 	from := s.bucket + "/" + param.Source
 
-	if !s.gcs && *param.Size > COPY_LIMIT {
+	if !s.gcs && *param.Size > s.config.MultipartCopyThreshold {
 		reqId, err := s.copyObjectMultipart(int64(*param.Size), from, param.Destination, "", param.ETag, param.Metadata, param.StorageClass)
 		if err != nil {
 			return nil, err

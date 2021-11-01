@@ -46,6 +46,8 @@ type S3Config struct {
 	StorageClass string
 	MultipartAge time.Duration
 
+	MultipartCopyThreshold uint64
+
 	UseSSE     bool
 	UseKMS     bool
 	KMSKeyID   string
