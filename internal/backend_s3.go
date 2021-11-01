@@ -743,7 +743,8 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 		metadataDirective = s3.MetadataDirectiveReplace
 	}
 
-	// FIXME Remove additional HEAD query
+	// Additional HEAD request is only done if we don't know object size or etag in advance
+	// ...or if we don't use extended listings with metadata and haven't done a HEAD request
 
 	if param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
 		(param.Metadata == nil || param.StorageClass == nil)) {

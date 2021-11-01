@@ -1164,6 +1164,13 @@ func (inode *Inode) SendUpload() bool {
 			from += "/"
 			skipRename = true
 		}
+		copyIn := &CopyBlobInput{
+			Source:       from,
+			Destination:  key,
+			Size:         PUInt64(inode.knownSize),
+			ETag:         PString(inode.knownETag),
+			Metadata:     escapeMetadata(inode.userMetadata),
+		}
 		go func() {
 			var err error
 			if !inode.isDir() || !inode.fs.flags.NoDirObject {
@@ -1172,10 +1179,7 @@ func (inode *Inode) SendUpload() bool {
 				// a parallel read could hit a non-existing name. So, with S3, we do it in 2 passes.
 				// First we copy the object, change the inode name, and then we delete the old copy.
 				inode.fs.addInflightChange(key)
-				_, err = cloud.CopyBlob(&CopyBlobInput{
-					Source:      from,
-					Destination: key,
-				})
+				_, err = cloud.CopyBlob(copyIn)
 				inode.fs.completeInflightChange(key)
 				notFoundIgnore := false
 				if err != nil {
@@ -1295,15 +1299,16 @@ func (inode *Inode) SendUpload() bool {
 			inode.userMetadataDirty = 0
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, 1)
+			copyIn := &CopyBlobInput{
+				Source:       key,
+				Destination:  key,
+				Size:         PUInt64(inode.knownSize),
+				ETag:         PString(inode.knownETag),
+				Metadata:     escapeMetadata(inode.userMetadata),
+			}
 			go func() {
 				inode.fs.addInflightChange(key)
-				_, err := cloud.CopyBlob(&CopyBlobInput{
-					Source:      key,
-					Destination: key,
-					Size:        &inode.Attributes.Size,
-					ETag:        PString(inode.knownETag),
-					Metadata:    escapeMetadata(inode.userMetadata),
-				})
+				_, err := cloud.CopyBlob(copyIn)
 				inode.fs.completeInflightChange(key)
 				inode.mu.Lock()
 				inode.recordFlushError(err)
