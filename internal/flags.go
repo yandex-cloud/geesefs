@@ -21,6 +21,7 @@ import (
 
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"text/template"
@@ -346,6 +347,14 @@ func NewApp() (app *cli.App) {
 				" Can't be less than 5 MB (default: 5 MB)",
 		},
 
+		cli.StringFlag{
+			Name:  "part-sizes",
+			Value: "5:1000,25:1000,125",
+			Usage: "Part sizes in MB. Total part count is always 10000 in S3."+
+				" Default is 1000 5 MB parts, then 1000 25 MB parts" +
+				" and then 125 MB for the rest of parts",
+		},
+
 		cli.IntFlag{
 			Name:  "max-merge-copy",
 			Value: 0,
@@ -523,6 +532,46 @@ func parseOptions(m map[string]string, s string) {
 	return
 }
 
+func parsePartSizes(s string) (result []PartSizeConfig) {
+	partSizes := strings.Split(s, ",")
+	totalCount := uint64(0)
+	for pi, ps := range partSizes {
+		a := strings.Split(ps, ":")
+		size, err := strconv.ParseUint(a[0], 10, 32)
+		if err != nil {
+			panic("Incorrect syntax for --part-sizes")
+		}
+		count := uint64(0)
+		if len(a) > 1 {
+			count, err = strconv.ParseUint(a[1], 10, 32)
+			if err != nil {
+				panic("Incorrect syntax for --part-sizes")
+			}
+		}
+		if count == 0 {
+			if pi < len(partSizes)-1 {
+				panic("Part count may be omitted only for the last interval")
+			}
+			count = 10000-totalCount
+		}
+		totalCount += count
+		if totalCount > 10000 {
+			panic("Total part count must be 10000")
+		}
+		if size < 5 {
+			panic("Minimum part size is 5 MB")
+		}
+		if size > 5*1024 {
+			panic("Maximum part size is 5 GB")
+		}
+		result = append(result, PartSizeConfig{
+			PartSize: size*1024*1024,
+			PartCount: count,
+		})
+	}
+	return
+}
+
 // PopulateFlags adds the flags accepted by run to the supplied flag set, returning the
 // variables into which the flags will parse.
 func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
@@ -582,6 +631,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		Foreground:             c.Bool("f"),
 		LogFile:                c.String("log-file"),
 	}
+
+	flags.PartSizes = parsePartSizes(c.String("part-sizes"))
 
 	// S3 by default, if not initialized in api/api.go
 	if flags.Backend == nil {

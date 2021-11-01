@@ -34,8 +34,10 @@ List of non-POSIX behaviors/limitations for GeeseFS:
 * does not support locking
 * `ctime`, `atime` is always the same as `mtime`
 
-In addition to the items above, the following are supportable but not yet implemented:
-* creating files larger than 1TB
+In addition to the items above:
+* default file size limit is 1.03 TB, achieved by splitting the file into 1000x 5MB parts,
+  1000x 25 MB parts and 8000x 125 MB parts. You can change part sizes, but AWS's own limit
+  is anyway 5 TB.
 
 # Stability
 

@@ -533,6 +533,11 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		MaxMergeCopyMB: 0,
 		IgnoreFsync: false,
 		SymlinkAttr: "--symlink-target",
+		PartSizes: []PartSizeConfig{
+			{ PartSize: 5*1024*1024, PartCount: 1000 },
+			{ PartSize: 25*1024*1024, PartCount: 1000 },
+			{ PartSize: 125*1024*1024, PartCount: 8000 },
+		},
 	}
 	if hasEnv("DEBUG") {
 		flags.DebugS3 = true

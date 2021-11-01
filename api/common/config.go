@@ -26,6 +26,11 @@ import (
 	"time"
 )
 
+type PartSizeConfig struct {
+	PartSize uint64
+	PartCount uint64
+}
+
 type FlagStorage struct {
 	// File system
 	MountOptions      map[string]string
@@ -74,6 +79,7 @@ type FlagStorage struct {
 	CachePath             string
 	MaxDiskCacheFD        int64
 	CacheFileMode         os.FileMode
+	PartSizes             []PartSizeConfig
 
 	// Debugging
 	DebugMain  bool

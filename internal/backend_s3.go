@@ -626,9 +626,8 @@ func sizeToParts(size int64) (int, int64) {
 		panic(fmt.Sprintf("object size: %v exceeds maximum S3 MPU size: %v", size, MAX_S3_MPU_SIZE))
 	}
 
-	// Use the maximum number of parts to allow the most server-side copy
-	// parallelism.
-	const MAX_PARTS = 10 * 1000
+	// Use the maximum number of parts to allow the most server-side copy parallelism.
+	const MAX_PARTS = 10000
 	const MIN_PART_SIZE = 50 * 1024 * 1024
 	partSize := MaxInt64(size/(MAX_PARTS-1), MIN_PART_SIZE)
 

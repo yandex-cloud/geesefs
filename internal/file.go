@@ -52,36 +52,33 @@ func NewFileHandle(inode *Inode) *FileHandle {
 }
 
 func (fs *Goofys) partNum(offset uint64) uint64 {
-	// 5 MB
-	n := offset/(5*1024*1024)
-	if n < 1000 {
-		return n
+	n := uint64(0)
+	start := uint64(0)
+	for _, s := range fs.flags.PartSizes {
+		p := (offset - start) / s.PartSize
+		if p < s.PartCount {
+			return n + p
+		}
+		start += s.PartSize * s.PartCount
+		n += s.PartCount
 	}
-	// 25 MB
-	n = (n-1000)/5
-	if n < 1000 {
-		return 1000 + n
-	}
-	// 125 MB
-	n = (n-1000)/5
-	return 2000 + n
+	panic(fmt.Sprintf(
+		"Offset too large: %v, max supported file size with current part size configuration is %v",
+		offset, start,
+	))
 }
 
 func (fs *Goofys) partRange(num uint64) (offset uint64, size uint64) {
-	if num < 1000 {
-		// 5 MB
-		size = 5*1024*1024
-		offset = num*size
-	} else if num < 2000 {
-		// 25 MB
-		size = 25*1024*1024
-		offset = 1000*5*1024*1024 + (num-1000)*size
-	} else {
-		// 125 MB
-		size = 125*1024*1024
-		offset = 1000*5*1024*1024 + 1000*25*1024*1024 + (num-2000)*size
+	n := uint64(0)
+	start := uint64(0)
+	for _, s := range fs.flags.PartSizes {
+		if num < n + s.PartCount {
+			return start + (num-n)*s.PartSize, s.PartSize
+		}
+		start += s.PartSize * s.PartCount
+		n += s.PartCount
 	}
-	return
+	panic(fmt.Sprintf("Part number too large: %v", num))
 }
 
 func locateBuffer(buffers []*FileBuffer, offset uint64) int {
