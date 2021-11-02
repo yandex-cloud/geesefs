@@ -1295,15 +1295,16 @@ func (inode *Inode) SendUpload() bool {
 			inode.userMetadataDirty = 0
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, 1)
+			copyIn := &CopyBlobInput{
+				Source:      key,
+				Destination: key,
+				Size:        PUInt64(inode.knownSize),
+				ETag:        PString(inode.knownETag),
+				Metadata:    escapeMetadata(inode.userMetadata),
+			}
 			go func() {
 				inode.fs.addInflightChange(key)
-				_, err := cloud.CopyBlob(&CopyBlobInput{
-					Source:      key,
-					Destination: key,
-					Size:        &inode.Attributes.Size,
-					ETag:        PString(inode.knownETag),
-					Metadata:    escapeMetadata(inode.userMetadata),
-				})
+				_, err := cloud.CopyBlob(copyIn)
 				inode.fs.completeInflightChange(key)
 				inode.mu.Lock()
 				inode.recordFlushError(err)
