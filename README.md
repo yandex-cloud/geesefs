@@ -31,13 +31,18 @@ GeeseFS attempts to solve these problems by using aggressive parallelism and asy
 List of non-POSIX behaviors/limitations for GeeseFS:
 * does not store file mode/owner/group, use `--(dir|file)-mode` or `--(uid|gid)` options
 * does not support hard links
+* does not support special files (block/character devices, named pipes)
 * does not support locking
 * `ctime`, `atime` is always the same as `mtime`
+* file modification time can't be set by user (for example with `cp --preserve` or utimes(2))
 
 In addition to the items above:
 * default file size limit is 1.03 TB, achieved by splitting the file into 1000x 5MB parts,
   1000x 25 MB parts and 8000x 125 MB parts. You can change part sizes, but AWS's own limit
   is anyway 5 TB.
+
+Owner & group, modification times and special files are in fact supportable with Yandex S3
+because it has listings with metadata. Feel free to post issues if you want it. :-)
 
 # Stability
 
@@ -53,7 +58,7 @@ including dirstress/fsstress stress-tests (generic/007, generic/011, generic/013
 | No readahead on random read    |    +    |    -   |    +   |   -  |    +    |
 | Server-side copy on append     |    +    |    -   |    -   |   *  |    +    |
 | Server-side copy on update     |    +    |    -   |    -   |   *  |    -    |
-| xattrs without extra RTT       |    +    |    -   |    -   |   -  |    +    |
+| xattrs without extra RTT       |    +*   |    -   |    -   |   -  |    +    |
 | Fast recursive listings        |    +    |    -   |    *   |   -  |    +    |
 | Asynchronous write             |    +    |    +   |    -   |   -  |    -    |
 | Asynchronous delete            |    +    |    -   |    -   |   -  |    -    |
@@ -66,6 +71,8 @@ including dirstress/fsstress stress-tests (generic/007, generic/011, generic/013
 \* S3FS uses server-side copy, but it still downloads the whole file to update it. And it's buggy too :-)
 
 \* rclone mount has VFS cache, but it can only cache whole files. And it's also buggy - it often hangs on write.
+
+\* xattrs without extra RTT only work with Yandex S3 (--list-type=ext-v1).
 
 # Installation
 
