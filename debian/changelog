@@ -1,3 +1,11 @@
+geesefs (0.30.0) stable; urgency=medium
+
+  * Allow to configure part sizes and multipart copy part size
+  * Fix one more theoretically possible race condition
+  * Build tests in CI
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 10 Nov 2021 19:05:16 +0300
+
 geesefs (0.29.9) unstable; urgency=medium
 
   * Fix the same race in one more place (in lookups, contrary to listings)
