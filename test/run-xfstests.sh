@@ -11,6 +11,7 @@ sleep 5
 
 [ -e /usr/bin/geesefs ] || sudo ln -s `pwd`/geesefs /usr/bin/geesefs
 
+sudo apt-get update
 sudo apt-get -y install s3cmd
 
 s3cmd --signature-v2 --no-ssl --host-bucket= --access_key=foo --secret_key=bar --host=http://localhost:$PROXY_PORT mb s3://testbucket
