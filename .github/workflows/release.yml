@@ -26,15 +26,20 @@ jobs:
     - name: Build Mac arm64
       run: env GOOS=darwin GOARCH=arm64 go build -o geesefs-mac-arm64 -v
 
+    - name: Build tests
+      run: go test -c github.com/yandex-cloud/geesefs/internal -o geesefs-tests-linux-amd64
+
     - name: Publish to S3
       run: |
         sudo apt-get -y install s3cmd
         s3cmd ${{secrets.S3CMD}} put geesefs-linux-amd64 s3://${{secrets.S3BUCKET}}/geesefs-linux-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-amd64 s3://${{secrets.S3BUCKET}}/geesefs-mac-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-arm64 s3://${{secrets.S3BUCKET}}/geesefs-mac-arm64
+        s3cmd ${{secrets.S3CMD}} put geesefs-tests-linux-amd64 s3://${{secrets.S3BUCKET}}/geesefs-tests-linux-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-linux-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-linux-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-mac-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-arm64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-mac-arm64
+        s3cmd ${{secrets.S3CMD}} put geesefs-tests-linux-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-tests-linux-amd64
 
     - name: Test
       run: make run-test
