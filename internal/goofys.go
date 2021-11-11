@@ -235,7 +235,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		Mtime: now,
 	}
 
-	fs.bufferPool = NewBufferPool(int64(flags.MemoryLimit))
+	fs.bufferPool = NewBufferPool(int64(flags.MemoryLimit), int64(flags.GCInterval) << 20)
 	fs.bufferPool.FreeSomeCleanBuffers = func(size int64) (int64, bool) {
 		return fs.FreeSomeCleanBuffers(size)
 	}

@@ -38,8 +38,10 @@ type BufferPool struct {
 	cur int64
 	max int64
 	limit int64
+	cgroupLimit uint64
 
-	requests uint64
+	requested int64
+	gcInterval int64
 
 	FreeSomeCleanBuffers func(size int64) (int64, bool)
 }
@@ -156,44 +158,43 @@ func (r *MultiReader) Len() uint64 {
 	return r.size
 }
 
-func maxMemToUse(usedMem int64) int64 {
+func NewBufferPool(limit int64, gcInterval int64) *BufferPool {
+
+	max, _ := getCgroupAvailableMem()
 	m, err := mem.VirtualMemory()
 	if err != nil {
 		panic(err)
 	}
+	if max > 0 {
+		// divide cgroup limit by 2 by default
+		max = max / 2
+	}
+	if max <= 0 || max > m.Available {
+		max = m.Available
+	}
+	if limit > int64(max) {
+		limit = int64(max)
+	}
 
-	cgroupMem, err := getCgroupAvailableMem()
+	pool := BufferPool{
+		limit: limit,
+		max: limit,
+		gcInterval: gcInterval,
+	}
+
+	pool.cond = sync.NewCond(&pool.mu)
+
+	return &pool
+}
+
+func (pool *BufferPool) recomputeBufferLimit() {
+	usedMem := atomic.LoadInt64(&pool.cur)
 
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 
-	availableMem := cgroupMem
-	if err != nil || availableMem < 0 || availableMem > m.Available {
-		availableMem = m.Available
-	}
-	max := int64(availableMem)+usedMem
-
-	log.Debugf("memory available: %v MB, cgroup: %v MB, buffers: %v MB, new limit: %v MB, real used: %v+%v MB",
-		m.Available >> 20, cgroupMem >> 20, usedMem >> 20, max >> 20, ms.Sys >> 20, ms.Alloc >> 20)
-
-	return max
-}
-
-func (pool BufferPool) Init() *BufferPool {
-	pool.cond = sync.NewCond(&pool.mu)
-	return &pool
-}
-
-func NewBufferPool(limit int64) *BufferPool {
-	pool := BufferPool{limit: limit}.Init()
-	return pool
-}
-
-func (pool *BufferPool) recomputeBufferLimit() {
-	pool.max = maxMemToUse(atomic.LoadInt64(&pool.cur))
-	if pool.limit > 0 && pool.max > pool.limit {
-		pool.max = pool.limit
-	}
+	log.Debugf("limit: %v MB, buffers: %v MB, metadata: %v MB, system: %v MB",
+		pool.limit >> 20, usedMem >> 20, (ms.Alloc-uint64(usedMem)) >> 20, ms.Sys >> 20)
 }
 
 func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) {
@@ -211,11 +212,11 @@ func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) {
 
 func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) {
 	if size > 0 {
-		pool.requests++
-		if pool.requests >= 2048 {
+		pool.requested += size
+		if pool.gcInterval > 0 && pool.requested >= pool.gcInterval {
 			debug.FreeOSMemory()
 			pool.recomputeBufferLimit()
-			pool.requests = 0
+			pool.requested = 0
 		}
 	}
 

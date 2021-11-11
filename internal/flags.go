@@ -256,6 +256,12 @@ func NewApp() (app *cli.App) {
 			Value: 1000,
 		},
 
+		cli.IntFlag{
+			Name:  "gc-interval",
+			Usage: "Force garbage collection after this amount of data buffer allocations",
+			Value: 250,
+		},
+
 		cli.BoolFlag{
 			Name:  "cheap",
 			Usage: "Reduce S3 operation costs at the expense of some performance (default: off)",
@@ -590,6 +596,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 		// Tuning,
 		MemoryLimit:            uint64(1024*1024*c.Int("memory-limit")),
+		GCInterval:             uint64(1024*1024*c.Int("gc-interval")),
 		Cheap:                  c.Bool("cheap"),
 		ExplicitDir:            c.Bool("no-implicit-dir"),
 		NoDirObject:            c.Bool("no-dir-object"),
