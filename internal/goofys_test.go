@@ -516,7 +516,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		FileMode:    0700,
 		Uid:         uint32(uid),
 		Gid:         uint32(gid),
-		MemoryLimit: 0,
+		MemoryLimit: 1024*1024*1024,
 		Cheap:       false,
 		ExplicitDir: false,
 		NoDirObject: false,
