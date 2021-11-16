@@ -1825,8 +1825,12 @@ func (s *GoofysTest) mountSame(t *C, mountPoint string, sameProc bool) {
 		if os.Getenv("REGION") != "" {
 			region = " --region \""+os.Getenv("REGION")+"\""
 		}
+		exe := os.Getenv("GEESEFS_BINARY")
+		if exe == "" {
+			exe = "../geesefs"
+		}
 		c := exec.Command("/bin/bash", "-c",
-			"../geesefs --debug_fuse --debug_s3"+
+			exe+" --debug_fuse --debug_s3"+
 			" --stat-cache-ttl "+s.fs.flags.StatCacheTTL.String()+
 			" --log-file \"mount_"+t.TestName()+".log\""+
 			" --endpoint \""+s.fs.flags.Endpoint+"\""+
