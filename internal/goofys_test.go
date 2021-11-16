@@ -123,6 +123,7 @@ type GoofysTest struct {
 	cloud     StorageBackend
 	emulator  bool
 	azurite   bool
+	tmp       string
 
 	removeBucket []StorageBackend
 
@@ -307,6 +308,10 @@ func (s *GoofysTest) waitForEmulator(t *C, addr string) {
 }
 
 func (s *GoofysTest) SetUpSuite(t *C) {
+	s.tmp = os.Getenv("TMPDIR")
+	if s.tmp == "" {
+		s.tmp = "/tmp"
+	}
 }
 
 func (s *GoofysTest) deleteBucket(cloud StorageBackend) error {
@@ -1907,14 +1912,14 @@ func (s *GoofysTest) runFuseTest(t *C, mountPoint string, umount bool, cmdArgs .
 }
 
 func (s *GoofysTest) TestFuse(t *C) {
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.runFuseTest(t, mountPoint, true, "../test/fuse-test.sh", mountPoint)
 }
 
 func (s *GoofysTest) TestFuseWithTTL(t *C) {
 	s.fs.flags.StatCacheTTL = 60 * 1000 * 1000 * 1000
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.runFuseTest(t, mountPoint, true, "../test/fuse-test.sh", mountPoint)
 }
@@ -1960,32 +1965,32 @@ func (s *GoofysTest) testExplicitDir(t *C) {
 
 func (s *GoofysTest) TestBenchLs(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.setUpTestTimeout(t, 20*time.Minute)
 	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "ls")
 }
 
 func (s *GoofysTest) TestBenchCreate(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "create")
 }
 
 func (s *GoofysTest) TestBenchCreateParallel(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "create_parallel")
 }
 
 func (s *GoofysTest) TestBenchIO(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "io")
 }
 
 func (s *GoofysTest) TestBenchFindTree(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "find")
 }
@@ -1994,7 +1999,7 @@ func (s *GoofysTest) TestIssue231(t *C) {
 	if isTravis() {
 		t.Skip("disable in travis, not sure if it has enough memory")
 	}
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "issue231")
 }
 
@@ -2019,7 +2024,7 @@ func (s *GoofysTest) TestChmod(t *C) {
 
 func (s *GoofysTest) TestIssue64(t *C) {
 	/*
-		mountPoint := "/tmp/mnt" + s.fs.bucket
+		mountPoint := s.tmp + "/mnt" + s.fs.bucket
 		log.Level = logrus.DebugLevel
 
 		err := os.MkdirAll(mountPoint, 0700)
@@ -2034,7 +2039,7 @@ func (s *GoofysTest) TestIssue64(t *C) {
 func (s *GoofysTest) TestIssue69Fuse(t *C) {
 	s.fs.flags.StatCacheTTL = 0
 
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
 
@@ -2142,7 +2147,7 @@ func (s *GoofysTest) TestBucketPrefixSlash(t *C) {
 }
 
 func (s *GoofysTest) TestFuseWithPrefix(t *C) {
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.fs = NewGoofys(context.Background(), s.fs.bucket+":testprefix", s.fs.flags)
 
@@ -2257,7 +2262,7 @@ func (s *GoofysTest) TestWriteAnonymousFuse(t *C) {
 	s.anonymous(t)
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
@@ -2284,7 +2289,7 @@ func (s *GoofysTest) TestWriteAnonymousFuse(t *C) {
 }
 
 func (s *GoofysTest) TestWriteSyncWriteFuse(t *C) {
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
@@ -2497,7 +2502,7 @@ func (s *GoofysTest) TestXAttrGet(t *C) {
 }
 
 func (s *GoofysTest) TestClientForkExec(t *C) {
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
 	file := mountPoint + "/TestClientForkExec"
@@ -2623,7 +2628,7 @@ func (s *GoofysTest) TestXAttrFuse(t *C) {
 	xattrPrefix := s.cloud.Capabilities().Name + "."
 
 	//fuseLog.Level = logrus.DebugLevel
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
 
@@ -2754,7 +2759,7 @@ func (s *GoofysTest) TestXAttrSet(t *C) {
 func (s *GoofysTest) TestPythonCopyTree(t *C) {
 	s.clearPrefix(t, s.cloud, "dir5")
 
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.runFuseTest(t, mountPoint, true, "python", "-c",
 		"import shutil; shutil.copytree('dir2', 'dir5')",
@@ -2769,7 +2774,7 @@ func (s *GoofysTest) TestCreateRenameBeforeCloseFuse(t *C) {
 		t.Skip("https://github.com/Azure/Azurite/issues/219")
 	}
 
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
@@ -2808,7 +2813,7 @@ func (s *GoofysTest) TestCreateRenameBeforeCloseFuse(t *C) {
 }
 
 func (s *GoofysTest) TestRenameBeforeCloseFuse(t *C) {
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
@@ -2957,7 +2962,7 @@ func (s *GoofysTest) TestReadDirSlurpContinuation(t *C) {
 	}
 
 	// Mount
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
 	// First create some directories to trigger slurp when listing
@@ -3081,7 +3086,7 @@ func (s *GoofysTest) writeSeekWriteFuse(t *C, file string, fh *os.File, first st
 }
 
 func (s *GoofysTest) TestWriteSeekWriteFuse(t *C) {
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
 
@@ -3136,7 +3141,7 @@ func (s *GoofysTest) TestDirMtimeLs(t *C) {
 }
 
 func (s *GoofysTest) TestRenameOverwrite(t *C) {
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
 
@@ -3191,7 +3196,7 @@ func (s *GoofysTest) TestRmdirWithDiropen(t *C) {
 		"dir2/dir3/file4": nil,
 	})
 
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 
 	s.mount(t, mountPoint)
@@ -4003,7 +4008,7 @@ func (s *GoofysTest) TestNestedMountUnmountSimple(t *C) {
 	s.setupBlobs(s.cloud, t, parEnv)
 	s.setupBlobs(childCloud, t, childEnv)
 
-	rootMountPath := "/tmp/fusetesting/" + RandStringBytesMaskImprSrc(16)
+	rootMountPath := s.tmp + "/fusetesting/" + RandStringBytesMaskImprSrc(16)
 	s.mountSame(t, rootMountPath, true)
 	defer s.umount(t, rootMountPath)
 	// Files under /tmp/fusetesting/ should all be from goofys root.
@@ -4057,7 +4062,7 @@ func (s *GoofysTest) TestUnmountBucketWithChild(t *C) {
 	s.setupBlobs(cCloud, t, cEnv)
 	s.setupBlobs(ccCloud, t, ccEnv)
 
-	rootMountPath := "/tmp/fusetesting/" + RandStringBytesMaskImprSrc(16)
+	rootMountPath := s.tmp + "/fusetesting/" + RandStringBytesMaskImprSrc(16)
 	s.mountSame(t, rootMountPath, true)
 	defer s.umount(t, rootMountPath)
 	// c/c/foo should come from root mount.
@@ -4081,7 +4086,7 @@ func (s *GoofysTest) TestUnmountBucketWithChild(t *C) {
 func (s *GoofysTest) TestRmImplicitDir(t *C) {
 	s.setupDefaultEnv(t, "test_rm_implicit_dir/")
 
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
@@ -4117,7 +4122,7 @@ func (s *GoofysTest) TestRmImplicitDir(t *C) {
 }
 
 func (s *GoofysTest) TestMount(t *C) {
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
@@ -4321,7 +4326,7 @@ func (s *GoofysTest) TestIssue474(t *C) {
 func (s *GoofysTest) TestReadExternalChangesFuse(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Second
 
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
@@ -4379,7 +4384,7 @@ func (s *GoofysTest) testReadMyOwnWriteFuse(t *C, externalUpdate bool) {
 	})
 	t.Assert(err, IsNil)
 
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
@@ -4454,7 +4459,7 @@ func (s *GoofysTest) testReadMyOwnWriteFuse(t *C, externalUpdate bool) {
 func (s *GoofysTest) TestReadMyOwnNewFileFuse(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Second
 
-	mountPoint := "/tmp/mnt" + s.fs.bucket
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
