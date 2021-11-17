@@ -1,3 +1,9 @@
+geesefs (0.30.2) stable; urgency=medium
+
+  * Fix test cleanup: retry deleting buckets, unmount all mountpoints
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 17 Nov 2021 17:21:19 +0300
+
 geesefs (0.30.1) stable; urgency=medium
 
   * Reduce memory usage by triggering GC more often
