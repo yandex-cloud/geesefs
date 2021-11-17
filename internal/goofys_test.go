@@ -62,8 +62,10 @@ import (
 	"context"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/corehandlers"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	aws_s3 "github.com/aws/aws-sdk-go/service/s3"
 
 	"github.com/Azure/azure-storage-blob-go/azblob"
 	"github.com/Azure/go-autorest/autorest"
@@ -315,49 +317,59 @@ func (s *GoofysTest) SetUpSuite(t *C) {
 }
 
 func (s *GoofysTest) deleteBucket(cloud StorageBackend) error {
-	param := &ListBlobsInput{}
+	var err error
+	for i := 0; i < 5; i++ {
+		param := &ListBlobsInput{}
 
-	// Azure need special handling.
-	azureKeysToRemove := make([]string, 0)
-	for {
-		resp, err := cloud.ListBlobs(param)
-		if len(resp.Items) == 0 {
-			// To overcome eventual consistency
-			break
-		}
-		if err != nil {
-			return err
-		}
-		keysToRemove := []string{}
-		for _, o := range resp.Items {
-			keysToRemove = append(keysToRemove, *o.Key)
-		}
-		if len(keysToRemove) != 0 {
-			switch cloud.(type) {
-			case *ADLv1, *ADLv2, *AZBlob:
-				// ADLV{1|2} and AZBlob (sometimes) supports directories. => dir can be removed only
-				// after the dir is empty. So we will remove the blobs in reverse depth order via
-				// DeleteADLBlobs after this for loop.
+		// Azure need special handling.
+		azureKeysToRemove := make([]string, 0)
+		for {
+			resp, err := cloud.ListBlobs(param)
+			if err != nil {
+				return err
+			}
+			if len(resp.Items) == 0 {
+				// To overcome eventual consistency
+				break
+			}
+			keysToRemove := []string{}
+			for _, o := range resp.Items {
+				keysToRemove = append(keysToRemove, *o.Key)
+			}
+			if len(keysToRemove) != 0 {
+				switch cloud.(type) {
+				case *ADLv1, *ADLv2, *AZBlob:
+					// ADLV{1|2} and AZBlob (sometimes) supports directories. => dir can be removed only
+					// after the dir is empty. So we will remove the blobs in reverse depth order via
+					// DeleteADLBlobs after this for loop.
 				azureKeysToRemove = append(azureKeysToRemove, keysToRemove...)
-			default:
-				_, err := cloud.DeleteBlobs(&DeleteBlobsInput{Items: keysToRemove})
-				if err != nil {
-					return err
+				default:
+					_, err = cloud.DeleteBlobs(&DeleteBlobsInput{Items: keysToRemove})
+					if err != nil {
+						return err
+					}
 				}
 			}
 		}
-	}
 
-	if len(azureKeysToRemove) != 0 {
-		err := s.DeleteADLBlobs(cloud, azureKeysToRemove)
-		if err != nil {
-			return err
+		if len(azureKeysToRemove) != 0 {
+			err = s.DeleteADLBlobs(cloud, azureKeysToRemove)
+			if err != nil {
+				return err
+			}
 		}
+
+		_, err = cloud.MultipartExpire(&MultipartExpireInput{})
+
+		_, err = cloud.RemoveBucket(&RemoveBucketInput{})
+		if awsErr, ok := err.(awserr.Error); ok {
+			if awsErr.Code() == "BucketNotEmpty" {
+				log.Warnf("Retrying delete")
+				continue
+			}
+		}
+		break
 	}
-
-	_, err := cloud.MultipartExpire(&MultipartExpireInput{})
-
-	_, err = cloud.RemoveBucket(&RemoveBucketInput{})
 	return err
 }
 
@@ -365,7 +377,9 @@ func (s *GoofysTest) TearDownTest(t *C) {
 	close(s.timeout)
 	s.timeout = nil
 
-	s.fs.SyncFS(nil)
+	if s.fs != nil {
+		s.fs.SyncFS(nil)
+	}
 
 	for _, cloud := range s.removeBucket {
 		err := s.deleteBucket(cloud)
@@ -1971,32 +1985,32 @@ func (s *GoofysTest) TestBenchLs(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.setUpTestTimeout(t, 20*time.Minute)
-	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "ls")
+	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "ls")
 }
 
 func (s *GoofysTest) TestBenchCreate(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
-	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "create")
+	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "create")
 }
 
 func (s *GoofysTest) TestBenchCreateParallel(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
-	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "create_parallel")
+	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "create_parallel")
 }
 
 func (s *GoofysTest) TestBenchIO(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
-	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "io")
+	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "io")
 }
 
 func (s *GoofysTest) TestBenchFindTree(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
-	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "find")
+	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "find")
 }
 
 func (s *GoofysTest) TestIssue231(t *C) {
@@ -2004,7 +2018,7 @@ func (s *GoofysTest) TestIssue231(t *C) {
 		t.Skip("disable in travis, not sure if it has enough memory")
 	}
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
-	s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "issue231")
+	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "issue231")
 }
 
 func (s *GoofysTest) TestChmod(t *C) {
@@ -2036,7 +2050,7 @@ func (s *GoofysTest) TestIssue64(t *C) {
 
 		defer os.Remove(mountPoint)
 
-		s.runFuseTest(t, mountPoint, false, "../bench/bench.sh", mountPoint, "issue64")
+		s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "issue64")
 	*/
 }
 
@@ -2046,6 +2060,7 @@ func (s *GoofysTest) TestIssue69Fuse(t *C) {
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
 	s.mount(t, mountPoint)
+	defer s.umount(t, mountPoint)
 
 	oldCwd, err := os.Getwd()
 	t.Assert(err, IsNil)
@@ -2053,8 +2068,6 @@ func (s *GoofysTest) TestIssue69Fuse(t *C) {
 	defer func() {
 		err := os.Chdir(oldCwd)
 		t.Assert(err, IsNil)
-
-		s.umount(t, mountPoint)
 	}()
 
 	err = os.Chdir(mountPoint)
@@ -2215,6 +2228,12 @@ func (s *GoofysTest) anonymous(t *C) {
 	_, err := cloud.MakeBucket(&MakeBucketInput{})
 	t.Assert(err, IsNil)
 	s.removeBucket = append(s.removeBucket, cloud)
+
+	acl, err := s3.S3.GetBucketAcl(&aws_s3.GetBucketAclInput{Bucket: PString(bucket)})
+	t.Assert(err, IsNil)
+	if len(acl.Grants) == 0 {
+		t.Skip("cloud does not support canned ACL")
+	}
 
 	s.fs = NewGoofys(context.Background(), bucket, s.fs.flags)
 	t.Assert(s.fs, NotNil)
