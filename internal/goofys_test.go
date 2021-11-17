@@ -82,6 +82,9 @@ import (
 
 	. "gopkg.in/check.v1"
 	"runtime/debug"
+
+	bench_embed "github.com/yandex-cloud/geesefs/bench"
+	test_embed "github.com/yandex-cloud/geesefs/test"
 )
 
 // so I don't get complains about unused imports
@@ -314,6 +317,8 @@ func (s *GoofysTest) SetUpSuite(t *C) {
 	if s.tmp == "" {
 		s.tmp = "/tmp"
 	}
+	os.WriteFile(s.tmp+"/fuse-test.sh", []byte(test_embed.FuseTestSh), 0755)
+	os.WriteFile(s.tmp+"/bench.sh", []byte(bench_embed.BenchSh), 0755)
 }
 
 func (s *GoofysTest) deleteBucket(cloud StorageBackend) error {
@@ -1932,14 +1937,14 @@ func (s *GoofysTest) runFuseTest(t *C, mountPoint string, umount bool, cmdArgs .
 func (s *GoofysTest) TestFuse(t *C) {
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
-	s.runFuseTest(t, mountPoint, true, "../test/fuse-test.sh", mountPoint)
+	s.runFuseTest(t, mountPoint, true, s.tmp+"/fuse-test.sh", mountPoint)
 }
 
 func (s *GoofysTest) TestFuseWithTTL(t *C) {
 	s.fs.flags.StatCacheTTL = 60 * 1000 * 1000 * 1000
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
-	s.runFuseTest(t, mountPoint, true, "../test/fuse-test.sh", mountPoint)
+	s.runFuseTest(t, mountPoint, true, s.tmp+"/fuse-test.sh", mountPoint)
 }
 
 func (s *GoofysTest) TestCheap(t *C) {
@@ -1985,32 +1990,32 @@ func (s *GoofysTest) TestBenchLs(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 	s.setUpTestTimeout(t, 20*time.Minute)
-	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "ls")
+	s.runFuseTest(t, mountPoint, true, s.tmp+"/bench.sh", mountPoint, "ls")
 }
 
 func (s *GoofysTest) TestBenchCreate(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
-	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "create")
+	s.runFuseTest(t, mountPoint, true, s.tmp+"/bench.sh", mountPoint, "create")
 }
 
 func (s *GoofysTest) TestBenchCreateParallel(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
-	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "create_parallel")
+	s.runFuseTest(t, mountPoint, true, s.tmp+"/bench.sh", mountPoint, "create_parallel")
 }
 
 func (s *GoofysTest) TestBenchIO(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
-	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "io")
+	s.runFuseTest(t, mountPoint, true, s.tmp+"/bench.sh", mountPoint, "io")
 }
 
 func (s *GoofysTest) TestBenchFindTree(t *C) {
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
-	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "find")
+	s.runFuseTest(t, mountPoint, true, s.tmp+"/bench.sh", mountPoint, "find")
 }
 
 func (s *GoofysTest) TestIssue231(t *C) {
@@ -2018,7 +2023,7 @@ func (s *GoofysTest) TestIssue231(t *C) {
 		t.Skip("disable in travis, not sure if it has enough memory")
 	}
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
-	s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "issue231")
+	s.runFuseTest(t, mountPoint, true, s.tmp+"/bench.sh", mountPoint, "issue231")
 }
 
 func (s *GoofysTest) TestChmod(t *C) {
@@ -2050,7 +2055,7 @@ func (s *GoofysTest) TestIssue64(t *C) {
 
 		defer os.Remove(mountPoint)
 
-		s.runFuseTest(t, mountPoint, true, "../bench/bench.sh", mountPoint, "issue64")
+		s.runFuseTest(t, mountPoint, true, s.tmp+"/bench.sh", mountPoint, "issue64")
 	*/
 }
 
@@ -2168,7 +2173,7 @@ func (s *GoofysTest) TestFuseWithPrefix(t *C) {
 
 	s.fs = NewGoofys(context.Background(), s.fs.bucket+":testprefix", s.fs.flags)
 
-	s.runFuseTest(t, mountPoint, true, "../test/fuse-test.sh", mountPoint)
+	s.runFuseTest(t, mountPoint, true, s.tmp+"/fuse-test.sh", mountPoint)
 }
 
 func (s *GoofysTest) TestRenameCache(t *C) {
