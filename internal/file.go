@@ -350,7 +350,10 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 	end := uint64(offset)+uint64(len(data))
 
 	// Try to reserve space without the inode lock
-	fh.inode.fs.bufferPool.Use(int64(len(data)), false)
+	err = fh.inode.fs.bufferPool.Use(int64(len(data)), false)
+	if err != nil {
+		return err
+	}
 
 	fh.inode.fs.lfru.Hit(fh.inode.Id, 0)
 
@@ -382,7 +385,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 
 	// Correct memory usage
 	if allocated != int64(len(data)) {
-		fh.inode.fs.bufferPool.Use(allocated-int64(len(data)), true)
+		err = fh.inode.fs.bufferPool.Use(allocated-int64(len(data)), true)
 	}
 
 	return
@@ -735,7 +738,16 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 	// Maybe free some buffers first
 	origOffset := offset
 	origSize := size
-	inode.fs.bufferPool.Use(int64(size), ignoreMemoryLimit)
+	err := inode.fs.bufferPool.Use(int64(size), ignoreMemoryLimit)
+	if err != nil {
+		log.Errorf("Error reading %v +%v of %v: %v", offset, size, key, err)
+		inode.mu.Lock()
+		inode.readError = err
+		inode.removeLoadingBuffers(offset, size)
+		inode.mu.Unlock()
+		inode.readCond.Broadcast()
+		return
+	}
 	inode.mu.Lock()
 	inode.LockRange(offset, size, false)
 	inode.mu.Unlock()

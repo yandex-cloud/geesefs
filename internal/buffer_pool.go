@@ -22,6 +22,7 @@ import (
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"github.com/shirou/gopsutil/mem"
 )
 
@@ -197,7 +198,7 @@ func (pool *BufferPool) recomputeBufferLimit() {
 		pool.limit >> 20, usedMem >> 20, (ms.Alloc-uint64(usedMem)) >> 20, ms.Sys >> 20)
 }
 
-func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) {
+func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) (err error) {
 	if size <= 0 {
 		atomic.AddInt64(&pool.cur, size)
 		if atomic.LoadInt32(&pool.wantFree) > 0 {
@@ -205,12 +206,13 @@ func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) {
 		}
 	} else {
 		pool.mu.Lock()
-		pool.UseUnlocked(size, ignoreMemoryLimit)
+		err = pool.UseUnlocked(size, ignoreMemoryLimit)
 		pool.mu.Unlock()
 	}
+	return
 }
 
-func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) {
+func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) error {
 	if size > 0 {
 		pool.requested += size
 		if pool.gcInterval > 0 && pool.requested >= pool.gcInterval {
@@ -240,8 +242,10 @@ func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) {
 				// we can't free anything else asynchronously, and we've made attempts to
 				// free memory AND correct our limits, yet we still can't allocate.
 				// it's likely that we are simply asking for too much
+				atomic.AddInt64(&pool.cur, -size)
+				pool.cond.Broadcast()
 				log.Errorf("Unable to allocate %d bytes, used %d bytes, limit is %d bytes", size, atomic.LoadInt64(&pool.cur)-size, pool.max)
-				panic("OOM")
+				return syscall.ENOMEM
 			}
 		}
 	}
@@ -249,4 +253,6 @@ func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) {
 	if size < 0 && atomic.LoadInt32(&pool.wantFree) > 0 {
 		pool.cond.Broadcast()
 	}
+
+	return nil
 }
