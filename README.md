@@ -29,6 +29,10 @@ GeeseFS attempts to solve these problems by using aggressive parallelism and asy
 \* Directory renames are allowed in Goofys for directories with no more than 1000 entries and the limit is hardcoded
 
 List of non-POSIX behaviors/limitations for GeeseFS:
+* symbolic links are only restored correctly when using Yandex S3 because standard S3
+  doesn't return user metadata in listings and detecting symlinks in standard S3 would
+  require an additional HEAD request for every file in listing which would make listings
+  too slow
 * does not store file mode/owner/group, use `--(dir|file)-mode` or `--(uid|gid)` options
 * does not support hard links
 * does not support special files (block/character devices, named pipes)
