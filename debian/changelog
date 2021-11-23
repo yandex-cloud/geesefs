@@ -1,3 +1,10 @@
+geesefs (0.30.3) stable; urgency=medium
+
+  * Do not crash with panic when exceeding memory limit, just return ENOMEM
+  * Embed test shell scripts in test binary
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 23 Nov 2021 17:40:18 +0300
+
 geesefs (0.30.2) stable; urgency=medium
 
   * Fix test cleanup: retry deleting buckets, unmount all mountpoints
