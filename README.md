@@ -35,7 +35,7 @@ List of non-POSIX behaviors/limitations for GeeseFS:
   too slow
 * does not store file mode/owner/group, use `--(dir|file)-mode` or `--(uid|gid)` options
 * does not support hard links
-* does not support special files (block/character devices, named pipes)
+* does not support special files (block/character devices, named pipes, UNIX sockets)
 * does not support locking
 * `ctime`, `atime` is always the same as `mtime`
 * file modification time can't be set by user (for example with `cp --preserve` or utimes(2))
