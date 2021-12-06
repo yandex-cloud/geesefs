@@ -1,3 +1,9 @@
+geesefs (0.30.4) stable; urgency=high
+
+  * Fix possible I/O errors on parallel read & write of a newly created file
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 06 Dec 2021 15:10:41 +0300
+
 geesefs (0.30.3) stable; urgency=medium
 
   * Do not crash with panic when exceeding memory limit, just return ENOMEM
