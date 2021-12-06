@@ -839,7 +839,7 @@ func (inode *Inode) UnlockRange(offset uint64, size uint64, flushing bool) {
 func (inode *Inode) IsRangeLocked(offset uint64, size uint64, onlyFlushing bool) bool {
 	for _, r := range inode.readRanges {
 		if r.Offset < offset+size &&
-			r.Offset+r.Size >= offset &&
+			r.Offset+r.Size > offset &&
 			(!onlyFlushing || r.Flushing) {
 			return true
 		}
@@ -943,30 +943,28 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	fh.inode.LockRange(offset, end-offset, false)
 	defer fh.inode.UnlockRange(offset, end-offset, false)
 
-	// Don't read anything from the server if the file is just created
+	// Check if anything requires to be loaded from the server
 	var requestErr error
-	if fh.inode.CacheState != ST_CREATED {
-		ra := fh.inode.fs.flags.ReadAheadKB*1024
-		if fh.seqReadSize >= fh.inode.fs.flags.LargeReadCutoffKB*1024 {
-			// Use larger readahead with 'pipelining'
-			ra = fh.inode.fs.flags.ReadAheadLargeKB*1024
-		} else if fh.lastReadCount > 0 {
-			// Disable readahead if last N read requests are smaller than X on average
-			avg := (fh.seqReadSize + fh.lastReadTotal) / (1 + fh.lastReadCount)
-			if avg <= fh.inode.fs.flags.SmallReadCutoffKB*1024 {
-				// Use smaller readahead
-				ra = fh.inode.fs.flags.ReadAheadSmallKB*1024
-			}
+	ra := fh.inode.fs.flags.ReadAheadKB*1024
+	if fh.seqReadSize >= fh.inode.fs.flags.LargeReadCutoffKB*1024 {
+		// Use larger readahead with 'pipelining'
+		ra = fh.inode.fs.flags.ReadAheadLargeKB*1024
+	} else if fh.lastReadCount > 0 {
+		// Disable readahead if last N read requests are smaller than X on average
+		avg := (fh.seqReadSize + fh.lastReadTotal) / (1 + fh.lastReadCount)
+		if avg <= fh.inode.fs.flags.SmallReadCutoffKB*1024 {
+			// Use smaller readahead
+			ra = fh.inode.fs.flags.ReadAheadSmallKB*1024
 		}
-		requestErr = fh.inode.CheckLoadRange(offset, end-offset, ra, false)
-		mappedErr := mapAwsError(requestErr)
-		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
-			// Object is deleted or resized remotely (416). Discard local version
-			log.Warnf("File %v is deleted or resized remotely, discarding local changes", fh.inode.FullName())
-			fh.inode.resetCache()
-			err = requestErr
-			return
-		}
+	}
+	requestErr = fh.inode.CheckLoadRange(offset, end-offset, ra, false)
+	mappedErr := mapAwsError(requestErr)
+	if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
+		// Object is deleted or resized remotely (416). Discard local version
+		log.Warnf("File %v is deleted or resized remotely, discarding local changes", fh.inode.FullName())
+		fh.inode.resetCache()
+		err = requestErr
+		return
 	}
 
 	// return cached buffers directly without copying
