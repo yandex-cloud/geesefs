@@ -42,6 +42,7 @@ type S3Config struct {
 	RequesterPays bool
 	Region        string
 	RegionSet     bool
+	ProjectId     string
 
 	StorageClass string
 	ColdMinSize  uint64

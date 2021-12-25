@@ -154,6 +154,12 @@ MISC OPTIONS:
 				" Possible values: http://127.0.0.1:8081/, https://s3.amazonaws.com",
 		},
 
+		cli.StringFlag{
+			Name:  "project-id",
+			Value: "",
+			Usage: "Project ID for Ceph multi-tenancy bucket sharing (bucket syntax project-id:bucket-name)",
+		},
+
 		cli.BoolFlag{
 			Name:  "iam",
 			Usage: "Try to authenticate automatically using VM metadata service (Yandex Cloud / IMDSv1 / GCP)",
@@ -858,6 +864,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config, _ := flags.Backend.(*S3Config)
 		config.Region        = c.String("region")
 		config.RegionSet     = c.IsSet("region")
+		config.ProjectId     = c.String("project-id")
 		config.RequesterPays = c.Bool("requester-pays")
 		config.StorageClass  = c.String("storage-class")
 		config.ColdMinSize   = c.Uint64("cold-min-size")
