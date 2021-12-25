@@ -46,6 +46,7 @@ type FlagStorage struct {
 	// Common Backend Config
 	UseContentType bool
 	Endpoint       string
+  ProjectId      string
 	Backend        interface{}
 
 	// Tuning

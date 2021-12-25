@@ -31,6 +31,7 @@ import (
 var log = GetLogger("main")
 
 func Mount(
+
 	ctx context.Context,
 	bucketName string,
 	flags *FlagStorage) (fs *Goofys, mfs *fuse.MountedFileSystem, err error) {

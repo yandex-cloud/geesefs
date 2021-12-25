@@ -64,6 +64,12 @@ func NewS3(bucket string, flags *FlagStorage, config *S3Config) (*S3Backend, err
 	if config.MultipartCopyThreshold == 0 {
 		config.MultipartCopyThreshold = 128*1024*1024
 	}
+
+  if(flags.ProjectId != "" ) {
+    log.Infof("Using Ceph multitenancy format bucket naming: %s", bucket)
+    bucket = flags.ProjectId+":"+bucket
+  }
+
 	awsConfig, err := config.ToAwsConfig(flags)
 	if err != nil {
 		return nil, err
