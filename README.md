@@ -55,6 +55,8 @@ because it has listings with metadata. Feel free to post issues if you want it. 
 GeeseFS is stable enough to pass most of `xfstests` which are applicable,
 including dirstress/fsstress stress-tests (generic/007, generic/011, generic/013).
 
+See also [#Common Issues](#Common Issues).
+
 # Performance Features
 
 |                                | GeeseFS | rclone | Goofys | S3FS | gcsfuse |
@@ -123,6 +125,45 @@ See [bench/README.md](bench/README.md).
 # Configuration
 
 There's a lot of tuning you can do. Consult `geesefs -h` to view the list of options.
+
+# Common Issues
+
+## Memory Limit
+
+Default internal cache memory limit in GeeseFS (--memory-limit) is 1 GB. GeeseFS uses cache
+for read buffers when it needs to load data from the server. At the same time, default "large"
+readahead setting is configured to be 100 MB which is optimal for linear read performance.
+
+However, that means that more than 10 processes trying to read large files at the same time
+may exceed that memory limit by requesting more than 1000 MB of buffers and in that case
+GeeseFS will return ENOMEM errors to some of them.
+
+You can overcome this problem by either raising --memory-limit (for example to 4 GB)
+or lowering --read-ahead-large (for example to 20 MB).
+
+## Batch Forget
+
+The following error message in logs is harmless and occurs regularly:
+
+`fuse.ERROR writeMessage: no such file or directory [16 0 0 0 218 255 255 255 176 95 0 0 0 0 0 0]`
+
+It is caused by the lack of FUSE BatchForget operation implementation and kernel returning ENOENT
+when GeeseFS tries to tell it that BatchForget isn't implemented :-)
+
+It doesn't lead to any problems because the kernel sends additional non-batch Forget operations
+after an unsuccessful BatchForget.
+
+BatchForget will be implemented at some point in the future and then the error message will stop
+appearing.
+
+## Troubleshooting
+
+If you experience any problems with GeeseFS - if it crashes, hangs or does something else nasty:
+
+- Update to the latest version if you haven't already done it
+- Check your system log (syslog/journalctl) and dmesg for error messages from GeeseFS
+- Try to start GeeseFS in debug mode: `--debug_s3 --debug_fuse --log-file /path/to/log.txt`,
+  reproduce the problem and send it to us via Issues or any other means.
 
 # License
 
