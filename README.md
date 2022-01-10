@@ -156,6 +156,18 @@ after an unsuccessful BatchForget.
 BatchForget will be implemented at some point in the future and then the error message will stop
 appearing.
 
+## Concurrent Updates
+
+GeeseFS doesn't support concurrent updates of the same file from multiple hosts. If you try to
+do that you should guarantee that one host calls `fsync()` on the modified file and then waits
+for at least `--stat-cache-ttl` (1 minute by default) before allowing another hosts to start
+updating the file. If you don't do that you may encounter lost updates (conflicts) which are
+reported in the log in the following way:
+
+```
+main.WARNING File xxx/yyy is deleted or resized remotely, discarding local changes
+```
+
 ## Troubleshooting
 
 If you experience any problems with GeeseFS - if it crashes, hangs or does something else nasty:
