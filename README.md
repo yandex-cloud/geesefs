@@ -160,7 +160,7 @@ appearing.
 
 GeeseFS doesn't support concurrent updates of the same file from multiple hosts. If you try to
 do that you should guarantee that one host calls `fsync()` on the modified file and then waits
-for at least `--stat-cache-ttl` (1 minute by default) before allowing another hosts to start
+for at least `--stat-cache-ttl` (1 minute by default) before allowing other hosts to start
 updating the file. If you don't do that you may encounter lost updates (conflicts) which are
 reported in the log in the following way:
 
