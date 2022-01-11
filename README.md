@@ -192,9 +192,13 @@ geesefs works with:
 * Minio
 * OpenStack Swift
 * Azure Blob Storage (even though it's not S3)
+* Backblaze B2
 
 It should also work with any other S3 that implements multipart uploads and
 multipart server-side copy (UploadPartCopy).
+
+Important note: you should mount geesefs with `--list-type 2` or `--list-type 1` options
+if you use it with non-Yandex S3.
 
 The following backends are inherited from Goofys code and still exist, but are broken:
 * Google Cloud Storage
