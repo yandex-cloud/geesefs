@@ -55,7 +55,7 @@ because it has listings with metadata. Feel free to post issues if you want it. 
 GeeseFS is stable enough to pass most of `xfstests` which are applicable,
 including dirstress/fsstress stress-tests (generic/007, generic/011, generic/013).
 
-See also [#Common Issues](#Common Issues).
+See also [Common Issues](#common-issues).
 
 # Performance Features
 
