@@ -1,3 +1,9 @@
+geesefs (0.30.5) stable; urgency=medium
+
+  * Fix multipart-copy failures on files with names which require URL-encoding
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 12 Jan 2022 17:14:15 +0300
+
 geesefs (0.30.4) stable; urgency=high
 
   * Fix possible I/O errors on parallel read & write of a newly created file
