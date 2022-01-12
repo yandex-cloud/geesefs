@@ -91,7 +91,6 @@ import (
 var ignored = logrus.DebugLevel
 
 const PerTestTimeout = 10 * time.Minute
-const READAHEAD_CHUNK = 4*1024*1024
 
 func currentUid() uint32 {
 	user, err := user.Current()
@@ -1079,7 +1078,7 @@ func (s *GoofysTest) TestCreateFiles(t *C) {
 	t.Assert(err, IsNil)
 
 	fileName = "testCreateFile2"
-	s.testWriteFile(t, fileName, 1, 128*1024)
+	s.testWriteFile(t, fileName, 1, 1)
 
 	inode, err := s.getRoot(t).LookUp(fileName)
 	t.Assert(err, IsNil)
@@ -1147,11 +1146,12 @@ func (r *FileHandleReader) Seek(offset int64, whence int) (int64, error) {
 	return r.offset, nil
 }
 
-func (s *GoofysTest) testWriteFile(t *C, fileName string, size int64, write_size int) {
-	s.testWriteFileAt(t, fileName, int64(0), size, write_size)
+func (s *GoofysTest) testWriteFile(t *C, fileName string, size int64, write_size int64) {
+	s.testWriteFileAt(t, fileName, int64(0), size, write_size, true)
 }
 
-func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size int64, write_size int) {
+// Write <size> bytes at <offset> in <write_size> byte chunks
+func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size int64, write_size int64, truncate bool) {
 	var fh *FileHandle
 	root := s.getRoot(t)
 
@@ -1175,14 +1175,16 @@ func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size i
 		}
 	} else {
 		in := s.fs.inodes[lookup.Entry.Child]
-		err = s.fs.SetInodeAttributes(s.ctx, &fuseops.SetInodeAttributesOp{Inode: in.Id, Size: PUInt64(0)})
-		t.Assert(err, IsNil)
+		if truncate {
+			err = s.fs.SetInodeAttributes(s.ctx, &fuseops.SetInodeAttributesOp{Inode: in.Id, Size: PUInt64(0)})
+			t.Assert(err, IsNil)
+		}
 		fh, err = in.OpenFile()
 		t.Assert(err, IsNil)
 	}
 
 	buf := make([]byte, write_size)
-	nwritten := offset
+	nwritten := int64(0)
 
 	src := io.LimitReader(&SeqReader{}, size)
 
@@ -1204,31 +1206,38 @@ func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size i
 
 	resp, err := s.cloud.HeadBlob(&HeadBlobInput{Key: fileName})
 	t.Assert(err, IsNil)
-	t.Assert(resp.Size, Equals, uint64(size+offset))
+	if truncate {
+		t.Assert(resp.Size, Equals, uint64(size+offset))
+	}
 
 	fr := &FileHandleReader{s.fs, fh, offset}
-	diff, err := CompareReader(fr, io.LimitReader(&SeqReader{offset}, size), 0)
+	diff, err := CompareReader(io.LimitReader(fr, size), io.LimitReader(&SeqReader{offset}, size), 0)
 	t.Assert(err, IsNil)
 	t.Assert(diff, Equals, -1)
-	t.Assert(fr.offset, Equals, size)
+	t.Assert(fr.offset, Equals, size+offset)
 
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	// read again with exact 4KB to catch aligned read case
 	fr = &FileHandleReader{s.fs, fh, offset}
-	diff, err = CompareReader(fr, io.LimitReader(&SeqReader{offset}, size), 4096)
+	diff, err = CompareReader(io.LimitReader(fr, size), io.LimitReader(&SeqReader{offset}, size), 4096)
 	t.Assert(err, IsNil)
 	t.Assert(diff, Equals, -1)
-	t.Assert(fr.offset, Equals, size)
+	t.Assert(fr.offset, Equals, size+offset)
 
 	fh.Release()
 }
 
 func (s *GoofysTest) TestWriteLargeFile(t *C) {
-	s.testWriteFile(t, "testLargeFile", int64(READAHEAD_CHUNK)+1024*1024, 128*1024)
-	s.testWriteFile(t, "testLargeFile2", int64(READAHEAD_CHUNK), 128*1024)
-	s.testWriteFile(t, "testLargeFile3", int64(READAHEAD_CHUNK)+1, 128*1024)
+	s.testWriteFile(t, "testLargeFile", 5*1024*1024, 128*1024)
+	s.testWriteFile(t, "testLargeFile2", 4*1024*1024, 128*1024)
+	s.testWriteFile(t, "testLargeFile3", 4*1024*1024+1, 128*1024)
+}
+
+func (s *GoofysTest) TestMultipartOverwrite(t *C) {
+	s.testWriteFile(t, "test%d0%b0", 20*1024*1024, 128*1024)
+	s.testWriteFileAt(t, "test%d0%b0", 0, 1, 1, false)
 }
 
 func (s *GoofysTest) TestWriteReallyLargeFile(t *C) {
