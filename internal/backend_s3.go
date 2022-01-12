@@ -996,12 +996,11 @@ func (s *S3Backend) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBl
 }
 
 func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
-	src := s.bucket+"/"+param.CopySource
 	params := s3.UploadPartCopyInput{
 		Bucket:     &s.bucket,
 		Key:        param.Commit.Key,
 		PartNumber: aws.Int64(int64(param.PartNumber)),
-		CopySource: &src,
+		CopySource: aws.String(pathEscape(s.bucket+"/"+param.CopySource)),
 		UploadId:   param.Commit.UploadId,
 	}
 	if param.Size != 0 {
