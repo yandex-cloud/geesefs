@@ -433,6 +433,13 @@ func NewApp() (app *cli.App) {
 			Value: 512,
 			Usage: "Simultaneously opened cache file descriptor limit",
 		},
+
+		cli.IntFlag{
+			Name:  "fuse-threads",
+			Value: 1,
+			Usage: "Use more than 1 thread for reading from the FUSE file descriptor" +
+				" (may speed up heavy write workloads)",
+		},
 	}
 
 	debugFlags := []cli.Flag{
@@ -626,6 +633,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		CachePath:              c.String("cache"),
 		MaxDiskCacheFD:         int64(c.Int("max-disk-cache-fd")),
 		CacheFileMode:          os.FileMode(c.Int("cache-file-mode")),
+		FuseThreads:            c.Int("fuse-threads"),
 
 		// Common Backend Config
 		Endpoint:               c.String("endpoint"),

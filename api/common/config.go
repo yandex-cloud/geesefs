@@ -81,6 +81,7 @@ type FlagStorage struct {
 	MaxDiskCacheFD        int64
 	CacheFileMode         os.FileMode
 	PartSizes             []PartSizeConfig
+	FuseThreads           int
 
 	// Debugging
 	DebugMain  bool
