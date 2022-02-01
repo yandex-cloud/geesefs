@@ -141,6 +141,27 @@ GeeseFS will return ENOMEM errors to some of them.
 You can overcome this problem by either raising --memory-limit (for example to 4 GB)
 or lowering --read-ahead-large (for example to 20 MB).
 
+## Maximizing Throughput
+
+If you have a lot of free network bandwidth and you want to achieve more MB/s of
+linear write speed, make sure you're writing into multiple files (not just 1)
+and start geesefs with the following options:
+
+```
+geesefs --no-checksum --memory-limit 4000 \
+    --max-flushers 32 --max-parallel-parts 32 --part-sizes 25
+```
+
+This increases parallelism at cost of reducing maximum file size to 250 GB
+(10000 parts * 25 MB) and increasing memory usage. With a lot of available
+network bandwidth you'll be able to reach ~1.6 GB/s write speed. For example,
+with fio:
+
+```
+fio -name=test -ioengine=libaio -direct=1 -bs=4M -iodepth=1 -fallocate=none \
+    -numjobs=8 -group_reporting -rw=write -size=10G
+```
+
 ## Batch Forget
 
 The following error message in logs is harmless and occurs regularly:
