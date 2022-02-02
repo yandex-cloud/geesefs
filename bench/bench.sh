@@ -93,7 +93,7 @@ function rm_files {
 }
 
 function find_files {
-    numfiles=$(find | wc -l)
+    numfiles=$(find . | wc -l)
 
     if [ "$numfiles" != 820 ]; then
         echo "$numfiles != 820"

@@ -39,7 +39,7 @@ elif [ $CLOUD == "azblob" ]; then
 fi
 
 if [ "$PROXY_BIN" != "" ]; then
-    stdbuf -oL -eL $PROXY_BIN &
+    $PROXY_BIN &
     PROXY_PID=$!
     export EMULATOR=1
 elif [ "$TIMEOUT" == "10m" ]; then
