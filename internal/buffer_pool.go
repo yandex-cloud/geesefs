@@ -41,8 +41,9 @@ type BufferPool struct {
 	limit int64
 	cgroupLimit uint64
 
-	requested int64
-	gcInterval int64
+	requested uint64
+	gcPrev uint64
+	gcInterval uint64
 
 	FreeSomeCleanBuffers func(size int64) (int64, bool)
 }
@@ -159,7 +160,7 @@ func (r *MultiReader) Len() uint64 {
 	return r.size
 }
 
-func NewBufferPool(limit int64, gcInterval int64) *BufferPool {
+func NewBufferPool(limit int64, gcInterval uint64) *BufferPool {
 
 	max, _ := getCgroupAvailableMem()
 	m, err := mem.VirtualMemory()
@@ -214,11 +215,12 @@ func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) (err error) {
 
 func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) error {
 	if size > 0 {
-		pool.requested += size
-		if pool.gcInterval > 0 && pool.requested >= pool.gcInterval {
+		req := atomic.AddUint64(&pool.requested, uint64(size))
+		prev := atomic.LoadUint64(&pool.gcPrev)
+		if pool.gcInterval > 0 && (req-prev) >= pool.gcInterval {
 			debug.FreeOSMemory()
 			pool.recomputeBufferLimit()
-			pool.requested = 0
+			atomic.StoreUint64(&pool.gcPrev, req)
 		}
 	}
 

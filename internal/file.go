@@ -152,6 +152,7 @@ func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, state int1
 		// This is profitable because a lot of tools write in small chunks
 		inode.buffers[pos-1].dirtyID = dirtyID
 		inode.buffers[pos-1].onDisk = false
+		inode.buffers[pos-1].recency = atomic.AddUint64(&inode.fs.memRecency, uint64(len(data)))
 		allocated += inode.appendBuffer(inode.buffers[pos-1], data)
 	} else {
 		var newBuf []byte
@@ -173,6 +174,7 @@ func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, state int1
 			state: state,
 			onDisk: false,
 			zero: false,
+			recency: atomic.AddUint64(&inode.fs.memRecency, uint64(len(newBuf))),
 			length: uint64(len(newBuf)),
 			data: newBuf,
 			ptr: dataPtr,
@@ -243,6 +245,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData 
 					dirtyID: b.dirtyID,
 					state: b.state,
 					onDisk: b.onDisk,
+					recency: b.recency,
 					loading: b.loading,
 					length: offset-b.offset,
 					zero: b.zero,
@@ -253,6 +256,7 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData 
 					dirtyID: b.dirtyID,
 					state: b.state,
 					onDisk: b.onDisk,
+					recency: b.recency,
 					loading: b.loading,
 					length: b.length-(endOffset-b.offset),
 					zero: b.zero,
@@ -337,6 +341,7 @@ func (inode *Inode) ResizeUnlocked(newSize uint64, zeroFill bool) {
 			dirtyID: atomic.AddUint64(&inode.fs.bufferPool.curDirtyID, 1),
 			state: BUF_DIRTY,
 			onDisk: false,
+			recency: 0,
 			length: newSize - inode.Attributes.Size,
 			zero: true,
 		})
@@ -1043,6 +1048,7 @@ func (inode *Inode) splitBuffer(i int, size uint64) {
 		dirtyID: b.dirtyID,
 		state: b.state,
 		onDisk: b.onDisk,
+		recency: b.recency,
 		loading: b.loading,
 		length: b.length-size,
 		zero: b.zero,

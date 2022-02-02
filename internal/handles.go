@@ -92,6 +92,8 @@ type FileBuffer struct {
 	onDisk bool
 	// Chunk only contains zeroes, data and ptr are nil
 	zero bool
+	// Memory allocation recency counter
+	recency uint64
 	// Unmodified chunks (equal to the current server-side object state) have dirtyID = 0.
 	// Every write or split assigns a new unique chunk ID.
 	// Flusher tracks IDs that are currently being flushed to the server,
