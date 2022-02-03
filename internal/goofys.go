@@ -438,7 +438,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 						// A flushed buffer can be removed at a cost of finalizing multipart upload
 						// to read it back later. However it's likely not a problem if we're uploading
 						// a large file because we may never need to read it back.
-						prev := del
+						prev := del-1
 						if prev < 0 {
 							prev = i-1
 						}
