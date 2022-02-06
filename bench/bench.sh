@@ -77,7 +77,7 @@ function ls_files {
     get_howmany $@
     # people usually use ls in the terminal when color is on
     numfiles=$(ls -1 --color=always | wc -l)
-    if [ "$numfiles" != "$howmany" ]; then
+    if [ "$numfiles" -ne "$howmany" ]; then
         echo "$numfiles != $howmany"
         false
     fi
@@ -95,7 +95,7 @@ function rm_files {
 function find_files {
     numfiles=$(find . | wc -l)
 
-    if [ "$numfiles" != 820 ]; then
+    if [ "$numfiles" -ne 820 ]; then
         echo "$numfiles != 820"
         rm_tree
         exit 1
