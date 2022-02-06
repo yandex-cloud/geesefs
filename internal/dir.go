@@ -1456,7 +1456,7 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
 		parent.dir.DeletedChildren[fromInode.Name] = fromInode
-		if fromInode.CacheState == ST_CACHED && (fromInode.isDir() || fromInode.fileHandles == 0) {
+		if fromInode.CacheState == ST_CACHED {
 			// Was not modified and we remove it from current parent => add modified
 			parent.addModified(1)
 		}
