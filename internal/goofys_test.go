@@ -1466,6 +1466,55 @@ func (s *GoofysTest) TestRenameToExisting(t *C) {
 	t.Assert(file2.Name, Equals, "file2")
 }
 
+// Check that renames of open files with flushed modifications work
+// That didn't work in 0.30.5 and older versions
+func (s *GoofysTest) TestRenameOpenedUnmodified(t *C) {
+	root := s.getRoot(t)
+
+	var fh *FileHandle
+
+	in, err := s.LookUpInode(t, "file20")
+	t.Assert(err, Equals, fuse.ENOENT)
+
+	in, err = s.LookUpInode(t, "file10")
+	t.Assert(err == nil || err == fuse.ENOENT, Equals, true)
+	if err == fuse.ENOENT {
+		op := &fuseops.CreateFileOp{
+			Parent: root.Id,
+			Name:   "file10",
+		}
+		err = s.fs.CreateFile(nil, op)
+		t.Assert(err, IsNil)
+		fh = s.fs.fileHandles[op.Handle]
+	} else {
+		fh, err = in.OpenFile()
+		t.Assert(err, IsNil)
+	}
+
+	err = fh.inode.SyncFile()
+	t.Assert(err, IsNil)
+
+	err = s.fs.Rename(nil, &fuseops.RenameOp{
+		OldParent: root.Id,
+		NewParent: root.Id,
+		OldName:   "file10",
+		NewName:   "file20",
+	})
+	t.Assert(err, IsNil)
+
+	fh.Release()
+
+	err = s.fs.SyncFS(nil)
+	t.Assert(err, IsNil)
+
+	// Check that the file is actually renamed
+	_, err = s.cloud.HeadBlob(&HeadBlobInput{Key: "file10"})
+	t.Assert(err, NotNil)
+	t.Assert(mapAwsError(err), Equals, fuse.ENOENT)
+	_, err = s.cloud.HeadBlob(&HeadBlobInput{Key: "file20"})
+	t.Assert(err, IsNil)
+}
+
 func (s *GoofysTest) TestBackendListPagination(t *C) {
 	if _, ok := s.cloud.(*ADLv1); ok {
 		t.Skip("ADLv1 doesn't have pagination")
