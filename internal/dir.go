@@ -1491,7 +1491,7 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	parent.removeChildUnlocked(fromInode)
 	fromInode.Name = to
 	fromInode.Parent = newParent
-	if fromInode.CacheState == ST_CACHED && (fromInode.isDir() || fromInode.fileHandles == 0) {
+	if fromInode.CacheState == ST_CACHED {
 		// Was not modified => we make it modified
 		fromInode.SetCacheState(ST_MODIFIED)
 	} else {
