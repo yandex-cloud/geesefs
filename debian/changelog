@@ -1,3 +1,10 @@
+geesefs (0.30.6) stable; urgency=medium
+
+  * Fix a bug where renames of open, but unmodified, files were not flushed to S3
+  * Improve parallel linear read speed by preventing eviction of recently loaded data
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 07 Feb 2022 16:23:20 +0300
+
 geesefs (0.30.5) stable; urgency=medium
 
   * Fix multipart-copy failures on files with names which require URL-encoding
