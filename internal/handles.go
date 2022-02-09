@@ -196,7 +196,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	if item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize {
 		if inode.knownETag != "" || inode.knownSize > 0 {
 			s3Log.Warnf("Conflict detected: server-side ETag or size of %v"+
-				" (%v, %v) differ from local (%v, %v). File is changed remotely, dropping cache",
+				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
 				inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
 		}
 		inode.resetCache()
