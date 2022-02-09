@@ -911,6 +911,10 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 		}
 	}()
 
+	// Lock inode
+	fh.inode.mu.Lock()
+	defer fh.inode.mu.Unlock()
+
 	if offset >= fh.inode.Attributes.Size {
 		// nothing to read
 		err = io.EOF
@@ -920,7 +924,9 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	if end >= fh.inode.Attributes.Size {
 		end = fh.inode.Attributes.Size
 	}
-	if offset == fh.lastReadEnd {
+	if size == 0 {
+		// Just in case if the length is zero
+	} else if offset == fh.lastReadEnd {
 		fh.seqReadSize += size
 		if fh.lastReadCount == 0 && fh.lastReadEnd == 0 {
 			fh.inode.fs.lfru.Hit(fh.inode.Id, 1)
@@ -943,8 +949,6 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	fh.lastReadEnd = end
 
 	// Guard buffers against eviction
-	fh.inode.mu.Lock()
-	defer fh.inode.mu.Unlock()
 	fh.inode.LockRange(offset, end-offset, false)
 	defer fh.inode.UnlockRange(offset, end-offset, false)
 
