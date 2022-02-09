@@ -1,3 +1,10 @@
+geesefs (0.30.7) stable; urgency=medium
+
+  * Fix a race condition possible on parallel first reads from different threads
+    on the same file descriptor
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 09 Feb 2022 22:29:14 +0300
+
 geesefs (0.30.6) stable; urgency=medium
 
   * Fix a bug where renames of open, but unmodified, files were not flushed to S3
