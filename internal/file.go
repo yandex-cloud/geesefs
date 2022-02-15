@@ -81,6 +81,13 @@ func (fs *Goofys) partRange(num uint64) (offset uint64, size uint64) {
 	panic(fmt.Sprintf("Part number too large: %v", num))
 }
 
+func (fs *Goofys) getMaxFileSize() (size uint64) {
+	for _, s := range fs.flags.PartSizes {
+		size += s.PartSize * s.PartCount
+	}
+	return size
+}
+
 func locateBuffer(buffers []*FileBuffer, offset uint64) int {
 	return sort.Search(len(buffers), func(i int) bool {
 		return buffers[i].offset + buffers[i].length > offset
@@ -353,6 +360,15 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 	fh.inode.logFuse("WriteFile", offset, len(data))
 
 	end := uint64(offset)+uint64(len(data))
+
+	if end > fh.inode.fs.getMaxFileSize() {
+		// File offset too large
+		log.Warnf(
+			"Maximum file size exceeded when writing %v bytes at offset %v to %v",
+			len(data), offset, fh.inode.FullName(),
+		)
+		return syscall.EFBIG
+	}
 
 	// Try to reserve space without the inode lock
 	err = fh.inode.fs.bufferPool.Use(int64(len(data)), false)
@@ -920,9 +936,20 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 		err = io.EOF
 		return
 	}
+
 	end := offset+size
 	if end >= fh.inode.Attributes.Size {
 		end = fh.inode.Attributes.Size
+	}
+	maxFileSize := fh.inode.fs.getMaxFileSize()
+	if end > maxFileSize {
+		// File offset too large
+		log.Warnf(
+			"Maximum file size exceeded when reading %v bytes at offset %v from %v",
+			size, offset, fh.inode.FullName(),
+		)
+		err = syscall.EFBIG
+		return
 	}
 	if size == 0 {
 		// Just in case if the length is zero
@@ -965,6 +992,9 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 			// Use smaller readahead
 			ra = fh.inode.fs.flags.ReadAheadSmallKB*1024
 		}
+	}
+	if ra+end > maxFileSize {
+		ra = 0
 	}
 	requestErr = fh.inode.CheckLoadRange(offset, end-offset, ra, false)
 	mappedErr := mapAwsError(requestErr)

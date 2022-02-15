@@ -1509,6 +1509,14 @@ func (fs *Goofys) SetInodeAttributes(
 	}
 
 	if op.Size != nil {
+		if *op.Size > fs.getMaxFileSize() {
+			// File size too large
+			log.Warnf(
+				"Maximum file size exceeded when trying to truncate %v to %v bytes",
+				inode.FullName(), *op.Size,
+			)
+			return syscall.EFBIG
+		}
 		inode.mu.Lock()
 		inode.ResizeUnlocked(*op.Size, true)
 		if inode.CacheState == ST_CACHED {
