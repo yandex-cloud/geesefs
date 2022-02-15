@@ -1,3 +1,11 @@
+geesefs (0.30.8) unstable; urgency=medium
+
+  * Return EFBIG to callers when trying to read or write beyond the
+    maximum file size instead of panicking
+  * Warn about conflicts only when there are actual changes
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 16 Feb 2022 00:42:31 +0300
+
 geesefs (0.30.7) stable; urgency=medium
 
   * Fix a race condition possible on parallel first reads from different threads
