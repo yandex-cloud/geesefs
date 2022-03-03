@@ -323,23 +323,23 @@ func (fs *Goofys) FDCloser() {
 	fs.diskFdMu.Lock()
 	for {
 		rmFdItem := fs.lfru.Pick(nil)
-		for fs.flags.MaxDiskCacheFD > 0 && fs.diskFdCount > fs.flags.MaxDiskCacheFD {
-			for rmFdItem != nil {
-				fs.mu.RLock()
-				rmFdInode := fs.inodes[rmFdItem.Id()]
-				fs.mu.RUnlock()
-				if rmFdInode != nil {
-					rmFdInode.mu.Lock()
-					if rmFdInode.DiskCacheFD != nil {
-						rmFdInode.DiskCacheFD.Close()
-						rmFdInode.DiskCacheFD = nil
-						fs.diskFdCount--
-						break
-					}
-					rmFdInode.mu.Unlock()
+		for fs.flags.MaxDiskCacheFD > 0 && fs.diskFdCount > fs.flags.MaxDiskCacheFD && rmFdItem != nil {
+			fs.diskFdMu.Unlock()
+			fs.mu.RLock()
+			rmFdInode := fs.inodes[rmFdItem.Id()]
+			fs.mu.RUnlock()
+			if rmFdInode != nil {
+				rmFdInode.mu.Lock()
+				if rmFdInode.DiskCacheFD != nil {
+					rmFdInode.DiskCacheFD.Close()
+					rmFdInode.DiskCacheFD = nil
+					fs.diskFdCount--
+					break
 				}
-				rmFdItem = fs.lfru.Pick(rmFdItem)
+				rmFdInode.mu.Unlock()
 			}
+			rmFdItem = fs.lfru.Pick(rmFdItem)
+			fs.diskFdMu.Lock()
 		}
 		fs.diskFdCond.Wait()
 	}
