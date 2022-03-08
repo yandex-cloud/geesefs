@@ -2350,8 +2350,11 @@ func (s *GoofysTest) TestWriteAnonymousFuse(t *C) {
 
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
+	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+	os.Setenv("AWS_ACCESS_KEY_ID", "")
 	s.mount(t, mountPoint)
 	defer s.umount(t, mountPoint)
+	os.Setenv("AWS_ACCESS_KEY_ID", accessKey)
 
 	file, err := os.OpenFile(mountPoint+"/test", os.O_WRONLY|os.O_CREATE, 0600)
 	// Writes always succeed because flushes are asynchronous
