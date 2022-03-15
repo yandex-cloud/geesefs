@@ -1,3 +1,10 @@
+geesefs (0.30.9) unstable; urgency=medium
+
+  * Fix a rare memory leak caused by incorrect LRU list tracking
+  * Fix mounting public buckets with an access key from environment variables
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 15 Mar 2022 22:39:36 +0300
+
 geesefs (0.30.8) unstable; urgency=medium
 
   * Return EFBIG to callers when trying to read or write beyond the
