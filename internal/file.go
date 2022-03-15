@@ -1584,8 +1584,6 @@ func (inode *Inode) resetCache() {
 	inode.SetCacheState(ST_CACHED)
 	// Invalidate metadata entry
 	inode.AttrTime = time.Time{}
-	// Remove from LFRU tracker
-	inode.fs.lfru.Forget(inode.Id)
 }
 
 func (inode *Inode) FlushSmallObject() {
