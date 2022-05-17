@@ -1,3 +1,9 @@
+geesefs (0.31.0) unstable; urgency=medium
+
+  * Fix ext-v1 / v2 / v1 listing method detection
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 17 May 2022 23:37:38 +0300
+
 geesefs (0.30.9) unstable; urgency=medium
 
   * Fix a rare memory leak caused by incorrect LRU list tracking
