@@ -112,10 +112,6 @@ func (fs FusePanicLogger) ReadFile(ctx context.Context, op *fuseops.ReadFileOp) 
 	defer LogPanic(&err)
 	return fs.Fs.ReadFile(ctx, op)
 }
-func (fs FusePanicLogger) VectoredRead(ctx context.Context, op *fuseops.VectoredReadOp) (err error) {
-	defer LogPanic(&err)
-	return fs.Fs.VectoredRead(ctx, op)
-}
 func (fs FusePanicLogger) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) (err error) {
 	defer LogPanic(&err)
 	return fs.Fs.WriteFile(ctx, op)

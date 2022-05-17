@@ -1305,9 +1305,9 @@ func (fs *Goofys) OpenFile(
 	return
 }
 
-func (fs *Goofys) VectoredRead(
+func (fs *Goofys) ReadFile(
 	ctx context.Context,
-	op *fuseops.VectoredReadOp) (err error) {
+	op *fuseops.ReadFileOp) (err error) {
 
 	fs.mu.RLock()
 	fh := fs.fileHandles[op.Handle]
