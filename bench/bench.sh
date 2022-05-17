@@ -149,16 +149,16 @@ function write_large_file {
     if [ "$FAST" == "true" ]; then
         count=100
     fi
-    dd if=/dev/zero of=largefile bs=1MB count=$count oflag=direct status=none
+    dd if=/dev/zero of=largefile bs=1MB count=$count oflag=direct
     fsync_dir
 }
 
 function read_large_file {
-    dd if=largefile of=/dev/null bs=1MB iflag=direct status=none
+    dd if=largefile of=/dev/null bs=1MB iflag=direct
 }
 
 function read_first_byte {
-    dd if=largefile of=/dev/null bs=512 count=1 iflag=direct status=none
+    dd if=largefile of=/dev/null bs=512 count=1 iflag=direct
 }
 
 if [ "$t" = "" -o "$t" = "create" ]; then
@@ -178,17 +178,17 @@ fi
 function write_md5 {
     if ! base64 -w 0 </dev/null; then
         # BSD base64
-        seed=$(dd if=/dev/urandom bs=128 count=1 status=none | base64)
+        seed=$(dd if=/dev/urandom bs=128 count=1 | base64)
     else
-        seed=$(dd if=/dev/urandom bs=128 count=1 status=none | base64 -w 0)
+        seed=$(dd if=/dev/urandom bs=128 count=1 | base64 -w 0)
     fi
-    random_cmd="openssl enc -aes-256-ctr -pbkdf2 -pass pass:$seed -nosalt"
+    random_cmd="openssl enc -aes-256-ctr -pass pass:$seed -nosalt"
     count=1000
     if [ "$FAST" == "true" ]; then
         count=100
     fi
-    MD5=$(dd if=/dev/zero bs=1M count=$count status=none | $random_cmd | \
-        tee >(md5sum) >(dd of=largefile bs=1M oflag=direct status=none) >/dev/null | cut -f 1 '-d ')
+    MD5=$(dd if=/dev/zero bs=1M count=$count | $random_cmd | \
+        tee >(md5sum) >(dd of=largefile bs=1M oflag=direct) >/dev/null | cut -f 1 '-d ')
     fsync_dir
 }
 
@@ -284,7 +284,7 @@ fi
 if [ "$t" = "disable" -o "$t" = "issue64" ]; then
     # setup the files
     (for i in $(seq 0 9); do
-        dd if=/dev/zero of=file$i bs=1MB count=300 oflag=direct status=none & true
+        dd if=/dev/zero of=file$i bs=1MB count=300 oflag=direct & true
     done
     wait)
     if [ $? != 0 ]; then
@@ -293,7 +293,7 @@ if [ "$t" = "disable" -o "$t" = "issue64" ]; then
 
     # 200 files and 5 concurrent transfer means 40 times, do 50 times for good measure
     (for i in $(seq 0 9); do
-        dd if=file$i of=/dev/null bs=1MB iflag=direct status=none &
+        dd if=file$i of=/dev/null bs=1MB iflag=direct &
     done
 
     for i in $(seq 10 300); do
@@ -302,7 +302,7 @@ if [ "$t" = "disable" -o "$t" = "issue64" ]; then
         running=$(ps -ef | grep ' dd if=' | grep -v grep | sed 's/.*dd if=file\([0-9]\).*/\1/')
         for i in $(seq 0 9); do
             if echo $running | grep -v -q $i; then
-                dd if=file$i of=/dev/null bs=1MB iflag=direct status=none &
+                dd if=file$i of=/dev/null bs=1MB iflag=direct &
                 break
             fi
         done
