@@ -228,7 +228,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		log.Errorf("Unable to access '%v': %v", bucket, err)
 		return nil
 	}
-	go cloud.MultipartExpire(&MultipartExpireInput{})
+	cloud.MultipartExpire(&MultipartExpireInput{})
 
 	now := time.Now()
 	fs.rootAttrs = InodeAttributes{
