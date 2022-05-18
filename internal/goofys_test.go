@@ -1237,7 +1237,19 @@ func (s *GoofysTest) TestWriteLargeFile(t *C) {
 
 func (s *GoofysTest) TestMultipartOverwrite(t *C) {
 	s.testWriteFile(t, "test%d0%b0", 20*1024*1024, 128*1024)
+	// Test overwrite
 	s.testWriteFileAt(t, "test%d0%b0", 0, 1, 1, false)
+	// Test copying object into itself on metadata change
+	_, err := s.cloud.CopyBlob(&CopyBlobInput{
+		Source:      "test%d0%b0",
+		Destination: "test%d0%b0",
+		Metadata:    map[string]*string{
+			"foo": aws.String("bar"),
+		},
+	})
+	t.Assert(err, IsNil)
+	// It must remain readable and ovewritable
+	s.testWriteFileAt(t, "test%d0%b0", 6*1024*1024, 1, 1, false)
 }
 
 func (s *GoofysTest) TestWriteReallyLargeFile(t *C) {
