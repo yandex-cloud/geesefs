@@ -483,7 +483,7 @@ func unescapeMetadata(meta map[string]*string) map[string][]byte {
 	for k, v := range meta {
 		uk, err := url.PathUnescape(strings.ToLower(k))
 		if err == nil {
-			uv, err := url.PathUnescape(strings.ToLower(*v))
+			uv, err := url.PathUnescape(*v)
 			if err == nil {
 				unescaped[uk] = []byte(uv)
 			}
