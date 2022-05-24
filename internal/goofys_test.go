@@ -370,6 +370,9 @@ func (s *GoofysTest) deleteBucket(cloud StorageBackend) error {
 			if awsErr.Code() == "BucketNotEmpty" {
 				log.Warnf("Retrying delete")
 				continue
+			} else if awsErr.Code() == "BucketNotExists" || awsErr.Code() == "NoSuchBucket" {
+				// Bucket is already deleted (may happen after a bad retry)
+				err = nil
 			}
 		}
 		break
