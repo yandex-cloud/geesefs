@@ -189,6 +189,37 @@ reported in the log in the following way:
 main.WARNING File xxx/yyy is deleted or resized remotely, discarding local changes
 ```
 
+## Asynchronous Write Errors
+
+GeeseFS buffers updates in memory (or disk cache, if enabled) and flushes them asynchronously,
+so writers don't get an error from an unsuccessful write. When an error occurs, GeeseFS keeps
+modifications in the cache and retries to flush them to the server later. GeeseFS tries to
+flush the data forever until success or until you stop GeeseFS mount process. If there is
+too much changed data and memory limit is reached during write, write request hangs until
+some data is flushed to the server to make it possible to free some memory.
+
+### fsync
+
+If you want to make sure that your changes are actually persisted to the server you have to
+call [fsync](https://man7.org/linux/man-pages/man2/fsync.2.html) on a file or directory.
+Calling `fsync` on a directory makes GeeseFS flush all changes inside it. It's stricter than
+Linux and POSIX behaviour where fsync-ing a directory only flushes directory entries
+(i.e., renamed files) in it.
+
+If a server or network error occurs during `fsync`, the caller receives an error code.
+
+Example of calling `fsync`. Note that both directories and files should be opened as files:
+
+```
+#!/usr/bin/python
+
+import sys, os
+os.fsync(os.open(sys.argv[1], os.O_RDONLY))
+```
+
+Command-line `sync` utility and [syncfs](https://man7.org/linux/man-pages/man2/syncfs.2.html) syscall
+don't work with GeeseFS because they aren't wired up in FUSE at all.
+
 ## Troubleshooting
 
 If you experience any problems with GeeseFS - if it crashes, hangs or does something else nasty:
