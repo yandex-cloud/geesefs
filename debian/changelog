@@ -1,4 +1,4 @@
-geesefs (0.31.2) unstable; urgency=medium
+geesefs (0.31.3) unstable; urgency=medium
 
   * Fix a bug where user metadata values were always lowercased
 
