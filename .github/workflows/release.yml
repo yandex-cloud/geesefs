@@ -18,13 +18,13 @@ jobs:
         go-version: 1.16
 
     - name: Build linux amd64
-      run: go build -o geesefs-linux-amd64 -v && ln -s geesefs-linux-amd64 geesefs
+      run: env CGO_ENABLED=0 go build -o geesefs-linux-amd64 -v && ln -s geesefs-linux-amd64 geesefs
 
     - name: Build Mac amd64
-      run: env GOOS=darwin GOARCH=amd64 go build -o geesefs-mac-amd64 -v
+      run: env CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o geesefs-mac-amd64 -v
 
     - name: Build Mac arm64
-      run: env GOOS=darwin GOARCH=arm64 go build -o geesefs-mac-arm64 -v
+      run: env CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o geesefs-mac-arm64 -v
 
     - name: Build tests
       run: go test -c github.com/yandex-cloud/geesefs/internal -o geesefs-tests-linux-amd64
