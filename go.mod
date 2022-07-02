@@ -30,7 +30,7 @@ require (
 	github.com/smartystreets/assertions v0.0.0-20160201214316-443d812296a8 // indirect
 	github.com/smartystreets/goconvey v1.6.1-0.20160119221636-995f5b2e021c // indirect
 	github.com/urfave/cli v1.21.1-0.20190807111034-521735b7608a
-	golang.org/x/sys v0.0.0-20210616094352-59db8d763f22
+	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a
 	google.golang.org/api v0.49.0
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127
 	gopkg.in/ini.v1 v1.46.0
@@ -38,4 +38,4 @@ require (
 
 replace github.com/aws/aws-sdk-go => ./s3ext
 
-replace github.com/jacobsa/fuse => github.com/vitalif/fusego v0.0.0-20220517201526-003d54287c05
+replace github.com/jacobsa/fuse => github.com/vitalif/fusego v0.0.0-20220702223751-e304003d79bf

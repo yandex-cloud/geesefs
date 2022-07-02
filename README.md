@@ -162,21 +162,6 @@ fio -name=test -ioengine=libaio -direct=1 -bs=4M -iodepth=1 -fallocate=none \
     -numjobs=8 -group_reporting -rw=write -size=10G
 ```
 
-## Batch Forget
-
-The following error message in logs is harmless and occurs regularly:
-
-`fuse.ERROR writeMessage: no such file or directory [16 0 0 0 218 255 255 255 176 95 0 0 0 0 0 0]`
-
-It is caused by the lack of FUSE BatchForget operation implementation and kernel returning ENOENT
-when GeeseFS tries to tell it that BatchForget isn't implemented :-)
-
-It doesn't lead to any problems because the kernel sends additional non-batch Forget operations
-after an unsuccessful BatchForget.
-
-BatchForget will be implemented at some point in the future and then the error message will stop
-appearing.
-
 ## Concurrent Updates
 
 GeeseFS doesn't support concurrent updates of the same file from multiple hosts. If you try to
