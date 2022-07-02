@@ -91,7 +91,9 @@ See also [Common Issues](#common-issues).
 * Or build from source with Go 1.13 or later:
 
 ```ShellSession
-$ go get github.com/yandex-cloud/geesefs
+$ git clone https://github.com/yandex-cloud/geesefs
+$ cd geesefs
+$ go build
 ```
 
 # Usage
