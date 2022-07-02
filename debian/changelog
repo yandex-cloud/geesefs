@@ -1,3 +1,9 @@
+geesefs (0.31.4) unstable; urgency=medium
+
+  * Add FUSE BatchForget operation support - should fix memory leaks on some kernels
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Sun, 03 Jul 2022 01:52:41 +0300
+
 geesefs (0.31.3) unstable; urgency=medium
 
   * Fix a bug where user metadata values were always lowercased
