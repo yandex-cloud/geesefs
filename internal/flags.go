@@ -143,6 +143,12 @@ func NewApp() (app *cli.App) {
 				" Possible values: http://127.0.0.1:8081/, https://s3.amazonaws.com",
 		},
 
+    cli.StringFlag{
+			Name:  "project-id",
+			Value: "",
+			Usage: "Propject id for CEPH multi-tenancy bucket sharing (bucket syntax project-id:bucket-name)",
+		},
+
 		cli.BoolFlag{
 			Name:  "iam",
 			Usage: "Try to authenticate automatically using VM metadata service (Yandex Cloud / IMDSv1)",
@@ -629,6 +635,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 		// Common Backend Config
 		Endpoint:               c.String("endpoint"),
+    ProjectId:              c.String("project-id"),
 		UseContentType:         c.Bool("use-content-type"),
 
 		// Debugging,
