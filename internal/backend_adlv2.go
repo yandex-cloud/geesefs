@@ -207,6 +207,10 @@ func (b *ADLv2) Capabilities() *Capabilities {
 	return &b.cap
 }
 
+func (b *ADLv2) GetBucketUsage(param *GetBucketUsageInput) (*GetBucketUsageOutput, error) {
+	return &GetBucketUsageOutput{Size: 0}, nil
+}
+
 type ADL2Error struct {
 	adl2.DataLakeStorageError
 }

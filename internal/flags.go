@@ -90,13 +90,31 @@ func NewApp() (app *cli.App) {
 		// File system
 		/////////////////////////
 
+		cli.StringFlag{
+			Name:  "provider",
+			Value: "unknow",
+			Usage: "The specific provider of the object storage service.",
+		},
+
+		cli.Uint64Flag{
+			Name:  "capacity",
+			Value: 1 * 1024 * 1024 * 1024 * 1024 * 1024,
+			Usage: "Limit the maximum capacity quota of mounted files.",
+		},
+
+		cli.Uint64Flag{
+			Name:  "disk-usage-interval",
+			Value: 60,
+			Usage: "Time interval for statistics of disk usage, in seconds.",
+		},
+
 		cli.StringSliceFlag{
 			Name:  "o",
 			Usage: "Additional system-specific mount options. Be careful!",
 		},
 
 		cli.StringFlag{
-			Name: "cache",
+			Name:  "cache",
 			Usage: "Directory to use for data cache. (default: off)",
 		},
 
@@ -286,20 +304,20 @@ func NewApp() (app *cli.App) {
 		cli.IntFlag{
 			Name:  "max-parallel-parts",
 			Value: 8,
-			Usage: "How much parallel requests out of the total number can be used for large part uploads."+
+			Usage: "How much parallel requests out of the total number can be used for large part uploads." +
 				" Large parts take more bandwidth so they usually require less parallelism (default: 8)",
 		},
 
 		cli.IntFlag{
 			Name:  "max-parallel-copy",
 			Value: 16,
-			Usage: "How much parallel unmodified part copy requests should be used."+
+			Usage: "How much parallel unmodified part copy requests should be used." +
 				" This limit is separate from max-flushers (default: 16)",
 		},
 
 		cli.IntFlag{
 			Name:  "read-ahead",
-			Value: 5*1024,
+			Value: 5 * 1024,
 			Usage: "How much data in KB should be pre-loaded with every read by default (default: 5 MB)",
 		},
 
@@ -323,19 +341,19 @@ func NewApp() (app *cli.App) {
 
 		cli.IntFlag{
 			Name:  "large-read-cutoff",
-			Value: 20*1024,
+			Value: 20 * 1024,
 			Usage: "Amount of linear read in KB after which the \"large\" readahead should be triggered (default: 20 MB)",
 		},
 
 		cli.IntFlag{
 			Name:  "read-ahead-large",
-			Value: 100*1024,
+			Value: 100 * 1024,
 			Usage: "Larger readahead size in KB to be used when long linear reads are detected (default: 100 MB)",
 		},
 
 		cli.IntFlag{
 			Name:  "read-ahead-parallel",
-			Value: 20*1024,
+			Value: 20 * 1024,
 			Usage: "Larger readahead will be triggered in parallel chunks of this size in KB (default: 20 MB)",
 		},
 
@@ -356,7 +374,7 @@ func NewApp() (app *cli.App) {
 		cli.StringFlag{
 			Name:  "part-sizes",
 			Value: "5:1000,25:1000,125",
-			Usage: "Part sizes in MB. Total part count is always 10000 in S3."+
+			Usage: "Part sizes in MB. Total part count is always 10000 in S3." +
 				" Default is 1000 5 MB parts, then 1000 25 MB parts" +
 				" and then 125 MB for the rest of parts",
 		},
@@ -365,7 +383,7 @@ func NewApp() (app *cli.App) {
 			Name:  "max-merge-copy",
 			Value: 0,
 			Usage: "If non-zero, allow to compose larger parts up to this number of megabytes" +
-				" in size from existing unchanged parts when doing server-side part copy."+
+				" in size from existing unchanged parts when doing server-side part copy." +
 				" Must be left at 0 for Yandex S3 (default: 0)",
 		},
 
@@ -473,7 +491,7 @@ func NewApp() (app *cli.App) {
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
 		Writer:   os.Stderr,
-		Flags:    append(append(append(append([]cli.Flag{
+		Flags: append(append(append(append([]cli.Flag{
 			cli.BoolFlag{
 				Name:  "help, h",
 				Usage: "Print this help text and exit successfully.",
@@ -558,7 +576,7 @@ func parsePartSizes(s string) (result []PartSizeConfig) {
 			if pi < len(partSizes)-1 {
 				panic("Part count may be omitted only for the last interval")
 			}
-			count = 10000-totalCount
+			count = 10000 - totalCount
 		}
 		totalCount += count
 		if totalCount > 10000 {
@@ -571,7 +589,7 @@ func parsePartSizes(s string) (result []PartSizeConfig) {
 			panic("Maximum part size is 5 GB")
 		}
 		result = append(result, PartSizeConfig{
-			PartSize: size*1024*1024,
+			PartSize:  size * 1024 * 1024,
 			PartCount: count,
 		})
 	}
@@ -588,55 +606,58 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 	flags := &FlagStorage{
 		// File system
-		MountOptions:           make(map[string]string),
-		DirMode:                os.FileMode(c.Int("dir-mode")),
-		FileMode:               os.FileMode(c.Int("file-mode")),
-		Uid:                    uint32(c.Int("uid")),
-		Gid:                    uint32(c.Int("gid")),
+		MountOptions: make(map[string]string),
+		DirMode:      os.FileMode(c.Int("dir-mode")),
+		FileMode:     os.FileMode(c.Int("file-mode")),
+		Uid:          uint32(c.Int("uid")),
+		Gid:          uint32(c.Int("gid")),
 
 		// Tuning,
-		MemoryLimit:            uint64(1024*1024*c.Int("memory-limit")),
-		GCInterval:             uint64(1024*1024*c.Int("gc-interval")),
-		Cheap:                  c.Bool("cheap"),
-		ExplicitDir:            c.Bool("no-implicit-dir"),
-		NoDirObject:            c.Bool("no-dir-object"),
-		MaxFlushers:            int64(c.Int("max-flushers")),
-		MaxParallelParts:       c.Int("max-parallel-parts"),
-		MaxParallelCopy:        c.Int("max-parallel-copy"),
-		StatCacheTTL:           c.Duration("stat-cache-ttl"),
-		HTTPTimeout:            c.Duration("http-timeout"),
-		RetryInterval:          c.Duration("retry-interval"),
-		ReadAheadKB:            uint64(c.Int("read-ahead")),
-		SmallReadCount:         uint64(c.Int("small-read-count")),
-		SmallReadCutoffKB:      uint64(c.Int("small-read-cutoff")),
-		ReadAheadSmallKB:       uint64(c.Int("read-ahead-small")),
-		LargeReadCutoffKB:      uint64(c.Int("large-read-cutoff")),
-		ReadAheadLargeKB:       uint64(c.Int("read-ahead-large")),
-		ReadAheadParallelKB:    uint64(c.Int("read-ahead-parallel")),
-		ReadMergeKB:            uint64(c.Int("read-merge")),
-		SinglePartMB:           uint64(singlePart),
-		MaxMergeCopyMB:         uint64(c.Int("max-merge-copy")),
-		IgnoreFsync:            c.Bool("ignore-fsync"),
-		SymlinkAttr:            c.String("symlink-attr"),
-		CachePopularThreshold:  int64(c.Int("cache-popular-threshold")),
-		CacheMaxHits:           int64(c.Int("cache-max-hits")),
-		CacheAgeInterval:       int64(c.Int("cache-age-interval")),
-		CacheAgeDecrement:      int64(c.Int("cache-age-decrement")),
-		CacheToDiskHits:        int64(c.Int("cache-to-disk-hits")),
-		CachePath:              c.String("cache"),
-		MaxDiskCacheFD:         int64(c.Int("max-disk-cache-fd")),
-		CacheFileMode:          os.FileMode(c.Int("cache-file-mode")),
+		MemoryLimit:           uint64(1024 * 1024 * c.Int("memory-limit")),
+		GCInterval:            uint64(1024 * 1024 * c.Int("gc-interval")),
+		Cheap:                 c.Bool("cheap"),
+		ExplicitDir:           c.Bool("no-implicit-dir"),
+		NoDirObject:           c.Bool("no-dir-object"),
+		MaxFlushers:           int64(c.Int("max-flushers")),
+		MaxParallelParts:      c.Int("max-parallel-parts"),
+		MaxParallelCopy:       c.Int("max-parallel-copy"),
+		StatCacheTTL:          c.Duration("stat-cache-ttl"),
+		HTTPTimeout:           c.Duration("http-timeout"),
+		RetryInterval:         c.Duration("retry-interval"),
+		ReadAheadKB:           uint64(c.Int("read-ahead")),
+		SmallReadCount:        uint64(c.Int("small-read-count")),
+		SmallReadCutoffKB:     uint64(c.Int("small-read-cutoff")),
+		ReadAheadSmallKB:      uint64(c.Int("read-ahead-small")),
+		LargeReadCutoffKB:     uint64(c.Int("large-read-cutoff")),
+		ReadAheadLargeKB:      uint64(c.Int("read-ahead-large")),
+		ReadAheadParallelKB:   uint64(c.Int("read-ahead-parallel")),
+		ReadMergeKB:           uint64(c.Int("read-merge")),
+		SinglePartMB:          uint64(singlePart),
+		MaxMergeCopyMB:        uint64(c.Int("max-merge-copy")),
+		IgnoreFsync:           c.Bool("ignore-fsync"),
+		SymlinkAttr:           c.String("symlink-attr"),
+		CachePopularThreshold: int64(c.Int("cache-popular-threshold")),
+		CacheMaxHits:          int64(c.Int("cache-max-hits")),
+		CacheAgeInterval:      int64(c.Int("cache-age-interval")),
+		CacheAgeDecrement:     int64(c.Int("cache-age-decrement")),
+		CacheToDiskHits:       int64(c.Int("cache-to-disk-hits")),
+		CachePath:             c.String("cache"),
+		MaxDiskCacheFD:        int64(c.Int("max-disk-cache-fd")),
+		CacheFileMode:         os.FileMode(c.Int("cache-file-mode")),
 
 		// Common Backend Config
-		Endpoint:               c.String("endpoint"),
-		UseContentType:         c.Bool("use-content-type"),
+		Provider:          c.String("provider"),
+		Capacity:          c.Uint64("capacity"),
+		DiskUsageInterval: c.Uint64("disk-usage-interval"),
+		Endpoint:          c.String("endpoint"),
+		UseContentType:    c.Bool("use-content-type"),
 
 		// Debugging,
-		DebugMain:              c.Bool("debug"),
-		DebugFuse:              c.Bool("debug_fuse"),
-		DebugS3:                c.Bool("debug_s3"),
-		Foreground:             c.Bool("f"),
-		LogFile:                c.String("log-file"),
+		DebugMain:  c.Bool("debug"),
+		DebugFuse:  c.Bool("debug_fuse"),
+		DebugS3:    c.Bool("debug_s3"),
+		Foreground: c.Bool("f"),
+		LogFile:    c.String("log-file"),
 	}
 
 	flags.PartSizes = parsePartSizes(c.String("part-sizes"))
@@ -645,25 +666,25 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 	if flags.Backend == nil {
 		flags.Backend = (&S3Config{}).Init()
 		config, _ := flags.Backend.(*S3Config)
-		config.Region        = c.String("region")
-		config.RegionSet     = c.IsSet("region")
+		config.Region = c.String("region")
+		config.RegionSet = c.IsSet("region")
 		config.RequesterPays = c.Bool("requester-pays")
-		config.StorageClass  = c.String("storage-class")
-		config.Profile       = c.String("profile")
-		config.SharedConfig  = c.StringSlice("shared-config")
-		config.UseSSE        = c.Bool("sse")
-		config.UseKMS        = c.IsSet("sse-kms")
-		config.KMSKeyID      = c.String("sse-kms")
-		config.SseC          = c.String("sse-c")
-		config.ACL           = c.String("acl")
-		config.Subdomain     = c.Bool("subdomain")
-		config.NoChecksum    = c.Bool("no-checksum")
-		config.UseIAM        = c.Bool("iam")
-		config.IAMHeader     = c.String("iam-header")
-		config.MultipartAge  = c.Duration("multipart-age")
+		config.StorageClass = c.String("storage-class")
+		config.Profile = c.String("profile")
+		config.SharedConfig = c.StringSlice("shared-config")
+		config.UseSSE = c.Bool("sse")
+		config.UseKMS = c.IsSet("sse-kms")
+		config.KMSKeyID = c.String("sse-kms")
+		config.SseC = c.String("sse-c")
+		config.ACL = c.String("acl")
+		config.Subdomain = c.Bool("subdomain")
+		config.NoChecksum = c.Bool("no-checksum")
+		config.UseIAM = c.Bool("iam")
+		config.IAMHeader = c.String("iam-header")
+		config.MultipartAge = c.Duration("multipart-age")
 		listType := c.String("list-type")
-		config.ListV1Ext     = listType == "ext-v1"
-		config.ListV2        = listType == "2"
+		config.ListV1Ext = listType == "ext-v1"
+		config.ListV2 = listType == "2"
 
 		config.MultipartCopyThreshold = uint64(c.Int("multipart-copy-threshold")) * 1024 * 1024
 

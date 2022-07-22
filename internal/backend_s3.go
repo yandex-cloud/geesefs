@@ -55,15 +55,15 @@ type S3Backend struct {
 	gcs      bool
 	v2Signer bool
 
-	iam bool
-	iamToken atomic.Value
+	iam                bool
+	iamToken           atomic.Value
 	iamTokenExpiration time.Time
-	iamRefreshTimer *time.Timer
+	iamRefreshTimer    *time.Timer
 }
 
 func NewS3(bucket string, flags *FlagStorage, config *S3Config) (*S3Backend, error) {
 	if config.MultipartCopyThreshold == 0 {
-		config.MultipartCopyThreshold = 128*1024*1024
+		config.MultipartCopyThreshold = 128 * 1024 * 1024
 	}
 	awsConfig, err := config.ToAwsConfig(flags)
 	if err != nil {
@@ -100,8 +100,8 @@ func NewS3(bucket string, flags *FlagStorage, config *S3Config) (*S3Backend, err
 }
 
 type IAMCredResponse struct {
-	Code string
-	Token string
+	Code       string
+	Token      string
 	Expiration time.Time
 }
 
@@ -128,11 +128,11 @@ func (s *S3Backend) TryIAM() error {
 		s.iam = true
 		s.iamToken.Store(creds.Token)
 		s.iamTokenExpiration = creds.Expiration
-		ttl := s.iamTokenExpiration.Sub(time.Now().Add(5*time.Minute))
+		ttl := s.iamTokenExpiration.Sub(time.Now().Add(5 * time.Minute))
 		if ttl < 0 {
 			ttl = s.iamTokenExpiration.Sub(time.Now())
 			if ttl >= 30*time.Second {
-				ttl = 30*time.Second
+				ttl = 30 * time.Second
 			}
 		}
 		s.iamRefreshTimer = time.AfterFunc(ttl, func() {
@@ -997,7 +997,7 @@ func (s *S3Backend) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBl
 
 	return &MultipartBlobAddOutput{
 		RequestId: s.getRequestId(req),
-		PartId: resp.ETag,
+		PartId:    resp.ETag,
 	}, nil
 }
 
@@ -1006,7 +1006,7 @@ func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*Multipart
 		Bucket:     &s.bucket,
 		Key:        param.Commit.Key,
 		PartNumber: aws.Int64(int64(param.PartNumber)),
-		CopySource: aws.String(pathEscape(s.bucket+"/"+param.CopySource)),
+		CopySource: aws.String(pathEscape(s.bucket + "/" + param.CopySource)),
 		UploadId:   param.Commit.UploadId,
 	}
 	if param.Size != 0 {
@@ -1028,7 +1028,7 @@ func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*Multipart
 
 	return &MultipartBlobCopyOutput{
 		RequestId: s.getRequestId(req),
-		PartId: resp.CopyPartResult.ETag,
+		PartId:    resp.CopyPartResult.ETag,
 	}, nil
 }
 
@@ -1171,4 +1171,8 @@ func (s *S3Backend) MakeBucket(param *MakeBucketInput) (*MakeBucketOutput, error
 
 func (s *S3Backend) Delegate() interface{} {
 	return s
+}
+
+func (s *S3Backend) GetBucketUsage(param *GetBucketUsageInput) (*GetBucketUsageOutput, error) {
+	return &GetBucketUsageOutput{Size: 0}, nil
 }

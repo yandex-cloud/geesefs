@@ -152,8 +152,8 @@ func NewADLv1(bucket string, flags *FlagStorage, config *ADLv1Config) (*ADLv1, e
 		bucket:  bucket,
 		cap: Capabilities{
 			//NoParallelMultipart: true,
-			DirBlob:             true,
-			Name:                "adl",
+			DirBlob: true,
+			Name:    "adl",
 			// ADLv1 fails with 404 if we upload data
 			// larger than 30000000 bytes (28.6MB) (28MB
 			// also failed in at one point, but as of
@@ -700,4 +700,8 @@ func (b *ADLv1) mkdir(dir string) error {
 		return fuse.EEXIST
 	}
 	return nil
+}
+
+func (b *ADLv1) GetBucketUsage(param *GetBucketUsageInput) (*GetBucketUsageOutput, error) {
+	return &GetBucketUsageOutput{Size: 0}, nil
 }
