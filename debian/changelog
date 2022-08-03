@@ -1,3 +1,9 @@
+geesefs (0.31.5) unstable; urgency=medium
+
+  * Reduce global FS lock contention and fix some theoretical deadlocks
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 03 Aug 2022 18:12:51 +0300
+
 geesefs (0.31.4) unstable; urgency=medium
 
   * Add FUSE BatchForget operation support - should fix memory leaks on some kernels
