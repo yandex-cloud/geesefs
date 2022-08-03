@@ -272,9 +272,7 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 	}
 	resp, err := cloud.ListBlobs(params)
 	if err != nil {
-		parent.fs.mu.Lock()
-		parent.fs.completeInflightListingUnlocked(myList)
-		parent.fs.mu.Unlock()
+		parent.fs.completeInflightListing(myList)
 		s3Log.Errorf("ListObjects %v = %v", params, err)
 		return
 	}
@@ -283,8 +281,7 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 	if lock {
 		parent.mu.Lock()
 	}
-	parent.fs.mu.Lock()
-	skipListing := parent.fs.completeInflightListingUnlocked(myList)
+	skipListing := parent.fs.completeInflightListing(myList)
 	dirs := make(map[*Inode]bool)
 	for _, obj := range resp.Items {
 		if skipListing != nil && skipListing[*obj.Key] {
@@ -295,7 +292,6 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 			parent.insertSubTree(baseName, &obj, dirs)
 		}
 	}
-	parent.fs.mu.Unlock()
 	if lock {
 		parent.mu.Unlock()
 	}
@@ -394,6 +390,7 @@ func listBlobsSafe(cloud StorageBackend, param *ListBlobsInput) (*ListBlobsOutpu
 	return res, nil
 }
 
+// LOCKS_EXCLUDED(dh.inode.fs)
 func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, skipListing map[string]bool) {
 	parent := dh.inode
 	fs := parent.fs
@@ -484,25 +481,20 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 		ContinuationToken: dh.inode.dir.listMarker,
 		Prefix:            &prefix,
 	}
-	dh.mu.Unlock()
 
+	dh.mu.Unlock()
 	resp, err := listBlobsSafe(cloud, params)
 	dh.mu.Lock()
+
 	if err != nil {
-		dh.inode.fs.mu.Lock()
-		dh.inode.fs.completeInflightListingUnlocked(myList)
-		dh.inode.fs.mu.Unlock()
+		dh.inode.fs.completeInflightListing(myList)
 		return
 	}
 
 	s3Log.Debug(resp)
 
 	dh.inode.mu.Lock()
-	dh.inode.fs.mu.Lock()
-
-	dh.handleListResult(resp, prefix, dh.inode.fs.completeInflightListingUnlocked(myList))
-
-	dh.inode.fs.mu.Unlock()
+	dh.handleListResult(resp, prefix, dh.inode.fs.completeInflightListing(myList))
 	dh.inode.mu.Unlock()
 
 	if resp.IsTruncated {
@@ -1006,9 +998,6 @@ func (parent *Inode) Create(name string) (inode *Inode, fh *FileHandle) {
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
 
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
 	now := time.Now()
 	inode = NewInode(fs, parent, name)
 	inode.userMetadata = make(map[string][]byte)
@@ -1041,9 +1030,6 @@ func (parent *Inode) MkDir(
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
 
-	parent.fs.mu.Lock()
-	defer parent.fs.mu.Unlock()
-
 	inode = parent.doMkDir(name)
 	inode.mu.Unlock()
 	parent.fs.WakeupFlusher()
@@ -1052,7 +1038,7 @@ func (parent *Inode) MkDir(
 }
 
 // LOCKS_REQUIRED(parent.mu)
-// LOCKS_REQUIRED(fs.mu)
+// LOCKS_EXCLUDED(parent.fs.mu)
 // Returns locked inode (!)
 func (parent *Inode) doMkDir(name string) (inode *Inode) {
 	if parent.dir.DeletedChildren != nil {
@@ -1078,10 +1064,12 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 				inode.Id = oldInode.Id
 				// We leave the older inode in place only for forget() calls
 				inode.refcnt = oldInode.refcnt
-				parent.fs.inodes[oldInode.Id] = inode
 				oldInode.mu.Lock()
+				parent.fs.mu.Lock()
+				parent.fs.inodes[oldInode.Id] = inode
 				oldInode.Id = parent.fs.allocateInodeId()
 				parent.fs.inodes[oldInode.Id] = oldInode
+				parent.fs.mu.Unlock()
 				oldInode.userMetadataDirty = 0
 				oldInode.userMetadata = make(map[string][]byte)
 				oldInode.touch()
@@ -1131,9 +1119,6 @@ func (parent *Inode) CreateSymlink(
 
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
-
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
 
 	now := time.Now()
 	inode = NewInode(fs, parent, name)
@@ -1387,9 +1372,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 }
 
 func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
-	newParent.fs.mu.Lock()
 	toDir := newParent.doMkDir(to)
-	newParent.fs.mu.Unlock()
 	toDir.userMetadata = fromInode.userMetadata
 	toDir.ImplicitDir = fromInode.ImplicitDir
 	// Trick IDs
@@ -1518,9 +1501,8 @@ func sealPastDirs(dirs map[*Inode]bool, d *Inode) {
 	dirs[d] = false
 }
 
-// LOCKS_REQUIRED(fs.mu)
 // LOCKS_REQUIRED(parent.mu)
-// LOCKS_REQUIRED(parent.fs.mu)
+// LOCKS_EXCLUDED(parent.fs.mu)
 func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*Inode]bool) {
 	fs := parent.fs
 	slash := strings.Index(path, "/")
@@ -1531,14 +1513,12 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			_, deleted := parent.dir.DeletedChildren[path]
 			if !deleted {
 				inode = NewInode(fs, parent, path)
+				// our locking order is parent before child, inode before fs. try to respect it
 				fs.insertInode(parent, inode)
 				inode.SetFromBlobItem(obj)
 			}
 		} else {
-			// our locking order is parent before child, inode before fs. try to respect it
-			fs.mu.Unlock()
 			inode.SetFromBlobItem(obj)
-			fs.mu.Lock()
 		}
 		sealPastDirs(dirs, parent)
 	} else {
@@ -1558,12 +1538,10 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 		} else if !inode.isDir() {
 			// replace unmodified file item with a directory
 			if atomic.LoadInt32(&inode.CacheState) == ST_CACHED {
-				fs.mu.Unlock()
 				inode.mu.Lock()
 				atomic.StoreInt32(&inode.refreshed, -1)
 				parent.removeChildUnlocked(inode)
 				inode.mu.Unlock()
-				fs.mu.Lock()
 				// create a directory inode instead
 				inode = NewInode(fs, parent, dir)
 				inode.ToDir()
@@ -1590,13 +1568,9 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			dirs[inode] = false
 
 			if !isDirBlob {
-				fs.mu.Unlock()
 				inode.mu.Lock()
-				fs.mu.Lock()
 				inode.insertSubTree(path, obj, dirs)
-				fs.mu.Unlock()
 				inode.mu.Unlock()
-				fs.mu.Lock()
 			}
 		}
 	}
@@ -1622,9 +1596,7 @@ func (parent *Inode) LookUp(name string) (*Inode, error) {
 	myList := parent.fs.addInflightListing()
 	blob, err := parent.LookUpInodeMaybeDir(name)
 	if err != nil {
-		parent.fs.mu.Lock()
-		parent.fs.completeInflightListingUnlocked(myList)
-		parent.fs.mu.Unlock()
+		parent.fs.completeInflightListing(myList)
 		return nil, err
 	}
 	dirs := make(map[*Inode]bool)
@@ -1634,12 +1606,10 @@ func (parent *Inode) LookUp(name string) (*Inode, error) {
 		prefixLen++
 	}
 	parent.mu.Lock()
-	parent.fs.mu.Lock()
-	skipListing := parent.fs.completeInflightListingUnlocked(myList)
+	skipListing := parent.fs.completeInflightListing(myList)
 	if skipListing == nil || !skipListing[*blob.Key] {
 		parent.insertSubTree((*blob.Key)[prefixLen : ], blob, dirs)
 	}
-	parent.fs.mu.Unlock()
 	inode := parent.findChildUnlocked(name)
 	parent.mu.Unlock()
 	return inode, nil

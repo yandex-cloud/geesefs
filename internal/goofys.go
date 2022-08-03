@@ -63,7 +63,7 @@ type Goofys struct {
 	bufferPool *BufferPool
 
 	// A lock protecting the state of the file system struct itself (distinct
-	// from per-inode locks). Make sure to see the notes on lock ordering above.
+	// from per-inode locks). Should be always taken after any inode locks.
 	mu sync.RWMutex
 
 	flusherMu sync.Mutex
@@ -591,15 +591,12 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 		mp.mu.Lock()
 		dirInode := mp.findChildUnlocked(dirName)
 		if dirInode == nil {
-			fs.mu.Lock()
-
 			dirInode = NewInode(fs, mp, dirName)
 			dirInode.ToDir()
 			dirInode.AttrTime = TIME_MAX
 			dirInode.userMetadata = make(map[string][]byte)
 
 			fs.insertInode(mp, dirInode)
-			fs.mu.Unlock()
 		}
 		mp.mu.Unlock()
 		mp = dirInode
@@ -617,10 +614,8 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 		mountInode.AttrTime = TIME_MAX
 		mountInode.userMetadata = make(map[string][]byte)
 
-		fs.mu.Lock()
-		defer fs.mu.Unlock()
-
 		fs.insertInode(mp, mountInode)
+
 		prev = mountInode
 	} else {
 		if !prev.isDir() {
@@ -932,6 +927,7 @@ func pathEscape(path string) string {
 	return u.EscapedPath()
 }
 
+// LOCKS_REQUIRED(fs.mu)
 func (fs *Goofys) allocateInodeId() (id fuseops.InodeID) {
 	id = fs.nextInodeID
 	fs.nextInodeID++
@@ -1021,8 +1017,8 @@ func (fs *Goofys) recheckInode(parent *Inode, inode *Inode, name string) (*Inode
 	return newInode, nil
 }
 
-// LOCKS_REQUIRED(fs.mu)
 // LOCKS_REQUIRED(parent.mu)
+// LOCKS_EXCLUDED(fs.mu)
 func (fs *Goofys) insertInode(parent *Inode, inode *Inode) {
 	addInode := false
 	if inode.Name == "." {
@@ -1036,12 +1032,14 @@ func (fs *Goofys) insertInode(parent *Inode, inode *Inode) {
 		if inode.Id != 0 {
 			panic(fmt.Sprintf("inode id is set: %v %v", inode.Name, inode.Id))
 		}
+		fs.mu.Lock()
 		inode.Id = fs.allocateInodeId()
 		addInode = true
 	}
 	parent.insertChildUnlocked(inode)
 	if addInode {
 		fs.inodes[inode.Id] = inode
+		fs.mu.Unlock()
 
 		// if we are inserting a new directory, also create
 		// the child . and ..
@@ -1051,6 +1049,7 @@ func (fs *Goofys) insertInode(parent *Inode, inode *Inode) {
 	}
 }
 
+// LOCKS_EXCLUDED(fs.mu)
 func (fs *Goofys) addDotAndDotDot(dir *Inode) {
 	dot := NewInode(fs, dir, ".")
 	dot.ToDir()
@@ -1236,10 +1235,12 @@ func (fs *Goofys) addInflightListing() int {
 // For any listing, we forcibly exclude all objects modifications of which were
 // started before the completion of the listing, but were not completed before
 // the beginning of the listing.
-// LOCKS_REQUIRED(fs.mu)
-func (fs *Goofys) completeInflightListingUnlocked(id int) map[string]bool {
+// LOCKS_EXCLUDED(fs.mu)
+func (fs *Goofys) completeInflightListing(id int) map[string]bool {
+	fs.mu.Lock()
 	m := fs.inflightListings[id]
 	delete(fs.inflightListings, id)
+	fs.mu.Unlock()
 	return m
 }
 

@@ -186,6 +186,7 @@ func NewInode(fs *Goofys, parent *Inode, name string) (inode *Inode) {
 	return
 }
 
+// LOCKS_EXCLUDED(inode.mu)
 func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
