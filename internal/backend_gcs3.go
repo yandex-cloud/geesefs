@@ -23,15 +23,15 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/jacobsa/fuse"
 	"cloud.google.com/go/storage"
+	"github.com/jacobsa/fuse"
 	"google.golang.org/api/iterator"
 )
 
 // GCS variant of S3
 type GCS3 struct {
 	*S3Backend
-	gcs *storage.Client
+	gcs          *storage.Client
 	jsonCredFile string
 }
 
@@ -103,12 +103,12 @@ func (s *GCS3) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 			})
 		} else {
 			items = append(items, BlobItemOutput{
-				Key: &attrs.Name,
-				ETag: &attrs.Etag,
+				Key:          &attrs.Name,
+				ETag:         &attrs.Etag,
 				LastModified: &attrs.Updated,
-				Size: uint64(attrs.Size),
+				Size:         uint64(attrs.Size),
 				StorageClass: &attrs.StorageClass,
-				Metadata: PMetadata(attrs.Metadata),
+				Metadata:     PMetadata(attrs.Metadata),
 			})
 		}
 		n++
@@ -155,4 +155,8 @@ func (s *GCS3) DeleteBlobs(param *DeleteBlobsInput) (*DeleteBlobsOutput, error) 
 // objects should be filtered out from List responses so they don't appear as separate files then
 func (s *GCS3) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
 	return nil, syscall.ENOSYS
+}
+
+func (s *GCS3) GetBucketUsage(param *GetBucketUsageInput) (*GetBucketUsageOutput, error) {
+	return &GetBucketUsageOutput{Size: 0}, nil
 }

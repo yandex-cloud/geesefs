@@ -27,7 +27,7 @@ import (
 )
 
 type Capabilities struct {
-	MaxMultipartSize    uint64
+	MaxMultipartSize uint64
 	// indicates that the blob store has native support for directories
 	DirBlob bool
 	Name    string
@@ -44,7 +44,7 @@ type BlobItemOutput struct {
 	Size         uint64
 	StorageClass *string
 	// may be nil in list responses for backends that don't return metadata in listings
-	Metadata     map[string]*string
+	Metadata map[string]*string
 }
 
 type HeadBlobOutput struct {
@@ -179,7 +179,7 @@ type MultipartBlobAddInput struct {
 
 type MultipartBlobAddOutput struct {
 	RequestId string
-	PartId *string
+	PartId    *string
 }
 
 type MultipartBlobCopyInput struct {
@@ -192,7 +192,7 @@ type MultipartBlobCopyInput struct {
 
 type MultipartBlobCopyOutput struct {
 	RequestId string
-	PartId *string
+	PartId    *string
 }
 
 type MultipartBlobCommitOutput struct {
@@ -228,6 +228,14 @@ type MakeBucketOutput struct {
 	RequestId string
 }
 
+type GetBucketUsageInput struct {
+}
+
+type GetBucketUsageOutput struct {
+	Size      uint64
+	RequestId string
+}
+
 /// Implementations of all the functions here are expected to be
 /// concurrency-safe, except for
 ///
@@ -256,6 +264,7 @@ type StorageBackend interface {
 	MultipartExpire(param *MultipartExpireInput) (*MultipartExpireOutput, error)
 	RemoveBucket(param *RemoveBucketInput) (*RemoveBucketOutput, error)
 	MakeBucket(param *MakeBucketInput) (*MakeBucketOutput, error)
+	GetBucketUsage(param *GetBucketUsageInput) (*GetBucketUsageOutput, error)
 	Delegate() interface{}
 }
 
@@ -424,6 +433,11 @@ func (s *StorageBackendInitWrapper) MakeBucket(param *MakeBucketInput) (*MakeBuc
 	return s.StorageBackend.MakeBucket(param)
 }
 
+func (s *StorageBackendInitWrapper) GetBucketUsage(param *GetBucketUsageInput) (*GetBucketUsageOutput, error) {
+	s.Init("")
+	return s.StorageBackend.GetBucketUsage(param)
+}
+
 type StorageBackendInitError struct {
 	error
 	cap Capabilities
@@ -545,5 +559,9 @@ func (e StorageBackendInitError) RemoveBucket(param *RemoveBucketInput) (*Remove
 }
 
 func (e StorageBackendInitError) MakeBucket(param *MakeBucketInput) (*MakeBucketOutput, error) {
+	return nil, e
+}
+
+func (e StorageBackendInitError) GetBucketUsage(param *GetBucketUsageInput) (*GetBucketUsageOutput, error) {
 	return nil, e
 }

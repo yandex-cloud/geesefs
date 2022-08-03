@@ -36,8 +36,9 @@ import (
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/jacobsa/fuse/fuseutil"
 
-	"github.com/sirupsen/logrus"
 	"net/http"
+
+	"github.com/sirupsen/logrus"
 )
 
 // goofys is a Filey System written in Go. All the backend data is
@@ -66,8 +67,8 @@ type Goofys struct {
 	// from per-inode locks). Should be always taken after any inode locks.
 	mu sync.RWMutex
 
-	flusherMu sync.Mutex
-	flusherCond *sync.Cond
+	flusherMu    sync.Mutex
+	flusherCond  *sync.Cond
 	flushPending int32
 
 	// The next inode ID to hand out. We assume that this will never overflow,
@@ -91,8 +92,8 @@ type Goofys struct {
 	// Inflight changes are tracked to skip them in parallel listings
 	// Required because we don't have guarantees about listing & change ordering
 	inflightListingId int
-	inflightListings map[int]map[string]bool
-	inflightChanges map[string]int
+	inflightListings  map[int]map[string]bool
+	inflightChanges   map[string]int
 
 	nextHandleID fuseops.HandleID
 	dirHandles   map[fuseops.HandleID]*DirHandle
@@ -100,15 +101,16 @@ type Goofys struct {
 	fileHandles map[fuseops.HandleID]*FileHandle
 
 	activeFlushers int64
-	flushRetrySet int32
-	memRecency uint64
+	flushRetrySet  int32
+	memRecency     uint64
 
 	forgotCnt uint32
 
-	zeroBuf []byte
-	lfru *LFRU
-	diskFdMu sync.Mutex
-	diskFdCond *sync.Cond
+	zeroBuf     []byte
+	lfru        *LFRU
+	diskUsage   uint64
+	diskFdMu    sync.Mutex
+	diskFdCond  *sync.Cond
 	diskFdCount int64
 }
 
@@ -130,6 +132,8 @@ func NewBackend(bucket string, flags *FlagStorage) (cloud StorageBackend, err er
 	} else if config, ok := flags.Backend.(*S3Config); ok {
 		if strings.HasSuffix(flags.Endpoint, "/storage.googleapis.com") {
 			cloud, err = NewGCS3(bucket, flags, config)
+		} else if flags.Provider == "minio" {
+			cloud, err = NewMinio(bucket, flags, config)
 		} else {
 			cloud, err = NewS3(bucket, flags, config)
 		}
@@ -189,12 +193,12 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	newBackend func(string, *FlagStorage) (StorageBackend, error)) *Goofys {
 	// Set up the basic struct.
 	fs := &Goofys{
-		bucket: bucket,
-		flags:  flags,
-		umask:  0122,
-		lfru:   NewLFRU(flags.CachePopularThreshold, flags.CacheMaxHits, flags.CacheAgeInterval, flags.CacheAgeDecrement),
-		zeroBuf: make([]byte, 1048576),
-		inflightChanges: make(map[string]int),
+		bucket:           bucket,
+		flags:            flags,
+		umask:            0122,
+		lfru:             NewLFRU(flags.CachePopularThreshold, flags.CacheMaxHits, flags.CacheAgeInterval, flags.CacheAgeDecrement),
+		zeroBuf:          make([]byte, 1048576),
+		inflightChanges:  make(map[string]int),
 		inflightListings: make(map[int]map[string]bool),
 	}
 
@@ -222,6 +226,18 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	}
 	_, fs.gcs = cloud.Delegate().(*GCS3)
 
+	go func(fs *Goofys, cloud StorageBackend) {
+		for {
+			getBucketUsageOutput, err := cloud.GetBucketUsage(&GetBucketUsageInput{})
+			if err != nil {
+				fs.diskUsage = 0
+			} else {
+				fs.diskUsage = getBucketUsageOutput.Size
+			}
+			time.Sleep(time.Second * time.Duration(fs.flags.DiskUsageInterval))
+		}
+	}(fs, cloud)
+
 	randomObjectName := prefix + (RandStringBytesMaskImprSrc(32))
 	err = cloud.Init(randomObjectName)
 	if err != nil {
@@ -236,7 +252,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		Mtime: now,
 	}
 
-	fs.bufferPool = NewBufferPool(int64(flags.MemoryLimit), uint64(flags.GCInterval) << 20)
+	fs.bufferPool = NewBufferPool(int64(flags.MemoryLimit), uint64(flags.GCInterval)<<20)
 	fs.bufferPool.FreeSomeCleanBuffers = func(size int64) (int64, bool) {
 		return fs.FreeSomeCleanBuffers(size)
 	}
@@ -269,6 +285,10 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	}
 
 	return fs
+}
+
+func (fs *Goofys) checkWriteAvailable(size uint64) bool {
+	return fs.flags.Capacity > (fs.diskUsage + size)
 }
 
 // from https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-golang
@@ -352,12 +372,12 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 	haveDirty := false
 	// Free at least 5 MB
 	if size < 5*1024*1024 {
-		size = 5*1024*1024
+		size = 5 * 1024 * 1024
 	}
 	skipRecent := atomic.LoadUint64(&fs.memRecency)
 	// Avoid evicting at least 1/4 of recent memory allocations
 	if skipRecent > fs.flags.MemoryLimit/4 {
-		skipRecent -= fs.flags.MemoryLimit/4
+		skipRecent -= fs.flags.MemoryLimit / 4
 	} else {
 		skipRecent = 0
 	}
@@ -438,12 +458,12 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 						// A flushed buffer can be removed at a cost of finalizing multipart upload
 						// to read it back later. However it's likely not a problem if we're uploading
 						// a large file because we may never need to read it back.
-						prev := del-1
+						prev := del - 1
 						if prev < 0 {
-							prev = i-1
+							prev = i - 1
 						}
 						if prev >= 0 && inode.buffers[prev].state == BUF_FL_CLEARED &&
-							buf.offset == (inode.buffers[prev].offset + inode.buffers[prev].length) {
+							buf.offset == (inode.buffers[prev].offset+inode.buffers[prev].length) {
 							inode.buffers[prev].length += buf.length
 							if del == -1 {
 								del = i
@@ -458,13 +478,13 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 				haveDirty = true
 			}
 			if del >= 0 {
-				inode.buffers = append(inode.buffers[0 : del], inode.buffers[i : ]...)
+				inode.buffers = append(inode.buffers[0:del], inode.buffers[i:]...)
 				i = del
 				del = -1
 			}
 		}
 		if del >= 0 {
-			inode.buffers = append(inode.buffers[0 : del], inode.buffers[i : ]...)
+			inode.buffers = append(inode.buffers[0:del], inode.buffers[i:]...)
 			del = -1
 		}
 		inode.mu.Unlock()
@@ -681,16 +701,20 @@ func (fs *Goofys) StatFS(
 	op *fuseops.StatFSOp) (err error) {
 
 	const BLOCK_SIZE = 4096
-	const TOTAL_SPACE = 1 * 1024 * 1024 * 1024 * 1024 * 1024 // 1PB
-	const TOTAL_BLOCKS = TOTAL_SPACE / BLOCK_SIZE
-	const INODES = 1 * 1000 * 1000 * 1000 // 1 billion
+	TOTAL_BLOCKS := fs.flags.Capacity / BLOCK_SIZE
+	USAGE_BLOCKS := fs.diskUsage / BLOCK_SIZE
+
 	op.BlockSize = BLOCK_SIZE
 	op.Blocks = TOTAL_BLOCKS
-	op.BlocksFree = TOTAL_BLOCKS
-	op.BlocksAvailable = TOTAL_BLOCKS
-	op.IoSize = 1 * 1024 * 1024 // 1MB
-	op.Inodes = INODES
-	op.InodesFree = INODES
+	if USAGE_BLOCKS > TOTAL_BLOCKS {
+		op.BlocksFree = 0
+	} else {
+		op.BlocksFree = TOTAL_BLOCKS - USAGE_BLOCKS
+	}
+	op.BlocksAvailable = op.BlocksFree
+	op.IoSize = 1 * 1024 * 1024            // 1MB
+	op.Inodes = 1 * 1000 * 1000 * 1000     // 1 billion
+	op.InodesFree = 1 * 1000 * 1000 * 1000 // 1 billion
 	return
 }
 
@@ -805,6 +829,9 @@ func (fs *Goofys) RemoveXattr(ctx context.Context,
 
 func (fs *Goofys) SetXattr(ctx context.Context,
 	op *fuseops.SetXattrOp) (err error) {
+	if !fs.checkWriteAvailable(0) {
+		return syscall.ENOSPC
+	}
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
@@ -825,6 +852,9 @@ func (fs *Goofys) SetXattr(ctx context.Context,
 
 func (fs *Goofys) CreateSymlink(ctx context.Context,
 	op *fuseops.CreateSymlinkOp) (err error) {
+	if !fs.checkWriteAvailable(0) {
+		return syscall.ENOSPC
+	}
 	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
 	fs.mu.RUnlock()
@@ -1372,7 +1402,9 @@ func (fs *Goofys) ReleaseFileHandle(
 func (fs *Goofys) CreateFile(
 	ctx context.Context,
 	op *fuseops.CreateFileOp) (err error) {
-
+	if !fs.checkWriteAvailable(0) {
+		return syscall.ENOSPC
+	}
 	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
 	fs.mu.RUnlock()
@@ -1412,9 +1444,11 @@ func (fs *Goofys) CreateFile(
 func (fs *Goofys) MkNode(
 	ctx context.Context,
 	op *fuseops.MkNodeOp) (err error) {
-
-	if (op.Mode & os.ModeType) != os.ModeDir &&
-		(op.Mode & os.ModeType) != 0 {
+	if !fs.checkWriteAvailable(0) {
+		return syscall.ENOSPC
+	}
+	if (op.Mode&os.ModeType) != os.ModeDir &&
+		(op.Mode&os.ModeType) != 0 {
 		// Special files are not supported yet
 		return syscall.ENOTSUP
 	}
@@ -1452,6 +1486,9 @@ func (fs *Goofys) MkNode(
 func (fs *Goofys) MkDir(
 	ctx context.Context,
 	op *fuseops.MkDirOp) (err error) {
+	if !fs.checkWriteAvailable(0) {
+		return syscall.ENOSPC
+	}
 
 	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
@@ -1499,7 +1536,9 @@ func (fs *Goofys) RmDir(
 func (fs *Goofys) SetInodeAttributes(
 	ctx context.Context,
 	op *fuseops.SetInodeAttributesOp) (err error) {
-
+	if !fs.checkWriteAvailable(0) {
+		return syscall.ENOSPC
+	}
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.RUnlock()
@@ -1539,7 +1578,9 @@ func (fs *Goofys) SetInodeAttributes(
 func (fs *Goofys) WriteFile(
 	ctx context.Context,
 	op *fuseops.WriteFileOp) (err error) {
-
+	if !fs.checkWriteAvailable(uint64(op.Offset)) {
+		return syscall.ENOSPC
+	}
 	fs.mu.RLock()
 
 	fh, ok := fs.fileHandles[op.Handle]

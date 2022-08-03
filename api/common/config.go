@@ -27,7 +27,7 @@ import (
 )
 
 type PartSizeConfig struct {
-	PartSize uint64
+	PartSize  uint64
 	PartCount uint64
 }
 
@@ -45,8 +45,12 @@ type FlagStorage struct {
 
 	// Common Backend Config
 	UseContentType bool
-	Endpoint       string
-	Backend        interface{}
+
+	Provider          string
+	Capacity          uint64
+	DiskUsageInterval uint64
+	Endpoint          string
+	Backend           interface{}
 
 	// Tuning
 	MemoryLimit           uint64
