@@ -258,10 +258,7 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 	if startAfter != "" {
 		startWith = &startAfter
 	} else if key != "" {
-		// Simulate '>' operator with start-after
-		// '.' = '/'-1
-		// \x... = 0x10FFFF in UTF-8 = largest code point
-		startWith = PString(key+".\xF4\x8F\xBF\xBF")
+		startWith = PString(key+"/")
 	}
 
 	myList := parent.fs.addInflightListing()
