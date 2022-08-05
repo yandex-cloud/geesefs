@@ -1,3 +1,10 @@
+geesefs (0.31.6) unstable; urgency=medium
+
+  * Remove listing method autodetection by StartAfter (it turns out it doesn't work with Yandex S3)
+  * Remove >= emulation by 0x10FFFF largest UTF-8 code point (should fix compatibility with Wasabi)
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 05 Aug 2022 14:26:08 +0300
+
 geesefs (0.31.5) unstable; urgency=medium
 
   * Reduce global FS lock contention and fix some theoretical deadlocks
