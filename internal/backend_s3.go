@@ -391,11 +391,6 @@ func (s *S3Backend) ListObjectsV2(params *s3.ListObjectsV2Input) (*s3.ListObject
 			return nil, "", err
 		}
 		out := s3.ListObjectsV2Output(*resp)
-		if in.StartAfter != nil && (out.StartAfter == nil || out.StartAfter != in.StartAfter) {
-			// Fallback to list v1
-			s.config.ListV1Ext = false
-			return s.ListObjectsV2(params)
-		}
 		for _, obj := range out.Contents {
 			// Make non-nil maps for all objects so that we know metadata is empty
 			if obj.UserMetadata == nil {

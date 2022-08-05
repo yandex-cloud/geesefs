@@ -217,7 +217,7 @@ func NewApp() (app *cli.App) {
 		cli.StringFlag{
 			Name:  "list-type",
 			Usage: "Listing type to use: ext-v1 (yandex only), 2 or 1 (default: ext-v1 for yandex, 1 for others)",
-			Value: "ext-v1",
+			Value: "",
 		},
 
 		cli.StringFlag{
@@ -662,6 +662,13 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.IAMHeader     = c.String("iam-header")
 		config.MultipartAge  = c.Duration("multipart-age")
 		listType := c.String("list-type")
+		if listType == "" {
+			if idx := strings.Index(flags.Endpoint, "yandex"); idx != -1 {
+				listType = "ext-v1"
+			} else {
+				listType = "1"
+			}
+		}
 		config.ListV1Ext     = listType == "ext-v1"
 		config.ListV2        = listType == "2"
 
