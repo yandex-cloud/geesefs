@@ -1825,6 +1825,11 @@ func (inode *Inode) FlushPart(part uint64) {
 		}
 	}
 
+	if inode.mpu == nil {
+		// Multipart upload was canceled in the meantime => don't flush
+		return
+	}
+
 	// Finally upload it
 	bufReader, bufIds := inode.GetMultiReader(partOffset, partSize)
 	bufLen := bufReader.Len()

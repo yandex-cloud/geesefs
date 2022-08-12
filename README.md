@@ -215,6 +215,10 @@ If you experience any problems with GeeseFS - if it crashes, hangs or does somet
 - Check your system log (syslog/journalctl) and dmesg for error messages from GeeseFS
 - Try to start GeeseFS in debug mode: `--debug_s3 --debug_fuse --log-file /path/to/log.txt`,
   reproduce the problem and send it to us via Issues or any other means.
+- If you experience crashes, you can also collect a core dump and send it to us:
+  - Run `ulimit -c unlimited`
+  - Set desired core dump path with `sudo sysctl -w kernel.core_pattern=/tmp/core-%e.%p.%h.%t`
+  - Start geesefs with `GOTRACEBACK=crash` environment variable
 
 # License
 
