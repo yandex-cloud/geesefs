@@ -236,6 +236,7 @@ geesefs works with:
 * OpenStack Swift
 * Azure Blob Storage (even though it's not S3)
 * Backblaze B2
+* Selectel S3
 
 It should also work with any other S3 that implements multipart uploads and
 multipart server-side copy (UploadPartCopy).
