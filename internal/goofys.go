@@ -333,13 +333,17 @@ func (fs *Goofys) FDCloser() {
 				if rmFdInode.DiskCacheFD != nil {
 					rmFdInode.DiskCacheFD.Close()
 					rmFdInode.DiskCacheFD = nil
+					rmFdInode.mu.Unlock()
+					fs.diskFdMu.Lock()
 					fs.diskFdCount--
-					break
+				} else {
+					rmFdInode.mu.Unlock()
+					fs.diskFdMu.Lock()
 				}
-				rmFdInode.mu.Unlock()
+			} else {
+				fs.diskFdMu.Lock()
 			}
 			rmFdItem = fs.lfru.Pick(rmFdItem)
-			fs.diskFdMu.Lock()
 		}
 		fs.diskFdCond.Wait()
 	}
