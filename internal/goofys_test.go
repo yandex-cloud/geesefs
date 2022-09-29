@@ -1172,7 +1172,9 @@ func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size i
 			err = s.fs.CreateFile(nil, &create)
 			t.Assert(err, IsNil)
 
+			s.fs.mu.RLock()
 			fh = s.fs.fileHandles[create.Handle]
+			s.fs.mu.RUnlock()
 		} else {
 			t.Assert(err, IsNil)
 		}
@@ -1500,7 +1502,9 @@ func (s *GoofysTest) TestRenameOpenedUnmodified(t *C) {
 		}
 		err = s.fs.CreateFile(nil, op)
 		t.Assert(err, IsNil)
+		s.fs.mu.RLock()
 		fh = s.fs.fileHandles[op.Handle]
+		s.fs.mu.RUnlock()
 	} else {
 		fh, err = in.OpenFile()
 		t.Assert(err, IsNil)
