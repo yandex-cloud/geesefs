@@ -752,8 +752,20 @@ func (parent *Inode) findChild(name string) (inode *Inode) {
 }
 
 func (parent *Inode) findInodeFunc(name string) func(i int) bool {
+	// . and .. must always come before all other entries
+	// FIXME: In fact, . and .. are fake entries and it would be totally fine to not store them at all
+	if name == "" {
+		return func(i int) bool {
+			return true
+		}
+	}
+	if name == "." || name == ".." {
+		return func(i int) bool {
+			return i >= 2 || parent.dir.Children[i].Name >= name
+		}
+	}
 	return func(i int) bool {
-		return parent.dir.Children[i].Name >= name
+		return i >= 2 && parent.dir.Children[i].Name >= name
 	}
 }
 
