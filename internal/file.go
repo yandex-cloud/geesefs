@@ -313,22 +313,52 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData 
 	return allocated
 }
 
-func (inode *Inode) ResizeUnlocked(newSize uint64, zeroFill bool) {
+func (inode *Inode) ResizeUnlocked(newSize uint64, zeroFill bool, finalizeFlushed bool) {
 	// Truncate or extend
+	inode.checkPauseWriters()
 	if inode.Attributes.Size > newSize && len(inode.buffers) > 0 {
 		// Truncate - remove extra buffers
-		end := len(inode.buffers)
-		for end > 0 && inode.buffers[end-1].offset >= newSize {
-			b := inode.buffers[end-1]
-			if b.data != nil {
-				b.ptr.refs--
-				if b.ptr.refs == 0 {
-					inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
+		end := 0
+		pauseAndFlush := true
+		for pauseAndFlush {
+			pauseAndFlush = false
+			end = len(inode.buffers)
+			for end > 0 && inode.buffers[end-1].offset >= newSize {
+				b := inode.buffers[end-1]
+				if b.state == BUF_FLUSHED_FULL || b.state == BUF_FLUSHED_CUT || b.state == BUF_FL_CLEARED {
+					// We can't remove already flushed parts from the server :-(
+					// And S3 (at least Ceph and Yandex, even though not Amazon) requires
+					// to use ALL uploaded parts when completing the upload
+					// So... we have to first finish the upload to be able to truncate it
+					if !finalizeFlushed {
+						log.Errorf("BUG: Trimming a flushed buffer where it should not happen")
+					} else {
+						pauseAndFlush = true
+						break
+					}
 				}
-				b.ptr = nil
-				b.data = nil
+				if b.data != nil {
+					b.ptr.refs--
+					if b.ptr.refs == 0 {
+						inode.fs.bufferPool.Use(-int64(len(b.ptr.mem)), false)
+					}
+					b.ptr = nil
+					b.data = nil
+				}
+				end--
 			}
-			end--
+			if pauseAndFlush {
+				inode.buffers = inode.buffers[0 : end]
+				inode.Attributes.Size = inode.buffers[end-1].offset + inode.buffers[end-1].length
+				inode.pauseWriters++
+				inode.mu.Unlock()
+				inode.SyncFile()
+				inode.mu.Lock()
+				inode.pauseWriters--
+				if inode.readCond != nil {
+					inode.readCond.Broadcast()
+				}
+			}
 		}
 		inode.buffers = inode.buffers[0 : end]
 		if end > 0 {
@@ -356,6 +386,15 @@ func (inode *Inode) ResizeUnlocked(newSize uint64, zeroFill bool) {
 	inode.Attributes.Size = newSize
 }
 
+func (inode *Inode) checkPauseWriters() {
+	for inode.pauseWriters > 0 {
+		if inode.readCond == nil {
+			inode.readCond = sync.NewCond(&inode.mu)
+		}
+		inode.readCond.Wait()
+	}
+}
+
 func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err error) {
 	fh.inode.logFuse("WriteFile", offset, len(data))
 
@@ -380,16 +419,11 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 
 	fh.inode.mu.Lock()
 
-	for fh.inode.pauseWriters > 0 {
-		if fh.inode.readCond == nil {
-			fh.inode.readCond = sync.NewCond(&fh.inode.mu)
-		}
-		fh.inode.readCond.Wait()
-	}
+	fh.inode.checkPauseWriters()
 
 	if fh.inode.Attributes.Size < end {
 		// Extend and zero fill
-		fh.inode.ResizeUnlocked(end, true)
+		fh.inode.ResizeUnlocked(end, true, false)
 	}
 
 	allocated := fh.inode.addBuffer(uint64(offset), data, BUF_DIRTY, copyData)
@@ -1879,7 +1913,7 @@ func (inode *Inode) FlushPart(part uint64) {
 
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) completeMultipart() {
-	// Server-size copy unmodified parts
+	// Server-side copy unmodified parts
 	finalSize := inode.Attributes.Size
 	numParts := inode.fs.partNum(finalSize)
 	numPartOffset, _ := inode.fs.partRange(numParts)
@@ -1927,7 +1961,7 @@ func (inode *Inode) completeMultipart() {
 				}
 				inode.mpu = nil
 				inode.updateFromFlush(finalSize, resp.ETag, resp.LastModified, resp.StorageClass)
-				stillDirty := inode.userMetadataDirty != 0 || inode.oldParent != nil
+				stillDirty := inode.userMetadataDirty != 0 || inode.oldParent != nil || inode.Attributes.Size != inode.knownSize
 				for i := 0; i < len(inode.buffers); {
 					if inode.buffers[i].state == BUF_FL_CLEARED {
 						inode.buffers = append(inode.buffers[0 : i], inode.buffers[i+1 : ]...)

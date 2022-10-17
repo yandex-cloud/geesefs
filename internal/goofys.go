@@ -1523,7 +1523,7 @@ func (fs *Goofys) SetInodeAttributes(
 			return syscall.EFBIG
 		}
 		inode.mu.Lock()
-		inode.ResizeUnlocked(*op.Size, true)
+		inode.ResizeUnlocked(*op.Size, true, true)
 		if inode.CacheState == ST_CACHED {
 			inode.SetCacheState(ST_MODIFIED)
 			inode.fs.WakeupFlusher()

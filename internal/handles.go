@@ -201,7 +201,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 				inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
 		}
 		inode.resetCache()
-		inode.ResizeUnlocked(item.Size, false)
+		inode.ResizeUnlocked(item.Size, false, false)
 		inode.knownSize = item.Size
 		if item.Metadata != nil {
 			inode.userMetadata = unescapeMetadata(item.Metadata)
