@@ -1153,8 +1153,7 @@ func (s *GoofysTest) testWriteFile(t *C, fileName string, size int64, write_size
 	s.testWriteFileAt(t, fileName, int64(0), size, write_size, true)
 }
 
-// Write <size> bytes at <offset> in <write_size> byte chunks
-func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size int64, write_size int64, truncate bool) {
+func (s *GoofysTest) testCreateAndWrite(t *C, fileName string, size int64, write_size int64, truncate bool) *FileHandle {
 	var fh *FileHandle
 	root := s.getRoot(t)
 
@@ -1206,7 +1205,14 @@ func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size i
 		nwritten += int64(nread)
 	}
 
-	err = fh.inode.SyncFile()
+	return fh
+}
+
+// Write <size> bytes at <offset> in <write_size> byte chunks
+func (s *GoofysTest) testWriteFileAt(t *C, fileName string, offset int64, size int64, write_size int64, truncate bool) {
+	fh := s.testCreateAndWrite(t, fileName, size, write_size, truncate)
+
+	err := fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err := s.cloud.HeadBlob(&HeadBlobInput{Key: fileName})
@@ -1267,6 +1273,37 @@ func (s *GoofysTest) TestWriteReallyLargeFile(t *C) {
 func (s *GoofysTest) TestWriteReplicatorThrottle(t *C) {
 	s.fs.flags.MaxFlushers = 1
 	s.testWriteFile(t, "testLargeFile", 21*1024*1024, 128*1024)
+}
+
+func (s *GoofysTest) TestMultipartWriteAndTruncate(t *C) {
+	fh := s.testCreateAndWrite(t, "testMP", 10*1024*1024, 128*1024, true)
+	// Now don't close the FD, but wait until both parts are flushed
+	for {
+		fh.inode.mu.Lock()
+		dirty := false
+		for _, buf := range fh.inode.buffers {
+			if buf.state == BUF_DIRTY {
+				dirty = true
+				break
+			}
+		}
+		fh.inode.mu.Unlock()
+		if !dirty {
+			break
+		}
+		s.fs.flusherMu.Lock()
+		if s.fs.flushPending == 0 {
+			s.fs.flusherCond.Wait()
+		}
+		s.fs.flusherMu.Unlock()
+	}
+	// Truncate the file so now it only consists of 1 part
+	err := s.fs.SetInodeAttributes(s.ctx, &fuseops.SetInodeAttributesOp{Inode: fh.inode.Id, Size: PUInt64(1*1024*1024)})
+	t.Assert(err, IsNil)
+	// And now try to flush the file. It would fail if GeeseFS wasn't flushing it before truncation
+	err = fh.inode.SyncFile()
+	t.Assert(err, IsNil)
+	fh.Release()
 }
 
 func (s *GoofysTest) TestReadWriteMinimumMemory(t *C) {
