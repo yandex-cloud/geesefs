@@ -1,3 +1,9 @@
+geesefs (0.32.0) unstable; urgency=medium
+
+  * Fix a bug where file truncation parallel to multipart upload breaks the upload
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 19 Oct 2022 01:49:58 +0300
+
 geesefs (0.31.9) unstable; urgency=medium
 
   * Fix failure to rename a directory with file starting on '('
