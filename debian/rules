@@ -3,6 +3,7 @@
 export DH_GOLANG_BUILDPKG := github.com/yandex-cloud/geesefs
 export GO111MODULE = on
 export GOPROXY = 
+export CGO_ENABLED = 0
 
 %:
 	dh $@ --builddirectory=_build --buildsystem=golang --with=golang
