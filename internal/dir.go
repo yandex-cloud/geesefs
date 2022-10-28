@@ -1394,6 +1394,8 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 	fs.inodes[newId] = fromInode
 	fs.inodes[oldId] = toDir
 	fs.mu.Unlock()
+	// Swap reference counts - the kernel will still send forget ops for the new inode
+	fromInode.refcnt, toDir.refcnt = toDir.refcnt, fromInode.refcnt
 	// 2 is to skip . and ..
 	for len(fromInode.dir.Children) > 2 {
 		child := fromInode.dir.Children[2]
