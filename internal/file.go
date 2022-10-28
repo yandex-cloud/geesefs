@@ -1032,11 +1032,13 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	}
 	requestErr = fh.inode.CheckLoadRange(offset, end-offset, ra, false)
 	mappedErr := mapAwsError(requestErr)
-	if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
-		// Object is deleted or resized remotely (416). Discard local version
-		log.Warnf("File %v is deleted or resized remotely, discarding local changes", fh.inode.FullName())
-		fh.inode.resetCache()
+	if requestErr != nil {
 		err = requestErr
+		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
+			// Object is deleted or resized remotely (416). Discard local version
+			log.Warnf("File %v is deleted or resized remotely, discarding local changes", fh.inode.FullName())
+			fh.inode.resetCache()
+		}
 		return
 	}
 
