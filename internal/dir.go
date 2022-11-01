@@ -330,7 +330,7 @@ func (inode *Inode) sealDir() {
 	inode.dir.listDone = true
 	inode.dir.lastFromCloud = nil
 	inode.dir.DirTime = time.Now()
-	inode.Attributes.Mtime = inode.findChildMaxTime()
+	inode.Attributes.Mtime, inode.Attributes.Ctime = inode.findChildMaxTime()
 }
 
 // Sorting order of entries in directories is slightly inconsistent between goofys
@@ -1014,7 +1014,11 @@ func (parent *Inode) Create(name string) (inode *Inode, fh *FileHandle) {
 	defer inode.mu.Unlock()
 	inode.Attributes = InodeAttributes{
 		Size:  0,
+		Ctime: now,
 		Mtime: now,
+		Uid:   fs.flags.Uid,
+		Gid:   fs.flags.Gid,
+		Mode:  fs.flags.FileMode,
 	}
 	// one ref is for lookup
 	inode.Ref()
@@ -1085,6 +1089,10 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 				oldInode.refcnt = 0
 				oldInode.Ref()
 				oldInode.SetCacheState(ST_MODIFIED)
+				oldInode.Attributes.Ctime = time.Now()
+				if parent.Attributes.Ctime.Before(oldInode.Attributes.Ctime) {
+					parent.Attributes.Ctime = oldInode.Attributes.Ctime
+				}
 				oldInode.Attributes.Mtime = time.Now()
 				if parent.Attributes.Mtime.Before(oldInode.Attributes.Mtime) {
 					parent.Attributes.Mtime = oldInode.Attributes.Mtime
@@ -1102,7 +1110,10 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 	inode.ToDir()
 	inode.touch()
 	// Record dir as actual
-	inode.dir.DirTime = inode.Attributes.Mtime
+	inode.dir.DirTime = inode.Attributes.Ctime
+	if parent.Attributes.Ctime.Before(inode.Attributes.Ctime) {
+		parent.Attributes.Ctime = inode.Attributes.Ctime
+	}
 	if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
 		parent.Attributes.Mtime = inode.Attributes.Mtime
 	}
@@ -1139,6 +1150,10 @@ func (parent *Inode) CreateSymlink(
 	inode.Attributes = InodeAttributes{
 		Size:  0,
 		Mtime: now,
+		Ctime: now,
+		Uid:   fs.flags.Uid,
+		Gid:   fs.flags.Gid,
+		Mode:  fs.flags.FileMode,
 	}
 	// one ref is for lookup
 	inode.Ref()
@@ -1587,20 +1602,24 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 	}
 }
 
-func (parent *Inode) findChildMaxTime() time.Time {
-	maxTime := parent.Attributes.Mtime
+func (parent *Inode) findChildMaxTime() (maxMtime, maxCtime time.Time) {
+	maxCtime = parent.Attributes.Ctime
+	maxMtime = parent.Attributes.Mtime
 
 	for i, c := range parent.dir.Children {
 		if i < 2 {
 			// skip . and ..
 			continue
 		}
-		if c.Attributes.Mtime.After(maxTime) {
-			maxTime = c.Attributes.Mtime
+		if c.Attributes.Ctime.After(maxCtime) {
+			maxCtime = c.Attributes.Ctime
+		}
+		if c.Attributes.Mtime.After(maxMtime) {
+			maxMtime = c.Attributes.Mtime
 		}
 	}
 
-	return maxTime
+	return
 }
 
 func (parent *Inode) LookUp(name string) (*Inode, error) {

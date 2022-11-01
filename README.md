@@ -21,34 +21,40 @@ Also check out our CSI S3 driver (GeeseFS-based): https://github.com/yandex-clou
 | Read after write  |    +    |    +   |    -   |   +  |    +    |
 | Partial writes    |    +    |    +   |    -   |   +  |    +    |
 | Truncate          |    +    |    -   |    -   |   +  |    +    |
-| chmod/chown       |    -    |    -   |    -   |   +  |    -    |
+| chmod/chown       |    Y    |    -   |    -   |   +  |    -    |
 | fsync             |    +    |    -   |    -   |   +  |    +    |
-| Symlinks          |    +    |    -   |    -   |   +  |    +    |
+| Symlinks          |    Y    |    -   |    -   |   +  |    +    |
+| Socket files      |    Y    |    -   |    -   |   +  |    -    |
+| Device files      |    Y    |    -   |    -   |   -  |    -    |
+| Custom mtime      |    Y    |    +   |    -   |   +  |    +    |
 | xattr             |    +    |    -   |    +   |   +  |    -    |
 | Directory renames |    +    |    +   |    *   |   +  |    +    |
 | readdir & changes |    +    |    +   |    -   |   +  |    +    |
 
-\* Directory renames are allowed in Goofys for directories with no more than 1000 entries and the limit is hardcoded
+**Y** Only works correctly with Yandex S3.
+
+**\*** Directory renames are allowed in Goofys for directories with no more than 1000 entries and the limit is hardcoded.
 
 List of non-POSIX behaviors/limitations for GeeseFS:
-* symbolic links are only restored correctly when using Yandex S3 because standard S3
-  doesn't return user metadata in listings and detecting symlinks in standard S3 would
-  require an additional HEAD request for every file in listing which would make listings
-  too slow
-* does not store file mode/owner/group, use `--(dir|file)-mode` or `--(uid|gid)` options
-* does not support hard links
-* does not support special files (block/character devices, named pipes, UNIX sockets)
-* does not support locking
-* `ctime`, `atime` is always the same as `mtime`
-* file modification time can't be set by user (for example with `cp --preserve` or utimes(2))
+* File mode/owner/group, symbolic links, custom mtimes and special files (block/character devices,
+  named pipes, UNIX sockets) are supported, but they are restored correctly only when
+  using Yandex S3 because standard S3 doesn't return user metadata in listings and
+  reading all this metadata in standard S3 would require an additional HEAD request
+  for every file in listing which would make listings too slow.
+* Special file support is enabled by default for Yandex S3 (disable with `--no-specials`) and disabled for others.
+* File mode/owner/group are disabled by default even for Yandex S3 (enable with `--enable-perms`).
+  When disabled, global permissions can be set with `--(dir|file)-mode` and `--(uid|gid)` options.
+* Custom modification times are also disabled by default even for Yandex S3 (enable with `--enable-mtime`).
+  When disabled:
+  - `ctime`, `atime` and `mtime` are always the same
+  - file modification time can't be set by user (for example with `cp --preserve` or utimes(2))
+* Does not support hard links
+* Does not support locking
 
 In addition to the items above:
-* default file size limit is 1.03 TB, achieved by splitting the file into 1000x 5MB parts,
+* Default file size limit is 1.03 TB, achieved by splitting the file into 1000x 5MB parts,
   1000x 25 MB parts and 8000x 125 MB parts. You can change part sizes, but AWS's own limit
   is anyway 5 TB.
-
-Owner & group, modification times and special files are in fact supportable with Yandex S3
-because it has listings with metadata. Feel free to post issues if you want it. :-)
 
 # Stability
 

@@ -71,6 +71,14 @@ type FlagStorage struct {
 	SinglePartMB          uint64
 	MaxMergeCopyMB        uint64
 	IgnoreFsync           bool
+	EnablePerms           bool
+	EnableSpecials        bool
+	EnableMtime           bool
+	UidAttr               string
+	GidAttr               string
+	FileModeAttr          string
+	RdevAttr              string
+	MtimeAttr             string
 	SymlinkAttr           string
 	CachePopularThreshold int64
 	CacheMaxHits          int64

@@ -233,6 +233,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	now := time.Now()
 	fs.rootAttrs = InodeAttributes{
 		Size:  4096,
+		Ctime: now,
 		Mtime: now,
 	}
 
@@ -251,6 +252,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	root.dir.mountPrefix = prefix
 	root.userMetadata = make(map[string][]byte)
 	root.Attributes.Mtime = fs.rootAttrs.Mtime
+	root.Attributes.Ctime = fs.rootAttrs.Ctime
 
 	fs.inodes[fuseops.RootInodeID] = root
 	fs.addDotAndDotDot(root)
@@ -1058,13 +1060,11 @@ func (fs *Goofys) addDotAndDotDot(dir *Inode) {
 	dot := NewInode(fs, dir, ".")
 	dot.ToDir()
 	dot.AttrTime = TIME_MAX
-	dot.userMetadata = make(map[string][]byte)
 	fs.insertInode(dir, dot)
 
 	dot = NewInode(fs, dir, "..")
 	dot.ToDir()
 	dot.AttrTime = TIME_MAX
-	dot.userMetadata = make(map[string][]byte)
 	fs.insertInode(dir, dot)
 }
 
@@ -1392,6 +1392,8 @@ func (fs *Goofys) CreateFile(
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
+	inode.setFileMode(op.Mode)
+
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
@@ -1418,8 +1420,8 @@ func (fs *Goofys) MkNode(
 	op *fuseops.MkNodeOp) (err error) {
 
 	if (op.Mode & os.ModeType) != os.ModeDir &&
-		(op.Mode & os.ModeType) != 0 {
-		// Special files are not supported yet
+		(op.Mode & os.ModeType) != 0 &&
+		!fs.flags.EnableSpecials {
 		return syscall.ENOTSUP
 	}
 
@@ -1433,7 +1435,7 @@ func (fs *Goofys) MkNode(
 	}
 
 	var inode *Inode
-	if (op.Mode & os.ModeType) == os.ModeDir {
+	if (op.Mode & os.ModeDir) != 0 {
 		inode, err = parent.MkDir(op.Name)
 		if err != nil {
 			err = mapAwsError(err)
@@ -1444,6 +1446,8 @@ func (fs *Goofys) MkNode(
 		inode, fh = parent.Create(op.Name)
 		fh.Release()
 	}
+	inode.Attributes.Rdev = op.Rdev
+	inode.setFileMode(op.Mode)
 
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
@@ -1471,6 +1475,11 @@ func (fs *Goofys) MkDir(
 	if err != nil {
 		err = mapAwsError(err)
 		return err
+	}
+	if fs.flags.EnablePerms {
+		inode.Attributes.Mode = os.ModeDir | (op.Mode & os.ModePerm)
+	} else {
+		inode.Attributes.Mode = os.ModeDir | fs.flags.DirMode
 	}
 
 	op.Entry.Child = inode.Id
@@ -1513,21 +1522,67 @@ func (fs *Goofys) SetInodeAttributes(
 		return syscall.ESTALE
 	}
 
-	if op.Size != nil {
+	if op.Size != nil || op.Mode != nil || op.Mtime != nil || op.Uid != nil || op.Gid != nil {
+		inode.mu.Lock()
+	}
+
+	modified := false
+
+	if op.Size != nil && inode.Attributes.Size != *op.Size {
 		if *op.Size > fs.getMaxFileSize() {
 			// File size too large
 			log.Warnf(
 				"Maximum file size exceeded when trying to truncate %v to %v bytes",
 				inode.FullName(), *op.Size,
 			)
+			inode.mu.Unlock()
 			return syscall.EFBIG
 		}
-		inode.mu.Lock()
 		inode.ResizeUnlocked(*op.Size, true, true)
-		if inode.CacheState == ST_CACHED {
-			inode.SetCacheState(ST_MODIFIED)
-			inode.fs.WakeupFlusher()
+		modified = true
+	}
+
+	if op.Mode != nil {
+		m, err := inode.setFileMode(*op.Mode)
+		if err != nil {
+			inode.mu.Unlock()
+			return err
 		}
+		modified = modified || m
+	}
+
+	if op.Mtime != nil && fs.flags.EnableMtime && inode.Attributes.Mtime != *op.Mtime {
+		inode.Attributes.Mtime = *op.Mtime
+		inode.setUserMeta(fs.flags.MtimeAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Mtime.Unix())))
+		modified = true
+	}
+
+	if op.Uid != nil && fs.flags.EnablePerms && inode.Attributes.Uid != *op.Uid {
+		inode.Attributes.Uid = *op.Uid
+		if inode.Attributes.Uid != fs.flags.Uid {
+			inode.setUserMeta(fs.flags.UidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Uid)))
+		} else {
+			inode.setUserMeta(fs.flags.UidAttr, nil)
+		}
+		modified = true
+	}
+
+	if op.Gid != nil && fs.flags.EnablePerms && inode.Attributes.Gid != *op.Gid {
+		inode.Attributes.Gid = *op.Gid
+		if inode.Attributes.Gid != fs.flags.Gid {
+			inode.setUserMeta(fs.flags.GidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Gid)))
+		} else {
+			inode.setUserMeta(fs.flags.GidAttr, nil)
+		}
+		modified = true
+	}
+
+	if modified && inode.CacheState == ST_CACHED {
+		inode.SetCacheState(ST_MODIFIED)
+		inode.fs.WakeupFlusher()
+	}
+
+	if op.Size != nil || op.Mode != nil || op.Mtime != nil || op.Uid != nil || op.Gid != nil {
 		inode.mu.Unlock()
 	}
 

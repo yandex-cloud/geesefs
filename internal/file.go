@@ -435,6 +435,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 	// FIXME: Don't activate the flusher immediately for small writes
 	fh.inode.fs.WakeupFlusher()
 	fh.inode.Attributes.Mtime = time.Now()
+	fh.inode.Attributes.Ctime = fh.inode.Attributes.Mtime
 
 	fh.inode.mu.Unlock()
 
@@ -2005,7 +2006,7 @@ func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *tim
 		inode.s3Metadata["storage-class"] = []byte(*storageClass)
 	}
 	if lastModified != nil {
-		inode.Attributes.Mtime = *lastModified
+		inode.Attributes.Ctime = *lastModified
 	}
 	inode.knownSize = size
 	inode.knownETag = *etag

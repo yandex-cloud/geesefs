@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,10 +46,11 @@ const (
 type InodeAttributes struct {
 	Size  uint64
 	Mtime time.Time
-}
-
-func (i InodeAttributes) Equal(other InodeAttributes) bool {
-	return i.Size == other.Size && i.Mtime.Equal(other.Mtime)
+	Ctime time.Time
+	Uid   uint32
+	Gid   uint32
+	Rdev  uint32
+	Mode  os.FileMode
 }
 
 type ReadRange struct {
@@ -177,6 +179,11 @@ func NewInode(fs *Goofys, parent *Inode, name string) (inode *Inode) {
 	inode = &Inode{
 		Name:       name,
 		fs:         fs,
+		Attributes: InodeAttributes{
+			Uid:    fs.flags.Uid,
+			Gid:    fs.flags.Gid,
+			Mode:   fs.flags.FileMode,
+		},
 		AttrTime:   time.Now(),
 		Parent:     parent,
 		s3Metadata: make(map[string][]byte),
@@ -203,17 +210,17 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 		inode.resetCache()
 		inode.ResizeUnlocked(item.Size, false, false)
 		inode.knownSize = item.Size
+		if item.LastModified != nil {
+			inode.Attributes.Mtime = *item.LastModified
+			inode.Attributes.Ctime = *item.LastModified
+		} else {
+			inode.Attributes.Mtime = inode.fs.rootAttrs.Ctime
+			inode.Attributes.Ctime = inode.fs.rootAttrs.Ctime
+		}
 		if item.Metadata != nil {
-			inode.userMetadata = unescapeMetadata(item.Metadata)
+			inode.setMetadata(item.Metadata)
 			inode.userMetadataDirty = 0
 		}
-	}
-	if item.LastModified != nil {
-		if inode.Attributes.Mtime.Before(*item.LastModified) {
-			inode.Attributes.Mtime = *item.LastModified
-		}
-	} else {
-		inode.Attributes.Mtime = inode.fs.rootAttrs.Mtime
 	}
 	if item.ETag != nil {
 		inode.s3Metadata["etag"] = []byte(*item.ETag)
@@ -294,6 +301,7 @@ func (inode *Inode) FullName() string {
 
 func (inode *Inode) touch() {
 	inode.Attributes.Mtime = time.Now()
+	inode.Attributes.Ctime = time.Now()
 }
 
 func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
@@ -304,24 +312,26 @@ func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 
 	attr = fuseops.InodeAttributes{
 		Size:   inode.Attributes.Size,
-		Atime:  mtime,
+		Atime:  inode.Attributes.Ctime,
 		Mtime:  mtime,
-		Ctime:  mtime,
+		Ctime:  inode.Attributes.Ctime,
 		Crtime: mtime,
-		Uid:    inode.fs.flags.Uid,
-		Gid:    inode.fs.flags.Gid,
+		Uid:    inode.Attributes.Uid,
+		Gid:    inode.Attributes.Gid,
+		Mode:   inode.Attributes.Mode,
+		Rdev:   inode.Attributes.Rdev,
 	}
 
 	if inode.dir != nil {
 		attr.Nlink = 2
-		attr.Mode = inode.fs.flags.DirMode | os.ModeDir
+		attr.Mode = attr.Mode & os.ModePerm | os.ModeDir
 	} else if inode.userMetadata != nil && inode.userMetadata[inode.fs.flags.SymlinkAttr] != nil {
 		attr.Nlink = 1
-		attr.Mode = inode.fs.flags.FileMode | os.ModeSymlink
+		attr.Mode = attr.Mode & os.ModePerm | os.ModeSymlink
 	} else {
 		attr.Nlink = 1
-		attr.Mode = inode.fs.flags.FileMode
 	}
+
 	return
 }
 
@@ -339,7 +349,10 @@ func (inode *Inode) ToDir() {
 	if inode.dir == nil {
 		inode.Attributes = InodeAttributes{
 			Size: 4096,
-			// Mtime intentionally not initialized
+			Uid:  inode.Attributes.Uid,
+			Gid:  inode.Attributes.Gid,
+			Mode: inode.fs.flags.DirMode | os.ModeDir,
+			// Ctime, Mtime intentionally not initialized
 		}
 		inode.dir = &DirInodeData{
 			lastOpenDirIdx: -1,
@@ -394,7 +407,106 @@ func (inode *Inode) fillXattrFromHead(resp *HeadBlobOutput) {
 		inode.s3Metadata["storage-class"] = []byte("STANDARD")
 	}
 
-	inode.userMetadata = unescapeMetadata(resp.Metadata)
+	inode.setMetadata(resp.Metadata)
+}
+
+// LOCKS_REQUIRED(inode.mu)
+func (inode *Inode) setUserMeta(key string, value []byte) {
+	if inode.userMetadata == nil {
+		inode.userMetadata = make(map[string][]byte)
+	}
+	if value == nil {
+		delete(inode.userMetadata, key)
+	} else {
+		inode.userMetadata[key] = value
+	}
+	inode.userMetadataDirty = 2
+}
+
+// LOCKS_REQUIRED(inode.mu)
+func (inode *Inode) setMetadata(metadata map[string]*string) {
+	inode.userMetadata = unescapeMetadata(metadata)
+	if inode.userMetadata != nil {
+		if inode.fs.flags.EnableMtime {
+			mtimeStr := inode.userMetadata[inode.fs.flags.MtimeAttr]
+			if mtimeStr != nil {
+				i, err := strconv.ParseUint(string(mtimeStr), 0, 64)
+				if err == nil {
+					inode.Attributes.Mtime = time.Unix(int64(i), 0)
+				}
+			}
+		}
+		if inode.fs.flags.EnablePerms {
+			uidStr := inode.userMetadata[inode.fs.flags.UidAttr]
+			if uidStr != nil {
+				i, err := strconv.ParseUint(string(uidStr), 0, 32)
+				if err == nil {
+					inode.Attributes.Uid = uint32(i)
+				}
+			}
+			gidStr := inode.userMetadata[inode.fs.flags.GidAttr]
+			if gidStr != nil {
+				i, err := strconv.ParseUint(string(gidStr), 0, 32)
+				if err == nil {
+					inode.Attributes.Gid = uint32(i)
+				}
+			}
+		}
+		if inode.fs.flags.EnablePerms || inode.fs.flags.EnableSpecials {
+			modeStr := inode.userMetadata[inode.fs.flags.FileModeAttr]
+			if modeStr != nil {
+				i, err := strconv.ParseUint(string(modeStr), 0, 32)
+				if err == nil {
+					fm := fuse.ConvertFileMode(uint32(i))
+					var mask os.FileMode
+					if inode.fs.flags.EnablePerms {
+						mask = os.ModePerm
+					}
+					if inode.fs.flags.EnableSpecials && (inode.Attributes.Mode & os.ModeType) == 0 {
+						mask = mask | os.ModeType
+					}
+					rmMask := (os.ModePerm | os.ModeType) ^ mask
+					inode.Attributes.Mode = inode.Attributes.Mode & rmMask | (fm & mask)
+					if (inode.Attributes.Mode & os.ModeDevice) != 0 {
+						rdev, _ := strconv.ParseUint(string(inode.userMetadata[inode.fs.flags.RdevAttr]), 0, 32)
+						inode.Attributes.Rdev = uint32(rdev)
+					}
+				}
+			}
+		}
+	}
+}
+
+func (inode *Inode) setFileMode(newMode os.FileMode) (changed bool, err error) {
+	prevMode := inode.Attributes.Mode
+	if inode.fs.flags.EnableSpecials {
+		if (newMode & os.ModeDir) != (inode.Attributes.Mode & os.ModeDir) {
+			if (newMode & os.ModeDir) != 0 {
+				return false, syscall.ENOTDIR
+			} else {
+				return false, syscall.EISDIR
+			}
+		}
+		inode.Attributes.Mode = (inode.Attributes.Mode & os.ModePerm) | (newMode & os.ModeType)
+	}
+	if inode.fs.flags.EnablePerms {
+		inode.Attributes.Mode = (inode.Attributes.Mode & os.ModeType) | (newMode & os.ModePerm)
+	}
+	var defaultMode os.FileMode
+	if inode.dir != nil {
+		defaultMode = inode.fs.flags.DirMode | os.ModeDir
+	} else {
+		defaultMode = inode.fs.flags.FileMode
+	}
+	if (inode.Attributes.Mode & os.ModeDevice) != 0 {
+		inode.setUserMeta(inode.fs.flags.RdevAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Rdev)))
+	}
+	if inode.Attributes.Mode != defaultMode {
+		inode.setUserMeta(inode.fs.flags.FileModeAttr, []byte(fmt.Sprintf("%d", fuse.ConvertGolangMode(inode.Attributes.Mode))))
+	} else {
+		inode.setUserMeta(inode.fs.flags.FileModeAttr, nil)
+	}
+	return prevMode != inode.Attributes.Mode, nil
 }
 
 // FIXME: Move all these xattr-related functions to file.go

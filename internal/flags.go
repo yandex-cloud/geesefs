@@ -222,13 +222,13 @@ func NewApp() (app *cli.App) {
 
 		cli.StringFlag{
 			Name:  "multipart-age",
-			Usage: "Multipart uploads older than this value will be deleted on start (default: 48 hours)",
+			Usage: "Multipart uploads older than this value will be deleted on start",
 			Value: "48h",
 		},
 
 		cli.IntFlag{
 			Name:  "multipart-copy-threshold",
-			Usage: "Threshold for switching from single-part to multipart object copy in MB. Maximum for AWS S3 is 5 GB (default: 128 MB)",
+			Usage: "Threshold for switching from single-part to multipart object copy in MB. Maximum for AWS S3 is 5 GB",
 			Value: 128,
 		},
 
@@ -280,27 +280,27 @@ func NewApp() (app *cli.App) {
 		cli.IntFlag{
 			Name:  "max-flushers",
 			Value: 16,
-			Usage: "How much parallel requests should be used for flushing changes to server (default: 16)",
+			Usage: "How much parallel requests should be used for flushing changes to server",
 		},
 
 		cli.IntFlag{
 			Name:  "max-parallel-parts",
 			Value: 8,
 			Usage: "How much parallel requests out of the total number can be used for large part uploads."+
-				" Large parts take more bandwidth so they usually require less parallelism (default: 8)",
+				" Large parts take more bandwidth so they usually require less parallelism",
 		},
 
 		cli.IntFlag{
 			Name:  "max-parallel-copy",
 			Value: 16,
 			Usage: "How much parallel unmodified part copy requests should be used."+
-				" This limit is separate from max-flushers (default: 16)",
+				" This limit is separate from max-flushers",
 		},
 
 		cli.IntFlag{
 			Name:  "read-ahead",
 			Value: 5*1024,
-			Usage: "How much data in KB should be pre-loaded with every read by default (default: 5 MB)",
+			Usage: "How much data in KB should be pre-loaded with every read by default",
 		},
 
 		cli.IntFlag{
@@ -312,45 +312,45 @@ func NewApp() (app *cli.App) {
 		cli.IntFlag{
 			Name:  "small-read-cutoff",
 			Value: 128,
-			Usage: "Maximum average size of last reads in KB to trigger \"small\" readahead (default: 128 KB)",
+			Usage: "Maximum average size of last reads in KB to trigger \"small\" readahead",
 		},
 
 		cli.IntFlag{
 			Name:  "read-ahead-small",
 			Value: 128,
-			Usage: "Smaller readahead size in KB to be used when small random reads are detected (default: 128 KB)",
+			Usage: "Smaller readahead size in KB to be used when small random reads are detected",
 		},
 
 		cli.IntFlag{
 			Name:  "large-read-cutoff",
 			Value: 20*1024,
-			Usage: "Amount of linear read in KB after which the \"large\" readahead should be triggered (default: 20 MB)",
+			Usage: "Amount of linear read in KB after which the \"large\" readahead should be triggered",
 		},
 
 		cli.IntFlag{
 			Name:  "read-ahead-large",
 			Value: 100*1024,
-			Usage: "Larger readahead size in KB to be used when long linear reads are detected (default: 100 MB)",
+			Usage: "Larger readahead size in KB to be used when long linear reads are detected",
 		},
 
 		cli.IntFlag{
 			Name:  "read-ahead-parallel",
 			Value: 20*1024,
-			Usage: "Larger readahead will be triggered in parallel chunks of this size in KB (default: 20 MB)",
+			Usage: "Larger readahead will be triggered in parallel chunks of this size in KB",
 		},
 
 		cli.IntFlag{
 			Name:  "read-merge",
 			Value: 512,
 			Usage: "Two HTTP requests required to satisfy a read will be merged into one" +
-				" if they're at most this number of KB away (default: 512)",
+				" if they're at most this number of KB away",
 		},
 
 		cli.IntFlag{
 			Name:  "single-part",
 			Value: 5,
 			Usage: "Maximum size of an object in MB to upload it as a single part." +
-				" Can't be less than 5 MB (default: 5 MB)",
+				" Can't be less than 5 MB",
 		},
 
 		cli.StringFlag{
@@ -366,7 +366,7 @@ func NewApp() (app *cli.App) {
 			Value: 0,
 			Usage: "If non-zero, allow to compose larger parts up to this number of megabytes" +
 				" in size from existing unchanged parts when doing server-side part copy."+
-				" Must be left at 0 for Yandex S3 (default: 0)",
+				" Must be left at 0 for Yandex S3",
 		},
 
 		cli.BoolFlag{
@@ -374,10 +374,64 @@ func NewApp() (app *cli.App) {
 			Usage: "Do not wait until changes are persisted to the server on fsync() call (default: off)",
 		},
 
+		cli.BoolFlag{
+			Name:  "enable-perms",
+			Usage: "Enable permissions, user and group ID." +
+				" Only works correctly if your S3 returns UserMetadata in listings (default: off)",
+		},
+
+		cli.BoolFlag{
+			Name:  "enable-specials",
+			Usage: "Enable special file support (sockets, devices, named pipes)." +
+				" Only works correctly if your S3 returns UserMetadata in listings (default: on for Yandex, off for others)",
+		},
+
+		cli.BoolFlag{
+			Name:  "no-specials",
+			Usage: "Disable special file support (sockets, devices, named pipes).",
+		},
+
+		cli.BoolFlag{
+			Name:  "enable-mtime",
+			Usage: "Enable modification time preservation." +
+				" Only works correctly if your S3 returns UserMetadata in listings (default: off)",
+		},
+
+		cli.StringFlag{
+			Name:  "uid-attr",
+			Value: "uid",
+			Usage: "User ID metadata attribute name",
+		},
+
+		cli.StringFlag{
+			Name:  "gid-attr",
+			Value: "gid",
+			Usage: "Group ID metadata attribute name",
+		},
+
+		cli.StringFlag{
+			Name:  "mode-attr",
+			Value: "mode",
+			Usage: "File mode (permissions & special file flags) metadata attribute name",
+		},
+
+		cli.StringFlag{
+			Name:  "rdev-attr",
+			Value: "rdev",
+			Usage: "Block/character device number metadata attribute name",
+		},
+
+		cli.StringFlag{
+			Name:  "mtime-attr",
+			Value: "mtime",
+			Usage: "File modification time (UNIX time) metadata attribute name",
+		},
+
 		cli.StringFlag{
 			Name:  "symlink-attr",
 			Value: "--symlink-target",
-			Usage: "Symbolic link target metadata attribute (default: --symlink-target)",
+			Usage: "Symbolic link target metadata attribute name." +
+				" Only works correctly if your S3 returns UserMetadata in listings",
 		},
 
 		cli.DurationFlag{
@@ -617,6 +671,14 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		SinglePartMB:           uint64(singlePart),
 		MaxMergeCopyMB:         uint64(c.Int("max-merge-copy")),
 		IgnoreFsync:            c.Bool("ignore-fsync"),
+		EnablePerms:            c.Bool("enable-perms"),
+		EnableSpecials:         c.Bool("enable-specials"),
+		EnableMtime:            c.Bool("enable-mtime"),
+		UidAttr:                c.String("uid-attr"),
+		GidAttr:                c.String("gid-attr"),
+		FileModeAttr:           c.String("mode-attr"),
+		RdevAttr:               c.String("rdev-attr"),
+		MtimeAttr:              c.String("mtime-attr"),
 		SymlinkAttr:            c.String("symlink-attr"),
 		CachePopularThreshold:  int64(c.Int("cache-popular-threshold")),
 		CacheMaxHits:           int64(c.Int("cache-max-hits")),
@@ -662,8 +724,12 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.IAMHeader     = c.String("iam-header")
 		config.MultipartAge  = c.Duration("multipart-age")
 		listType := c.String("list-type")
+		isYandex := strings.Index(flags.Endpoint, "yandex") != -1
+		if isYandex && !c.IsSet("no-specials") {
+			flags.EnableSpecials = true
+		}
 		if listType == "" {
-			if idx := strings.Index(flags.Endpoint, "yandex"); idx != -1 {
+			if isYandex {
 				listType = "ext-v1"
 			} else {
 				listType = "1"
@@ -678,6 +744,10 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		if config.UseKMS {
 			config.UseSSE = true
 		}
+	}
+
+	if c.IsSet("no-specials") {
+		flags.EnableSpecials = false
 	}
 
 	// Handle the repeated "-o" flag.
