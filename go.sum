@@ -290,10 +290,8 @@ github.com/stretchr/testify v1.6.1 h1:hDPOHmpOpP40lSULcqw7IrRb/u7w6RpDC9399XyoNd
 github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/urfave/cli v1.21.1-0.20190807111034-521735b7608a h1:Q372CokLjPoo4bx4qmpjaxZ0yEJR05rZkeEyXcEvSTY=
 github.com/urfave/cli v1.21.1-0.20190807111034-521735b7608a/go.mod h1:pLnliFgEwGWwRKy8217bLxXBDmG6pBQeZcIzf+m7U+k=
-github.com/vitalif/fusego v0.0.0-20220517201526-003d54287c05 h1:SDeqAo7ZTpt0zMzIepDg7y7Bd+C7FhuhMGJMX5euwPI=
-github.com/vitalif/fusego v0.0.0-20220517201526-003d54287c05/go.mod h1:xtZnnLxHY6QniCrfIpTwr5h8mH8zr+jsOFj0y9cfyp4=
-github.com/vitalif/fusego v0.0.0-20220702223751-e304003d79bf h1:DyLoTxLcurage3zrbstM/Rh44mvPxPDyU9foZODWcc8=
-github.com/vitalif/fusego v0.0.0-20220702223751-e304003d79bf/go.mod h1:liOmRdJd8oTwHCQ5M9JemRE3CebdlYcZWLk+ZjQeuq0=
+github.com/vitalif/fusego v0.0.0-20221101223738-c02e24f8ceba h1:+eySt00InH5nBy8IVGx1Vv33NExBh57oMV3boDmSDLg=
+github.com/vitalif/fusego v0.0.0-20221101223738-c02e24f8ceba/go.mod h1:liOmRdJd8oTwHCQ5M9JemRE3CebdlYcZWLk+ZjQeuq0=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.32/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=

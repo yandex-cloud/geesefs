@@ -38,4 +38,4 @@ require (
 
 replace github.com/aws/aws-sdk-go => ./s3ext
 
-replace github.com/jacobsa/fuse => github.com/vitalif/fusego v0.0.0-20220702223751-e304003d79bf
+replace github.com/jacobsa/fuse => github.com/vitalif/fusego v0.0.0-20221101223738-c02e24f8ceba
