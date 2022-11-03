@@ -330,7 +330,12 @@ func (inode *Inode) sealDir() {
 	inode.dir.listDone = true
 	inode.dir.lastFromCloud = nil
 	inode.dir.DirTime = time.Now()
-	inode.Attributes.Mtime, inode.Attributes.Ctime = inode.findChildMaxTime()
+	if inode.fs.flags.EnableMtime && inode.userMetadata != nil &&
+		inode.userMetadata[inode.fs.flags.MtimeAttr] != nil {
+		_, inode.Attributes.Ctime = inode.findChildMaxTime()
+	} else {
+		inode.Attributes.Mtime, inode.Attributes.Ctime = inode.findChildMaxTime()
+	}
 }
 
 // Sorting order of entries in directories is slightly inconsistent between goofys
