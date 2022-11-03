@@ -1,3 +1,9 @@
+geesefs (0.33.0) unstable; urgency=medium
+
+  * Optional uid, gid, UNIX permissions, special file and mtime support
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Thu, 03 Nov 2022 12:19:02 +0300
+
 geesefs (0.32.1) unstable; urgency=medium
 
   * Fix possible "panic: deref inode xxx by xxx from xxx" after forgetting a renamed directory
