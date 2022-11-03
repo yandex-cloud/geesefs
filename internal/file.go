@@ -436,6 +436,11 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 	fh.inode.fs.WakeupFlusher()
 	fh.inode.Attributes.Mtime = time.Now()
 	fh.inode.Attributes.Ctime = fh.inode.Attributes.Mtime
+	if fh.inode.fs.flags.EnableMtime && fh.inode.userMetadata != nil &&
+		fh.inode.userMetadata[fh.inode.fs.flags.MtimeAttr] != nil {
+		delete(fh.inode.userMetadata, fh.inode.fs.flags.MtimeAttr)
+		fh.inode.userMetadataDirty = 2
+	}
 
 	fh.inode.mu.Unlock()
 
