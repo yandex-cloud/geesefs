@@ -1,0 +1,10 @@
+IMAGE=cr.yandex/crp9ftr22d26age3hulg/ftp-s3-gateway
+VERSION=1.0
+
+build:
+	docker build -t $(IMAGE):$(VERSION) .
+
+push: build
+	docker tag $(IMAGE):$(VERSION) $(IMAGE):latest
+	docker push $(IMAGE):latest
+	docker push $(IMAGE):$(VERSION)
