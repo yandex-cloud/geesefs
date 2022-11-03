@@ -47,7 +47,7 @@ List of non-POSIX behaviors/limitations for GeeseFS:
 * Custom modification times are also disabled by default even for Yandex S3 (enable with `--enable-mtime`).
   When disabled:
   - `ctime`, `atime` and `mtime` are always the same
-  - file modification time can't be set by user (for example with `cp --preserve` or utimes(2))
+  - file modification time can't be set by user (for example with `cp --preserve`, `rsync -a` or utimes(2))
 * Does not support hard links
 * Does not support locking
 
