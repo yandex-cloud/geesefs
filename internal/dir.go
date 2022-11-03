@@ -32,6 +32,12 @@ import (
 	"github.com/jacobsa/fuse/fuseutil"
 )
 
+type SlurpGap struct {
+	// Gap is (start < key <= end)
+	start, end string
+	loadTime time.Time
+}
+
 type DirInodeData struct {
 	cloud       StorageBackend
 	mountPrefix string
@@ -52,6 +58,7 @@ type DirInodeData struct {
 
 	Children []*Inode
 	DeletedChildren map[string]*Inode
+	Gaps []*SlurpGap
 	handles []*DirHandle
 }
 
@@ -233,7 +240,7 @@ func (inode *Inode) slurpOnce(lock bool) (done bool, err error) {
 	for parent != nil && parent.dir.cloud == nil {
 		parent = parent.Parent
 	}
-	next, err := parent.listObjectsSlurp(inode, "", lock)
+	next, err := parent.listObjectsSlurp(inode, "", true, lock)
 	return next == "", err
 }
 
@@ -246,7 +253,7 @@ func isInvalidName(name string) bool {
 		strings.Index(name, "/../") >= 0
 }
 
-func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool) (nextStartAfter string, err error) {
+func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, sealEnd bool, lock bool) (nextStartAfter string, err error) {
 	// Prefix is for insertSubTree
 	cloud, prefix := parent.cloud()
 	if prefix != "" {
@@ -289,9 +296,6 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 			parent.insertSubTree(baseName, &obj, dirs)
 		}
 	}
-	if lock {
-		parent.mu.Unlock()
-	}
 
 	for d, sealed := range dirs {
 		// It's not safe to seal upper directories, we're not slurping at their start
@@ -305,24 +309,83 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, lock bool
 		obj = &resp.Items[len(resp.Items)-1]
 	}
 	seal := false
-	// if we are done listing prefix, we are good
-	if prefix != "" && obj != nil && !strings.HasPrefix(*obj.Key, prefix) {
-		if *obj.Key > prefix {
+	if sealEnd {
+		// if we are done listing prefix, we are good
+		if prefix != "" && obj != nil && !strings.HasPrefix(*obj.Key, prefix) {
+			if *obj.Key > prefix {
+				seal = true
+			}
+		} else if !resp.IsTruncated {
 			seal = true
 		}
-	} else if !resp.IsTruncated {
-		seal = true
 	}
 
 	if seal {
 		inode.sealDir()
 		nextStartAfter = ""
-	} else {
+	} else if obj != nil {
 		// NextContinuationToken is not returned when delimiter is empty, so use obj.Key
 		nextStartAfter = *obj.Key
 	}
 
+	// Remember this range as already loaded
+	parent.dir.markGapLoaded(NilStr(startWith), nextStartAfter)
+
+	if lock {
+		parent.mu.Unlock()
+	}
+
 	return
+}
+
+func (dir *DirInodeData) markGapLoaded(start, end string) {
+	pos := 0
+	if start != "" {
+		pos = sort.Search(len(dir.Gaps), func(i int) bool {
+			return dir.Gaps[i].start >= start
+		})
+	}
+	for pos > 0 && dir.Gaps[pos-1].end > start {
+		pos--
+	}
+	endPos := sort.Search(len(dir.Gaps), func(i int) bool {
+		return dir.Gaps[i].start >= end
+	})
+	if pos < len(dir.Gaps) && dir.Gaps[pos].start < start {
+		dir.Gaps[pos].end = start
+		pos++
+	}
+	if endPos > 0 && dir.Gaps[endPos-1].end > end {
+		dir.Gaps[endPos-1].start = end
+		endPos--
+	}
+	l := len(dir.Gaps)-(endPos-pos)
+	if pos == endPos {
+		dir.Gaps = append(dir.Gaps, nil)
+	}
+	copy(dir.Gaps[pos+1:], dir.Gaps[endPos:])
+	dir.Gaps[pos] = &SlurpGap{
+		start: start,
+		end: end,
+		loadTime: time.Now(),
+	}
+	dir.Gaps = dir.Gaps[0:l]
+}
+
+// LOCKS_REQUIRED(inode.mu)
+func (dir *DirInodeData) checkGapLoaded(key string, newerThan time.Time) bool {
+	pos := sort.Search(len(dir.Gaps), func(i int) bool {
+		return dir.Gaps[i].end >= key
+	})
+	if pos < len(dir.Gaps) && dir.Gaps[pos].start < key {
+		if dir.Gaps[pos].loadTime.After(newerThan) {
+			return true
+		} else {
+			copy(dir.Gaps[pos:], dir.Gaps[pos+1:])
+			dir.Gaps = dir.Gaps[0:len(dir.Gaps)-1]
+		}
+	}
+	return false
 }
 
 func (inode *Inode) sealDir() {
@@ -1386,7 +1449,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		var err error
 		fromInode.dir.listDone = false
 		for !fromInode.dir.listDone {
-			next, err = fromInode.listObjectsSlurp(fromInode, next, false)
+			next, err = fromInode.listObjectsSlurp(fromInode, next, true, false)
 			if err != nil {
 				return mapAwsError(err)
 			}
@@ -1628,7 +1691,44 @@ func (parent *Inode) findChildMaxTime() (maxMtime, maxCtime time.Time) {
 	return
 }
 
-func (parent *Inode) LookUp(name string) (*Inode, error) {
+func (parent *Inode) LookUp(name string, doSlurp bool) (*Inode, error) {
+	_, parentKey := parent.cloud()
+	key := appendChildName(parentKey, name)
+	root := parent
+	for root != nil && root.dir.cloud == nil {
+		root = root.Parent
+	}
+	expire := time.Now().Add(-parent.fs.flags.StatCacheTTL)
+	root.mu.Lock()
+	loaded := root.dir.checkGapLoaded(key, expire) && root.dir.checkGapLoaded(key+"/", expire)
+	root.mu.Unlock()
+	if loaded {
+		parent.mu.Lock()
+		inode := parent.findChildUnlocked(name)
+		parent.mu.Unlock()
+		return inode, nil
+	}
+	if doSlurp {
+		// 99% of time it's impractical to do 2 HEAD requests per file when looking it up
+		// So we first try to preload a whole batch of files starting with our key
+		// If the file/directory is there, the listing result will highly likely contain it
+		// The only case where it may be missing from the listing is when it's a directory
+		// and there's a lot of (more than 1000) files named "<file>[\x20-\x2E]...", because
+		// these names will come before "file/".
+		_, err := root.listObjectsSlurp(&Inode{Parent: parent}, key, false, true)
+		if err != nil {
+			return nil, err
+		}
+		parent.mu.Lock()
+		inode := parent.findChildUnlocked(name)
+		parent.mu.Unlock()
+		root.mu.Lock()
+		loaded := root.dir.checkGapLoaded(key, expire) && root.dir.checkGapLoaded(key+"/", expire)
+		root.mu.Unlock()
+		if inode != nil || loaded {
+			return inode, nil
+		}
+	}
 	myList := parent.fs.addInflightListing()
 	blob, err := parent.LookUpInodeMaybeDir(name)
 	if err != nil {
@@ -1636,7 +1736,6 @@ func (parent *Inode) LookUp(name string) (*Inode, error) {
 		return nil, err
 	}
 	dirs := make(map[*Inode]bool)
-	_, parentKey := parent.cloud()
 	prefixLen := len(parentKey)
 	if prefixLen > 0 {
 		prefixLen++

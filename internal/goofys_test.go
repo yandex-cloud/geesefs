@@ -833,7 +833,7 @@ func (s *GoofysTest) TestPanicWrapper(t *C) {
 }
 
 func (s *GoofysTest) TestGetInodeAttributes(t *C) {
-	inode, err := s.getRoot(t).LookUp("file1")
+	inode, err := s.getRoot(t).LookUp("file1", false)
 	t.Assert(err, IsNil)
 
 	attr, err := inode.GetAttributes()
@@ -1014,7 +1014,7 @@ func (s *GoofysTest) TestReadFiles(t *C) {
 
 	for _, en := range entries {
 		if en.Type == fuseutil.DT_File && (en.Name == "file1" || en.Name == "file2" || en.Name == "zero") {
-			in, err := parent.LookUp(en.Name)
+			in, err := parent.LookUp(en.Name, false)
 			t.Assert(err, IsNil)
 
 			fh, err := in.OpenFile()
@@ -1039,7 +1039,7 @@ func (s *GoofysTest) TestReadOffset(t *C) {
 	root := s.getRoot(t)
 	f := "file1"
 
-	in, err := root.LookUp(f)
+	in, err := root.LookUp(f, false)
 	t.Assert(err, IsNil)
 
 	fh, err := in.OpenFile()
@@ -1077,13 +1077,13 @@ func (s *GoofysTest) TestCreateFiles(t *C) {
 	t.Assert(resp.HeadBlobOutput.Size, DeepEquals, uint64(0))
 	defer resp.Body.Close()
 
-	_, err = s.getRoot(t).LookUp(fileName)
+	_, err = s.getRoot(t).LookUp(fileName, false)
 	t.Assert(err, IsNil)
 
 	fileName = "testCreateFile2"
 	s.testWriteFile(t, fileName, 1, 1)
 
-	inode, err := s.getRoot(t).LookUp(fileName)
+	inode, err := s.getRoot(t).LookUp(fileName, false)
 	t.Assert(err, IsNil)
 
 	fh, err = inode.OpenFile()
@@ -2087,10 +2087,6 @@ func (s *GoofysTest) testExplicitDir(t *C) {
 	t.Assert(err, IsNil)
 
 	_, err = s.LookUpInode(t, "fileNotFound")
-	t.Assert(err, Equals, fuse.ENOENT)
-
-	// dir1/ doesn't exist so we shouldn't be able to see it
-	_, err = s.LookUpInode(t, "dir1/file3")
 	t.Assert(err, Equals, fuse.ENOENT)
 
 	_, err = s.LookUpInode(t, "dir4/file5")
@@ -3426,10 +3422,6 @@ func (s *GoofysTest) TestDirMTime(t *C) {
 
 	attr1, _ := dir1.GetAttributes()
 	m1 := attr1.Mtime
-	if !s.cloud.Capabilities().DirBlob {
-		// dir1 doesn't have a dir blob, so should take root's mtime
-		t.Assert(m1, Equals, root.Attributes.Mtime)
-	}
 
 	time.Sleep(2 * time.Second)
 
@@ -3479,9 +3471,13 @@ func (s *GoofysTest) TestDirMTime(t *C) {
 	_, err = s.cloud.PutBlob(params)
 	t.Assert(err, IsNil)
 
+	// dir2 could be already preloaded due to optimisations, it may have older mtime
+	// FIXME: (maybe) update parent directory modification times when flushing files inside them
+	s.fs.flags.StatCacheTTL = 1 * time.Second
 	s.readDirIntoCache(t, dir2.Id)
+	s.fs.flags.StatCacheTTL = 1 * time.Minute
 
-	newfile, err := dir2.LookUp("newfile")
+	newfile, err := dir2.LookUp("newfile", false)
 	t.Assert(err, IsNil)
 
 	attr2New, _ := dir2.GetAttributes()
@@ -3516,10 +3512,8 @@ func (s *GoofysTest) TestDirMTimeNoTTL(t *C) {
 	t.Assert(err, IsNil)
 
 	attr3, _ := dir3.GetAttributes()
-	// setupDefaultEnv is before mounting but we can't really
-	// compare the time here since dir3 is s3 server time and dir2
-	// is local time
-	t.Assert(attr3.Mtime, Not(Equals), m2)
+	// dir2/dir10 is preloaded when looking up dir2 so its mtime is the same
+	t.Assert(attr3.Mtime, Equals, m2)
 }
 
 func (s *GoofysTest) TestIssue326(t *C) {
@@ -3766,7 +3760,7 @@ func (s *GoofysTest) TestVFS(t *C) {
 	t.Assert(rootPath, Equals, "cloud2Prefix")
 
 	// the mount would shadow dir4/file5
-	_, err = in.LookUp("file5")
+	_, err = in.LookUp("file5", false)
 	t.Assert(err, Equals, fuse.ENOENT)
 
 	_, fh := in.Create("testfile")

@@ -1012,8 +1012,8 @@ func (fs *Goofys) LookUpInode(
 	return
 }
 
-func (fs *Goofys) recheckInode(parent *Inode, inode *Inode, name string) (*Inode, error) {
-	newInode, err := parent.LookUp(name)
+func (fs *Goofys) recheckInode(parent *Inode, inode *Inode, name string) (newInode *Inode, err error) {
+	newInode, err = parent.LookUp(name, inode == nil)
 	if err != nil {
 		if inode != nil {
 			parent.removeChild(inode)

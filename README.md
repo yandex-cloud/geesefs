@@ -73,6 +73,7 @@ See also [Common Issues](#common-issues).
 | Server-side copy on append     |    +    |    -   |    -   |   *  |    +    |
 | Server-side copy on update     |    +    |    -   |    -   |   *  |    -    |
 | xattrs without extra RTT       |    +*   |    -   |    -   |   -  |    +    |
+| Dir preload on file lookup     |    +    |    -   |    -   |   -  |    -    |
 | Fast recursive listings        |    +    |    -   |    *   |   -  |    +    |
 | Asynchronous write             |    +    |    +   |    -   |   -  |    -    |
 | Asynchronous delete            |    +    |    -   |    -   |   -  |    -    |
