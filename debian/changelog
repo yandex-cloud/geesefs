@@ -1,3 +1,9 @@
+geesefs (0.34.0) unstable; urgency=medium
+
+  * Slurp files on lookup to speedup lookups (rsync benefits largely from this change)
+
+ -- Vitaliy Filippov <vitalif@yandex-team.ru>  Mon, 07 Nov 2022 18:31:39 +0300
+
 geesefs (0.33.1) unstable; urgency=medium
 
   * Fix a bug where directory objects of removed directories could be left in cloud in --no-dir-object mode
