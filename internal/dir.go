@@ -1197,6 +1197,7 @@ func (dir *Inode) SendMkDir() {
 		DirBlob:  true,
 		Metadata: escapeMetadata(dir.userMetadata),
 	}
+	dir.ImplicitDir = false
 	dir.IsFlushing += dir.fs.flags.MaxParallelParts
 	atomic.AddInt64(&dir.fs.activeFlushers, 1)
 	go func() {
