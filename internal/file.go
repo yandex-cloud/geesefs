@@ -39,6 +39,8 @@ type FileHandle struct {
 	lastReadIdx int
 }
 
+// On Linux and MacOS, IOV_MAX = 1024
+const IOV_MAX = 1024
 const MAX_BUF = 5 * 1024 * 1024
 const READ_BUF_SIZE = 128 * 1024
 
@@ -1098,6 +1100,15 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 			}
 			return
 		}
+	}
+
+	// Don't exceed IOV_MAX-1 for writev.
+	if len(data) > IOV_MAX-1 {
+		var tail []byte
+		for i := IOV_MAX-2; i < len(data); i++ {
+			tail = append(tail, data[i]...)
+		}
+		data = append(data[0:IOV_MAX-2], tail)
 	}
 
 	bytesRead = int(end-offset)
