@@ -85,8 +85,8 @@ const (
 type FileBuffer struct {
 	offset uint64
 	length uint64
-	// Chunk state: 1 = clean. 2 = dirty. 3 = part flushed, but not finalized
-	// 4 = flushed, not finalized, but removed from memory
+	// Chunk state: 1 = clean. 2 = dirty. 3, 4 = part flushed, but not finalized
+	// 5 = flushed, not finalized, but removed from memory
 	state int16
 	// Loading from server or from disk
 	loading bool

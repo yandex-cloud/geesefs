@@ -1610,9 +1610,9 @@ func (fs *Goofys) WriteFile(
 	// fuse binding leaves extra room for header, so we
 	// account for it when we decide whether to do "zero-copy" write
 	copyData := len(op.Data) < cap(op.Data)-4096
-	err = fh.WriteFile(op.Offset, op.Data, copyData)
+	copied, err := fh.WriteFile(op.Offset, op.Data, copyData)
 	err = mapAwsError(err)
-	op.SuppressReuse = !copyData
+	op.SuppressReuse = !copied
 
 	return
 }
