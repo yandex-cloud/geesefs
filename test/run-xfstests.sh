@@ -34,6 +34,6 @@ cd xfstests
 sudo apt-get -y install xfslibs-dev uuid-dev libtool-bin \
 	e2fsprogs automake gcc libuuid1 quota attr make \
 	libacl1-dev libaio-dev xfsprogs libgdbm-dev gawk fio dbench \
-	uuid-runtime python sqlite3 libcap-dev
+	uuid-runtime python3 sqlite3 libcap-dev
 make -j8
 sudo -E ./check generic/001 generic/005 generic/006 generic/007 generic/011 generic/013 generic/014
