@@ -1293,6 +1293,8 @@ func (inode *Inode) SendUpload() bool {
 						s3Log.Warnf("Conflict detected: failed to copy %v to %v: %v. File is removed remotely, dropping cache", from, key, err)
 						inode.mu.Lock()
 						newParent := inode.Parent
+						oldParent := inode.oldParent
+						oldName := inode.oldName
 						inode.oldParent = nil
 						inode.oldName = ""
 						inode.renamingTo = false
@@ -1301,6 +1303,12 @@ func (inode *Inode) SendUpload() bool {
 						newParent.mu.Lock()
 						newParent.removeChildUnlocked(inode)
 						newParent.mu.Unlock()
+						if oldParent != nil {
+							oldParent.mu.Lock()
+							delete(oldParent.dir.DeletedChildren, oldName)
+							oldParent.addModified(-1)
+							oldParent.mu.Unlock()
+						}
 					} else {
 						log.Debugf("Failed to copy %v to %v (rename): %v", from, key, err)
 						inode.mu.Lock()
