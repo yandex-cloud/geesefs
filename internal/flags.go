@@ -519,6 +519,12 @@ func NewApp() (app *cli.App) {
 			Usage: "Redirect logs to file, 'stderr' (default for foreground) or 'syslog' (default for background).",
 			Value: "",
 		},
+
+		cli.DurationFlag{
+			Name:  "print-stats",
+			Value: 30 * time.Second,
+			Usage: "I/O statistics printing interval. Set to 0 to disable.",
+		},
 	}
 
 	app = &cli.App{
@@ -699,6 +705,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		DebugS3:                c.Bool("debug_s3"),
 		Foreground:             c.Bool("f"),
 		LogFile:                c.String("log-file"),
+		StatsInterval:          c.Duration("print-stats"),
 	}
 
 	flags.PartSizes = parsePartSizes(c.String("part-sizes"))
