@@ -1,3 +1,10 @@
+geesefs (0.34.1) unstable; urgency=medium
+
+  * Detect conflict during rename and don't hang on them
+  * Do not exceed IOV_MAX in ReadFile if there are too many buffers
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Tue, 22 Nov 2022 11:54:35 +0300
+
 geesefs (0.34.0) unstable; urgency=medium
 
   * Slurp files on lookup to speedup lookups (rsync benefits largely from this change)
