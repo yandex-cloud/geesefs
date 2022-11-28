@@ -92,7 +92,8 @@ See also [Common Issues](#common-issues).
 # Installation
 
 * Pre-built binaries:
-  * [Linux amd64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-linux-amd64). You may also need to install fuse-utils first.
+  * [Linux amd64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-linux-amd64).
+    You may also need to install FUSE utils (fuse3 or fuse RPM/Debian package) first.
   * [Mac amd64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-mac-amd64),
     [arm64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-mac-arm64). You also need osxfuse/macfuse for GeeseFS to work.
 * Or build from source with Go 1.13 or later:
