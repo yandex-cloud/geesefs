@@ -210,9 +210,13 @@ func main() {
 			InitLoggers(flags.LogFile)
 		}
 
-		if os.Getenv("PPROF") != "" {
+		pprof := flags.PProf
+		if pprof == "" && os.Getenv("PPROF") != "" {
+			pprof = os.Getenv("PPROF")
+		}
+		if pprof != "" {
 			go func() {
-				addr := os.Getenv("PPROF")
+				addr := pprof
 				if strings.Index(addr, ":") == -1 {
 					addr = "127.0.0.1:"+addr
 				}

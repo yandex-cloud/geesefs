@@ -509,6 +509,12 @@ func NewApp() (app *cli.App) {
 			Usage: "Enable S3-related debugging output.",
 		},
 
+		cli.StringFlag{
+			Name:  "pprof",
+			Usage: "Specify port or host:port to enable pprof HTTP profiler on that port.",
+			Value: "",
+		},
+
 		cli.BoolFlag{
 			Name:  "f",
 			Usage: "Run geesefs in foreground.",
@@ -706,6 +712,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		Foreground:             c.Bool("f"),
 		LogFile:                c.String("log-file"),
 		StatsInterval:          c.Duration("print-stats"),
+		PProf:                  c.String("pprof"),
 	}
 
 	flags.PartSizes = parsePartSizes(c.String("part-sizes"))

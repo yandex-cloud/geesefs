@@ -94,6 +94,7 @@ type FlagStorage struct {
 	DebugMain  bool
 	DebugFuse  bool
 	DebugS3    bool
+	PProf      string
 	Foreground bool
 	LogFile    string
 
