@@ -134,16 +134,6 @@ var Version = "use `make build' to fill version hash correctly"
 func main() {
 	VersionHash = Version
 
-	if os.Getenv("PPROF") != "" {
-		go func() {
-			addr := os.Getenv("PPROF")
-			if strings.Index(addr, ":") == -1 {
-				addr = "127.0.0.1:"+addr
-			}
-			log.Println(http.ListenAndServe(addr, nil))
-		}()
-	}
-
 	messagePath()
 
 	app := NewApp()
@@ -218,6 +208,16 @@ func main() {
 
 		} else {
 			InitLoggers(flags.LogFile)
+		}
+
+		if os.Getenv("PPROF") != "" {
+			go func() {
+				addr := os.Getenv("PPROF")
+				if strings.Index(addr, ":") == -1 {
+					addr = "127.0.0.1:"+addr
+				}
+				log.Println(http.ListenAndServe(addr, nil))
+			}()
 		}
 
 		// Mount the file system.
