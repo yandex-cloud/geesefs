@@ -136,7 +136,11 @@ func main() {
 
 	if os.Getenv("PPROF") != "" {
 		go func() {
-			log.Println(http.ListenAndServe("localhost:"+os.Getenv("PPROF"), nil))
+			addr := os.Getenv("PPROF")
+			if strings.Index(addr, ":") == -1 {
+				addr = "127.0.0.1:"+addr
+			}
+			log.Println(http.ListenAndServe(addr, nil))
 		}()
 	}
 
