@@ -401,60 +401,6 @@ func (inode *Inode) sealDir() {
 	}
 }
 
-// Sorting order of entries in directories is slightly inconsistent between goofys
-// and azblob, s3. This inconsistency can be a problem if the listing involves
-// multiple pagination results. Call this instead of `cloud.ListBlobs` if you are
-// paginating.
-//
-// Problem: In s3 & azblob, prefixes are returned with '/' => the prefix "2019" is
-// returned as "2019/". So the list api for these backends returns "2019/" after
-// "2019-0001/" because ascii("/") > ascii("-"). This is problematic for goofys if
-// "2019/" is returned in x+1'th batch and "2019-0001/" is returned in x'th; Goofys
-// stores the results as they arrive in a sorted array and expects backends to return
-// entries in a sorted order.
-// We cant just use ordering of s3/azblob because different cloud providers have
-// different sorting strategies when it involes directories. In s3 "a/" > "a-b/".
-// In adlv2 it is opposite.
-//
-// Solution: To deal with this our solution with follows (for all backends). For
-// a single call of ListBlobs, we keep requesting multiple list batches until there
-// is nothing left to list or the last listed entry has all characters > "/"
-// Relavant test case: TestReadDirDash
-func listBlobsSafe(cloud StorageBackend, param *ListBlobsInput) (*ListBlobsOutput, error) {
-	res, err := cloud.ListBlobs(param)
-	if err != nil {
-		return nil, err
-	}
-
-	for shouldFetchNextListBlobsPage(res) {
-		nextReq := &ListBlobsInput{
-			// Inherit Prefix, Delimiter, MaxKeys from original request.
-			Prefix:    param.Prefix,
-			Delimiter: param.Delimiter,
-			MaxKeys:   param.MaxKeys,
-			// Get the continuation token from the result.
-			ContinuationToken: res.NextContinuationToken,
-		}
-		nextRes, err := cloud.ListBlobs(nextReq)
-		if err != nil {
-			return nil, err
-		}
-
-		res = &ListBlobsOutput{
-			// Add new items and prefixes.
-			Prefixes: append(res.Prefixes, nextRes.Prefixes...),
-			Items:    append(res.Items, nextRes.Items...),
-			// Inherit NextContinuationToken, IsTruncated from nextRes.
-			NextContinuationToken: nextRes.NextContinuationToken,
-			IsTruncated:           nextRes.IsTruncated,
-			// We no longer have a single request. This is composite request. Concatenate
-			// new request id to exiting.
-			RequestId: res.RequestId + ", " + nextRes.RequestId,
-		}
-	}
-	return res, nil
-}
-
 // LOCKS_EXCLUDED(dh.inode.fs)
 func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, skipListing map[string]bool) {
 	parent := dh.inode
@@ -548,7 +494,7 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	}
 
 	dh.mu.Unlock()
-	resp, err := listBlobsSafe(cloud, params)
+	resp, err := cloud.ListBlobs(params)
 	dh.mu.Lock()
 
 	if err != nil {
@@ -566,6 +512,29 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 		// :-X idiotic aws-sdk with string pointers was leading to a huge memory leak here
 		next := *resp.NextContinuationToken
 		dh.inode.dir.listMarker = &next
+		// In s3 & azblob, prefixes are returned with '/' => the prefix "2019" is
+		// returned as "2019/". So the list api for these backends returns "2019/" after
+		// "2019-0001/" because ascii("/") > ascii("-"). This is problematic for us if
+		// "2019/" is returned in x+1'th batch and "2019-0001/" is returned in x'th
+		// because GeeseFS returns results to the client in the sorted order.
+		//
+		// We could always use ordering of s3/azblob but other cloud providers may have
+		// different sorting strategies. For example, in ADLv2 "a/" is < "a-b/".
+		//
+		// We also could intelligently cut the result array so that the last item
+		// either doesn't contain characters before '/' or is followed by another item
+		// with a larger prefix (i.e. 'abc-def', then 'abd-' or 'abca-') in the removed
+		// portion, but it's probably rarely worth it because `readdir` listings are
+		// usually anyway full. Also it would require using StartAfter instead of
+		// ContinuationToken. Nevertheless, it may be a FIXME for the future :-)
+		//
+		// So, currently we just proceed to next pages in this case.
+		//
+		// Relevant test case: TestReadDirDash
+		if shouldFetchNextListBlobsPage(resp) {
+			// Tell loadListing() that we want more pages :)
+			dh.inode.dir.lastFromCloud = nil
+		}
 	} else {
 		dh.inode.sealDir()
 	}
