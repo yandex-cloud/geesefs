@@ -562,8 +562,10 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	dh.handleListResult(resp, prefix, dh.inode.fs.completeInflightListing(myList))
 	dh.inode.mu.Unlock()
 
-	if resp.IsTruncated {
-		dh.inode.dir.listMarker = resp.NextContinuationToken
+	if resp.IsTruncated && resp.NextContinuationToken != nil {
+		// :-X idiotic aws-sdk with string pointers was leading to a huge memory leak here
+		next := *resp.NextContinuationToken
+		dh.inode.dir.listMarker = &next
 	} else {
 		dh.inode.sealDir()
 	}
