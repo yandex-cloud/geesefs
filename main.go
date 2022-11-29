@@ -136,7 +136,7 @@ func main() {
 
 	if os.Getenv("PPROF") != "" {
 		go func() {
-			fmt.Printf("%v", http.ListenAndServe("localhost:"+os.Getenv("PPROF"), nil))
+			log.Println(http.ListenAndServe("localhost:"+os.Getenv("PPROF"), nil))
 		}()
 	}
 
