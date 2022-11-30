@@ -9,12 +9,12 @@ type DirTest struct{}
 var _ = Suite(&DirTest{})
 
 func (s *DirTest) TestHasCharLtSlash(t *C) {
-	t.Assert(hasCharLtSlash("wow"), Equals, false)
+	t.Assert(findLtSlash("wow") >= 0, Equals, false)
 	// '-', ' ' are less than '/'
-	t.Assert(hasCharLtSlash("w-o-w"), Equals, true)
-	t.Assert(hasCharLtSlash("w o w"), Equals, true)
+	t.Assert(findLtSlash("w-o-w") >= 0, Equals, true)
+	t.Assert(findLtSlash("w o w") >= 0, Equals, true)
 	// All unicode chars have multi-byte values and are > '/'
-	t.Assert(hasCharLtSlash("wøw"), Equals, false)
+	t.Assert(findLtSlash("wøw") >= 0, Equals, false)
 }
 
 func (s *DirTest) TestCloudPathToName(t *C) {

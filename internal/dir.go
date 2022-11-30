@@ -48,6 +48,8 @@ type DirInodeData struct {
 	DirTime         time.Time
 
 	listMarker *string
+	listPrefixes map[string]bool
+	listPostponed *ListBlobsOutput
 	lastFromCloud *string
 	listDone bool
 	// Time at which we started fetching child entries
@@ -72,13 +74,13 @@ type DirHandleEntry struct {
 // Returns true if any char in `inp` has a value < '/'.
 // This should work for unicode also: unicode chars are all greater than 128.
 // See TestHasCharLtSlash for examples.
-func hasCharLtSlash(inp string) bool {
-	for _, c := range inp {
+func findLtSlash(inp string) int {
+	for i, c := range inp {
 		if c < '/' {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 // Gets the name of the blob/prefix from a full cloud path.
@@ -87,6 +89,54 @@ func cloudPathToName(inp string) string {
 	inp = strings.TrimRight(inp, "/")
 	split := strings.Split(inp, "/")
 	return split[len(split)-1]
+}
+
+// "abc-defa", then "abc-defg" => "abc/" MAY come next
+// "abc-defa", then "abca" or "abd" => "abc/" MAY NOT come next
+func preSlashGreater(item string, i int, next string) bool {
+	if len(next) <= i {
+		return item[0:i] < next
+	} else {
+		return item[0:i] < next[0:i] || item[0:i] == next[0:i] && next[i] >= '/'
+	}
+}
+
+/*func allPreSlashPrefixesGreater(item string, next string) bool {
+	for i := 0; i < len(item); i++ {
+		if item[i] < '/' {
+			if len(next) <= i {
+				return item[0:i] < next
+			} else {
+				return item[0:i] < next[0:i] || item[0:i] == next[0:i] && next[i] >= '/'
+			}
+		}
+	}
+	return true
+}*/
+
+func cutPreSlashTail(resp *ListBlobsOutput) (prefixPos int, itemPos int) {
+	if !resp.IsTruncated {
+		// There is no next page.
+		return len(resp.Prefixes), len(resp.Items)
+	}
+	var pos, end int
+	end = len(resp.Prefixes)
+	for pos = end; pos > 0; pos-- {
+		lt := findLtSlash(*resp.Prefixes[pos-1].Prefix)
+		if lt < 0 || pos < end && preSlashGreater(*resp.Prefixes[pos-1].Prefix, lt, *resp.Prefixes[end-1].Prefix) {
+			break
+		}
+	}
+	prefixPos = pos
+	end = len(resp.Items)
+	for pos = end; pos > 0; pos-- {
+		lt := findLtSlash(*resp.Items[pos-1].Key)
+		if lt < 0 || pos < end && preSlashGreater(*resp.Items[pos-1].Key, lt, *resp.Items[end-1].Key) {
+			break
+		}
+	}
+	itemPos = pos
+	return
 }
 
 // Returns true if the last prefix's name or last item's name from the given
@@ -100,10 +150,10 @@ func shouldFetchNextListBlobsPage(resp *ListBlobsOutput) bool {
 	numPrefixes := len(resp.Prefixes)
 	numItems := len(resp.Items)
 	if numPrefixes > 0 &&
-		hasCharLtSlash(cloudPathToName(*resp.Prefixes[numPrefixes-1].Prefix)) {
+		findLtSlash(cloudPathToName(*resp.Prefixes[numPrefixes-1].Prefix)) >= 0 {
 		return true
 	} else if numItems > 0 &&
-		hasCharLtSlash(cloudPathToName(*resp.Items[numItems-1].Key)) {
+		findLtSlash(cloudPathToName(*resp.Items[numItems-1].Key)) >= 0 {
 		return true
 	}
 	return false
@@ -390,6 +440,8 @@ func (dir *DirInodeData) checkGapLoaded(key string, newerThan time.Time) bool {
 
 func (inode *Inode) sealDir() {
 	inode.dir.listMarker = nil
+	inode.dir.listPostponed = nil
+	inode.dir.listPrefixes = nil
 	inode.dir.listDone = true
 	inode.dir.lastFromCloud = nil
 	inode.dir.DirTime = time.Now()
@@ -471,6 +523,8 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, skip
 	}
 }
 
+// LOCKS_REQUIRED(dh.mu)
+// LOCKS_EXCLUDED(dh.inode.mu)
 func (dh *DirHandle) listObjectsFlat() (err error) {
 	cloud, prefix := dh.inode.cloud()
 	if cloud == nil {
@@ -505,41 +559,115 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	s3Log.Debug(resp)
 
 	dh.inode.mu.Lock()
-	dh.handleListResult(resp, prefix, dh.inode.fs.completeInflightListing(myList))
+
+	if dh.inode.dir.listPostponed != nil {
+		resp.Items = append(dh.inode.dir.listPostponed.Items, resp.Items...)
+		resp.Prefixes = append(dh.inode.dir.listPostponed.Prefixes, resp.Prefixes...)
+		dh.inode.dir.listPostponed = nil
+	}
+
+	// In s3 & azblob, prefixes are returned with '/' => the prefix "2019" is
+	// returned as "2019/". So the list api for these backends returns "2019/" after
+	// "2019-0001/" because ascii("/") > ascii("-"). This is problematic for us if
+	// "2019/" is returned in x+1'th batch and "2019-0001/" is returned in x'th
+	// because GeeseFS returns results to the client in the sorted order.
+	//
+	// We could always use ordering of s3/azblob but other cloud providers may have
+	// different sorting strategies. For example, in ADLv2 "a/" is < "a-b/".
+	//
+	// Try to intelligently cut the result array so that the last item either doesn't
+	// contain characters before '/' or is followed by another item with a larger
+	// prefix (i.e. 'abc-def', then 'abd-' or 'abca-') in the removed portion.
+	//
+	// Relevant test case: TestReadDirDash
+	var prefixRes *ListBlobsOutput
+	prefixPos, itemPos := cutPreSlashTail(resp)
+	if resp.IsTruncated && prefixPos == 0 && itemPos == 0 {
+		// All items are unsafe.
+		// May happen if all items begin with the same prefix containing a character
+		// smaller than '/'. For example, if all items start with '00-'.
+		// In this case we have to separately check that prefix.
+		prefixRes = &ListBlobsOutput{}
+		if len(resp.Prefixes) > 0 {
+			err = dh.checkPrefix(prefixRes, prefix, *resp.Prefixes[len(resp.Prefixes)-1].Prefix)
+			if err != nil {
+				dh.inode.fs.completeInflightListing(myList)
+				return err
+			}
+		}
+		if len(resp.Items) > 0 {
+			err = dh.checkPrefix(prefixRes, prefix, *resp.Items[len(resp.Items)-1].Key)
+			if err != nil {
+				dh.inode.fs.completeInflightListing(myList)
+				return err
+			}
+		}
+	} else if prefixPos < len(resp.Prefixes) || itemPos < len(resp.Items) {
+		// Some items are unsafe. Cut them into the next listing
+		dh.inode.dir.listPostponed = &ListBlobsOutput{
+			Prefixes: resp.Prefixes[prefixPos:],
+			Items: resp.Items[itemPos:],
+		}
+		resp.Prefixes = resp.Prefixes[0:prefixPos]
+		resp.Items = resp.Items[0:itemPos]
+	}
+
+	skipListing := dh.inode.fs.completeInflightListing(myList)
+	if prefixRes != nil {
+		dh.handleListResult(prefixRes, prefix, skipListing)
+		dh.inode.dir.lastFromCloud = nil
+	}
+	dh.handleListResult(resp, prefix, skipListing)
+
 	dh.inode.mu.Unlock()
 
 	if resp.IsTruncated && resp.NextContinuationToken != nil {
 		// :-X idiotic aws-sdk with string pointers was leading to a huge memory leak here
 		next := *resp.NextContinuationToken
 		dh.inode.dir.listMarker = &next
-		// In s3 & azblob, prefixes are returned with '/' => the prefix "2019" is
-		// returned as "2019/". So the list api for these backends returns "2019/" after
-		// "2019-0001/" because ascii("/") > ascii("-"). This is problematic for us if
-		// "2019/" is returned in x+1'th batch and "2019-0001/" is returned in x'th
-		// because GeeseFS returns results to the client in the sorted order.
-		//
-		// We could always use ordering of s3/azblob but other cloud providers may have
-		// different sorting strategies. For example, in ADLv2 "a/" is < "a-b/".
-		//
-		// We also could intelligently cut the result array so that the last item
-		// either doesn't contain characters before '/' or is followed by another item
-		// with a larger prefix (i.e. 'abc-def', then 'abd-' or 'abca-') in the removed
-		// portion, but it's probably rarely worth it because `readdir` listings are
-		// usually anyway full. Also it would require using StartAfter instead of
-		// ContinuationToken. Nevertheless, it may be a FIXME for the future :-)
-		//
-		// So, currently we just proceed to next pages in this case.
-		//
-		// Relevant test case: TestReadDirDash
-		if shouldFetchNextListBlobsPage(resp) {
-			// Tell loadListing() that we want more pages :)
-			dh.inode.dir.lastFromCloud = nil
-		}
 	} else {
 		dh.inode.sealDir()
 	}
 
 	return
+}
+
+// LOCKS_REQUIRED(dh.mu)
+// LOCKS_REQUIRED(dh.inode.mu)
+func (dh *DirHandle) checkPrefix(resp *ListBlobsOutput, oldPrefix string, lastObject string) (error) {
+	lt := findLtSlash(lastObject[len(oldPrefix):])
+	if lt < 0 {
+		return nil
+	}
+	lt = len(oldPrefix) + lt
+	newPrefix := lastObject[0:lt] + "/"
+	if dh.inode.dir.listPrefixes == nil || !dh.inode.dir.listPrefixes[newPrefix] {
+		cloud, _ := dh.inode.cloud()
+		if cloud == nil {
+			// Stale inode
+			return syscall.ESTALE
+		}
+		dh.inode.mu.Unlock()
+		dh.mu.Unlock()
+		prefixRes, err := cloud.ListBlobs(&ListBlobsInput{
+			Prefix:     PString(newPrefix),
+			Delimiter:  PString("/"),
+			MaxKeys:    aws.Uint32(1),
+		})
+		dh.mu.Lock()
+		dh.inode.mu.Lock()
+		if err != nil {
+			return err
+		}
+		if dh.inode.dir.listPrefixes == nil {
+			dh.inode.dir.listPrefixes = make(map[string]bool)
+		}
+		dh.inode.dir.listPrefixes[newPrefix] = true
+		if len(prefixRes.Items) > 0 || len(prefixRes.Prefixes) > 0 {
+			resp.Prefixes = append(resp.Prefixes, BlobPrefixOutput{Prefix: PString(newPrefix)})
+		}
+	}
+	return nil
 }
 
 func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry) {
