@@ -253,7 +253,6 @@ Services known to be **broken**:
 * CloudFlare R2. They have at least 2 bugs and don't respond to bug reports:
   - They throttle requests incorrectly, by returning 403 Forbidden if you exceed
     5 requests per seconds.
-  - Their listings are broken, see https://github.com/yandex-cloud/geesefs/issues/56.
 
 Important note: you should mount geesefs with `--list-type 2` or `--list-type 1` options
 if you use it with non-Yandex S3.
