@@ -250,9 +250,8 @@ It should also work with any other S3 that implements multipart uploads and
 multipart server-side copy (UploadPartCopy).
 
 Services known to be **broken**:
-* CloudFlare R2. They have at least 2 bugs and don't respond to bug reports:
-  - They throttle requests incorrectly, by returning 403 Forbidden if you exceed
-    5 requests per seconds.
+* CloudFlare R2. They have an issue with throttling - instead of using HTTP 429 status
+  code they return 403 Forbidden if you exceed 5 requests per seconds.
 
 Important note: you should mount geesefs with `--list-type 2` or `--list-type 1` options
 if you use it with non-Yandex S3.
