@@ -60,7 +60,9 @@ type S3Config struct {
 
 	Subdomain bool
 
-	UseIAM bool
+	UseIAM    bool
+	IAMFlavor string
+	IAMUrl    string
 	IAMHeader string
 
 	Credentials *credentials.Credentials

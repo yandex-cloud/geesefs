@@ -99,15 +99,42 @@ func NewS3(bucket string, flags *FlagStorage, config *S3Config) (*S3Backend, err
 	return s, nil
 }
 
-type IAMCredResponse struct {
+type IMDSv1Response struct {
 	Code string
 	Token string
 	Expiration time.Time
 }
 
-func (s *S3Backend) TryIAM() error {
-	credUrl := "http://169.254.169.254/latest/meta-data/iam/security-credentials/default"
-	resp, err := http.Get(credUrl)
+type GCPCredResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType string `json:"token_type"`
+	ExpiresIn int `json:"expires_in"`
+}
+
+func (s *S3Backend) TryIAM() (err error) {
+	credUrl := s.config.IAMUrl
+	if credUrl == "" {
+		if s.config.IAMFlavor == "gcp" {
+			credUrl = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token"
+		} else {
+			credUrl = "http://169.254.169.254/latest/meta-data/iam/security-credentials/default"
+		}
+	}
+	now := time.Now()
+	token := ""
+	var ttl time.Duration
+	var resp *http.Response
+	if s.config.IAMFlavor == "gcp" {
+		req, err := http.NewRequest("GET", credUrl, nil)
+		if err != nil {
+			s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
+			return err
+		}
+		req.Header.Add("Metadata-Flavor", "Google")
+		resp, err = http.DefaultClient.Do(req)
+	} else {
+		resp, err = http.Get(credUrl)
+	}
 	if err != nil {
 		s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
 		return err
@@ -118,32 +145,46 @@ func (s *S3Backend) TryIAM() error {
 		s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
 		return err
 	}
-	var creds IAMCredResponse
-	err = json.Unmarshal(body, &creds)
-	if err != nil {
-		s3Log.Infof("Bad response while trying to get IAM token from %v: %v", credUrl, err)
-		return err
-	}
-	if creds.Code == "Success" {
-		s.iam = true
-		s.iamToken.Store(creds.Token)
-		s.iamTokenExpiration = creds.Expiration
-		ttl := s.iamTokenExpiration.Sub(time.Now().Add(5*time.Minute))
-		if ttl < 0 {
-			ttl = s.iamTokenExpiration.Sub(time.Now())
-			if ttl >= 30*time.Second {
-				ttl = 30*time.Second
-			}
+	if s.config.IAMFlavor == "gcp" {
+		var creds GCPCredResponse
+		err = json.Unmarshal(body, &creds)
+		if err != nil {
+			s3Log.Infof("Bad response while trying to get IAM token from %v: %v", credUrl, err)
+			return err
 		}
-		s.iamRefreshTimer = time.AfterFunc(ttl, func() {
-			s.RefreshIAM()
-		})
-		s3Log.Infof("Successfully acquired IAM Token")
-		return nil
+		if creds.AccessToken == "" {
+			s3Log.Infof("Failed to get IAM token, response text is %v", string(body))
+			return errors.New("Failed to get IAM token")
+		}
+		token = creds.AccessToken
+		ttl = time.Duration(creds.ExpiresIn) * time.Second
 	} else {
-		s3Log.Infof("Failed to get IAM Token, code is %v", creds.Code)
-		return errors.New(creds.Code)
+		var creds IMDSv1Response
+		err = json.Unmarshal(body, &creds)
+		if err != nil {
+			s3Log.Infof("Bad response while trying to get IAM token from %v: %v", credUrl, err)
+			return err
+		}
+		if creds.Code != "Success" {
+			s3Log.Infof("Failed to get IAM token, code is %v", creds.Code)
+			return errors.New(creds.Code)
+		}
+		token = creds.Token
+		ttl = creds.Expiration.Sub(now)
 	}
+	s.iam = true
+	s.iamToken.Store(token)
+	s.iamTokenExpiration = now.Add(ttl)
+	if ttl > 5*time.Minute {
+		ttl = ttl - 5*time.Minute
+	} else if ttl > 30*time.Second {
+		ttl = ttl - 30*time.Second
+	}
+	s.iamRefreshTimer = time.AfterFunc(ttl, func() {
+		s.RefreshIAM()
+	})
+	s3Log.Infof("Successfully acquired IAM Token")
+	return nil
 }
 
 func (s *S3Backend) RefreshIAM() {

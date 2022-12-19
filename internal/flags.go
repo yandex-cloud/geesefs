@@ -145,13 +145,25 @@ func NewApp() (app *cli.App) {
 
 		cli.BoolFlag{
 			Name:  "iam",
-			Usage: "Try to authenticate automatically using VM metadata service (Yandex Cloud / IMDSv1)",
+			Usage: "Try to authenticate automatically using VM metadata service (Yandex Cloud / IMDSv1 / GCP)",
 		},
 
 		cli.StringFlag{
 			Name:  "iam-header",
 			Value: "X-YaCloud-SubjectToken",
 			Usage: "The header to use for authenticating with IAM token",
+		},
+
+		cli.StringFlag{
+			Name:  "iam-flavor",
+			Value: "gcp",
+			Usage: "Instance metadata service flavor: gcp or imdsv1",
+		},
+
+		cli.StringFlag{
+			Name:  "iam-url",
+			Value: "",
+			Usage: "Custom instance metadata service URL",
 		},
 
 		cli.StringFlag{
@@ -736,7 +748,12 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.NoChecksum    = c.Bool("no-checksum")
 		config.UseIAM        = c.Bool("iam")
 		config.IAMHeader     = c.String("iam-header")
+		config.IAMFlavor     = c.String("iam-flavor")
+		config.IAMUrl        = c.String("iam-url")
 		config.MultipartAge  = c.Duration("multipart-age")
+		if config.IAMFlavor != "gcp" && config.IAMFlavor != "imdsv1" {
+			panic("Unknown --iam-flavor: "+config.IAMFlavor)
+		}
 		listType := c.String("list-type")
 		isYandex := strings.Index(flags.Endpoint, "yandex") != -1
 		if isYandex && !c.IsSet("no-specials") {
