@@ -1,15 +1,24 @@
+geesefs (0.34.2) unstable; urgency=medium
+
+  * Implement the new yandex/google IAM service flavor
+  * Reduce memory usage during loading of very large directories
+  * Fix PPROF runtime debugging support
+  * Add I/O statistics printer
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 19 Dec 2022 19:56:05 +0300
+
 geesefs (0.34.1) unstable; urgency=medium
 
   * Detect conflict during rename and don't hang on them
   * Do not exceed IOV_MAX in ReadFile if there are too many buffers
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Tue, 22 Nov 2022 11:54:35 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 22 Nov 2022 11:54:35 +0300
 
 geesefs (0.34.0) unstable; urgency=medium
 
   * Slurp files on lookup to speedup lookups (rsync benefits largely from this change)
 
- -- Vitaliy Filippov <vitalif@yandex-team.ru>  Mon, 07 Nov 2022 18:31:39 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 07 Nov 2022 18:31:39 +0300
 
 geesefs (0.33.1) unstable; urgency=medium
 
@@ -17,7 +26,7 @@ geesefs (0.33.1) unstable; urgency=medium
   * Preserve directory mtimes set with utimes()
   * Reset file mtime on write
 
- -- Vitaliy Filippov <vitalif@yandex-team.ru>  Mon, 07 Nov 2022 18:04:00 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 07 Nov 2022 18:04:00 +0300
 
 geesefs (0.33.0) unstable; urgency=medium
 
