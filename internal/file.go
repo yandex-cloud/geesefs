@@ -327,7 +327,9 @@ func (inode *Inode) ResizeUnlocked(newSize uint64, zeroFill bool, finalizeFlushe
 			end = len(inode.buffers)
 			for end > 0 && inode.buffers[end-1].offset >= newSize {
 				b := inode.buffers[end-1]
-				if b.state == BUF_FLUSHED_FULL || b.state == BUF_FLUSHED_CUT || b.state == BUF_FL_CLEARED {
+				if b.state == BUF_FLUSHED_FULL || b.state == BUF_FLUSHED_CUT || b.state == BUF_FL_CLEARED ||
+					inode.IsRangeLocked(b.offset, b.length, true) {
+					// This buffer is flushed or is currently being flushed
 					// We can't remove already flushed parts from the server :-(
 					// And S3 (at least Ceph and Yandex, even though not Amazon) requires
 					// to use ALL uploaded parts when completing the upload
