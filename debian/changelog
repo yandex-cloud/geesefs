@@ -1,3 +1,9 @@
+geesefs (0.34.3) unstable; urgency=medium
+
+  * Followup to 0.32.0's file truncation fix - fix an additional case of the same bug
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Thu, 12 Jan 2023 19:09:23 +0300
+
 geesefs (0.34.2) unstable; urgency=medium
 
   * Implement the new yandex/google IAM service flavor
