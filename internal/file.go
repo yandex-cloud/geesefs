@@ -205,20 +205,54 @@ func insertBuffer(buffers []*FileBuffer, pos int, add ...*FileBuffer) []*FileBuf
 }
 
 func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData bool) int64 {
-	allocated := int64(0)
-
-	start := locateBuffer(inode.buffers, offset)
 	dataLen := uint64(len(data))
 	endOffset := offset+dataLen
 
 	// Remove intersecting parts as they're being overwritten
-	// If we're inserting a clean buffer, don't remove dirty ones
+	allocated := inode.removeRange(offset, dataLen, state)
+
+	// Insert non-overlapping parts of the buffer
+	curOffset := offset
+	dataPtr := &BufferPointer{
+		mem: data,
+		refs: 0,
+	}
+	start := locateBuffer(inode.buffers, offset)
+	pos := start
+	for ; pos < len(inode.buffers) && curOffset < endOffset; pos++ {
+		b := inode.buffers[pos]
+		if b.offset + b.length <= offset {
+			continue
+		}
+		if b.offset > curOffset {
+			// insert curOffset->min(b.offset,endOffset)
+			nextEnd := b.offset
+			if nextEnd > endOffset {
+				nextEnd = endOffset
+			}
+			allocated += inode.insertBuffer(pos, curOffset, data[curOffset-offset : nextEnd-offset], state, copyData, dataPtr)
+		}
+		curOffset = b.offset + b.length
+	}
+	if curOffset < endOffset {
+		// Insert curOffset->endOffset
+		allocated += inode.insertBuffer(pos, curOffset, data[curOffset-offset : ], state, copyData, dataPtr)
+	}
+
+	return allocated
+}
+
+// Remove buffers in range (offset..size)
+func (inode *Inode) removeRange(offset, size uint64, state int16) (allocated int64) {
+	start := locateBuffer(inode.buffers, offset)
+	endOffset := offset+size
 	for pos := start; pos < len(inode.buffers); pos++ {
 		b := inode.buffers[pos]
 		if b.offset >= endOffset {
 			break
 		}
 		bufEnd := b.offset+b.length
+		// If we're inserting a clean buffer, don't remove dirty ones
 		if (state >= BUF_DIRTY || b.state < BUF_DIRTY) && bufEnd > offset && endOffset > b.offset {
 			if offset <= b.offset {
 				if endOffset >= bufEnd {
@@ -284,35 +318,35 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData 
 			}
 		}
 	}
+	return
+}
 
-	// Insert non-overlapping parts of the buffer
-	curOffset := offset
-	dataPtr := &BufferPointer{
-		mem: data,
-		refs: 0,
-	}
-	pos := start
-	for ; pos < len(inode.buffers) && curOffset < endOffset; pos++ {
-		b := inode.buffers[pos]
-		if b.offset + b.length <= offset {
-			continue
-		}
-		if b.offset > curOffset {
-			// insert curOffset->min(b.offset,endOffset)
-			nextEnd := b.offset
-			if nextEnd > endOffset {
-				nextEnd = endOffset
-			}
-			allocated += inode.insertBuffer(pos, curOffset, data[curOffset-offset : nextEnd-offset], state, copyData, dataPtr)
-		}
-		curOffset = b.offset + b.length
-	}
-	if curOffset < endOffset {
-		// Insert curOffset->endOffset
-		allocated += inode.insertBuffer(pos, curOffset, data[curOffset-offset : ], state, copyData, dataPtr)
+func (inode *Inode) zeroRange(offset, size uint64) (bool, int64) {
+	// Check if it's already zeroed
+	pos := locateBuffer(inode.buffers, offset)
+	if pos < len(inode.buffers) && inode.buffers[pos].zero &&
+		inode.buffers[pos].offset == offset && inode.buffers[pos].length == size {
+		return false, 0
 	}
 
-	return allocated
+	// Remove intersecting parts as they're being overwritten
+	allocated := inode.removeRange(offset, size, BUF_DIRTY)
+
+	// Insert a zero buffer
+	pos = locateBuffer(inode.buffers, offset)
+	inode.buffers = insertBuffer(inode.buffers, pos, &FileBuffer{
+		offset: offset,
+		dirtyID: atomic.AddUint64(&inode.fs.bufferPool.curDirtyID, 1),
+		state: BUF_DIRTY,
+		onDisk: false,
+		zero: true,
+		recency: 0,
+		length: size,
+		data: nil,
+		ptr: nil,
+	})
+
+	return true, allocated
 }
 
 func (inode *Inode) ResizeUnlocked(newSize uint64, zeroFill bool, finalizeFlushed bool) {

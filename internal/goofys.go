@@ -1805,3 +1805,85 @@ func (fs *Goofys) SyncFS(parent *Inode) (err error) {
 	}
 	return
 }
+
+const (
+	FALLOC_FL_KEEP_SIZE      = uint32(0x01)
+	FALLOC_FL_PUNCH_HOLE     = uint32(0x02)
+	FALLOC_FL_COLLAPSE_RANGE = uint32(0x08)
+	FALLOC_FL_ZERO_RANGE     = uint32(0x10)
+	FALLOC_FL_INSERT_RANGE   = uint32(0x20)
+)
+
+func (fs *Goofys) Fallocate(
+	ctx context.Context,
+	op *fuseops.FallocateOp) (err error) {
+
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
+
+	fs.mu.RLock()
+	inode := fs.getInodeOrDie(op.Inode)
+	fs.mu.RUnlock()
+
+	if atomic.LoadInt32(&inode.refreshed) == -1 {
+		// Stale inode
+		return syscall.ESTALE
+	}
+
+	if op.Length == 0 {
+		return nil
+	}
+
+	inode.mu.Lock()
+
+	modified := false
+
+	if (op.Mode & (FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_INSERT_RANGE)) != 0 {
+		// Insert range/remove range operations are not supported
+		// It's possible to support them, but it will require buffer remapping support.
+		// I.e. if you open a file, insert/collapse a range and then read past the
+		// affected offset you should get data from the old offset! And it's probably
+		// wise to use UploadPartCopy with the corresponding ranges to optimize copying
+		// on the server side in this case. Some day we might even be able to preserve
+		// multipart part IDs if cutting a non-finalized upload across part boundaries,
+		// but now we can't - part offsets are always fixed.
+		inode.mu.Unlock()
+		return syscall.ENOTSUP
+	}
+
+	if op.Offset+op.Length > inode.Attributes.Size {
+		if (op.Mode & FALLOC_FL_KEEP_SIZE) == 0 {
+			// Resize
+			if op.Offset+op.Length > fs.getMaxFileSize() {
+				// File size too large
+				log.Warnf(
+					"Maximum file size exceeded when trying to extend %v to %v bytes using fallocate",
+					inode.FullName(), op.Offset+op.Length,
+				)
+				inode.mu.Unlock()
+				return syscall.EFBIG
+			}
+			inode.ResizeUnlocked(op.Offset+op.Length, true, true)
+			modified = true
+		} else {
+			if op.Offset > inode.Attributes.Size {
+				op.Offset = inode.Attributes.Size
+			}
+			op.Length = inode.Attributes.Size-op.Offset
+		}
+	}
+
+	if (op.Mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)) != 0 {
+		// Zero fill
+		mod, _ := inode.zeroRange(op.Offset, op.Length)
+		modified = modified || mod
+	}
+
+	if modified && inode.CacheState == ST_CACHED {
+		inode.SetCacheState(ST_MODIFIED)
+		inode.fs.WakeupFlusher()
+	}
+
+	inode.mu.Unlock()
+
+	return
+}

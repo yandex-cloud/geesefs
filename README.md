@@ -21,6 +21,7 @@ Also check out our CSI S3 driver (GeeseFS-based): https://github.com/yandex-clou
 | Read after write  |    +    |    +   |    -   |   +  |    +    |
 | Partial writes    |    +    |    +   |    -   |   +  |    +    |
 | Truncate          |    +    |    -   |    -   |   +  |    +    |
+| fallocate         |    +    |    -   |    -   |   -  |    -    |
 | chmod/chown       |    Y    |    -   |    -   |   +  |    -    |
 | fsync             |    +    |    -   |    -   |   +  |    +    |
 | Symlinks          |    Y    |    -   |    -   |   +  |    +    |
