@@ -59,7 +59,7 @@ func InitLoggers(logFile string) {
 		for _, l := range loggers {
 			l.Out = file
 		}
-		err = syscall.Dup2(int(file.Fd()), int(os.Stderr.Fd()))
+		err = syscall.Dup3(int(file.Fd()), int(os.Stderr.Fd()), 0)
 		if err != nil {
 			log.Errorf("Couldn't redirect STDERR to the log file %v", logFile)
 			return
