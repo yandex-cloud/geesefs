@@ -1,3 +1,10 @@
+geesefs (0.34.5) unstable; urgency=medium
+
+  * Fix a possible race condition between rename & list due to the lack of locking around sealDir()
+  * Add support for Linux arm64 (use syscall.Dup3 instead of Dup2)
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Wed, 01 Mar 2023 23:45:24 +0300
+
 geesefs (0.34.4) unstable; urgency=medium
 
   * Implement fallocate(), except really perverted FALLOC_FL_COLLAPSE_RANGE and FALLOC_FL_INSERT_RANGE
