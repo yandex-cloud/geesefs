@@ -300,7 +300,13 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, sealEnd b
 	for d, sealed := range dirs {
 		// It's not safe to seal upper directories, we're not slurping at their start
 		if (sealed || !resp.IsTruncated) && !d.isParentOf(inode) {
+			if d != parent {
+				d.mu.Lock()
+			}
 			d.sealDir()
+			if d != parent {
+				d.mu.Unlock()
+			}
 		}
 	}
 
@@ -321,7 +327,13 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, sealEnd b
 	}
 
 	if seal {
+		if inode != parent {
+			inode.mu.Lock()
+		}
 		inode.sealDir()
+		if inode != parent {
+			inode.mu.Unlock()
+		}
 		nextStartAfter = ""
 	} else if obj != nil {
 		// NextContinuationToken is not returned when delimiter is empty, so use obj.Key
@@ -388,6 +400,7 @@ func (dir *DirInodeData) checkGapLoaded(key string, newerThan time.Time) bool {
 	return false
 }
 
+// LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) sealDir() {
 	inode.dir.listMarker = nil
 	inode.dir.listDone = true
@@ -401,7 +414,8 @@ func (inode *Inode) sealDir() {
 	}
 }
 
-// LOCKS_EXCLUDED(dh.inode.fs)
+// LOCKS_REQUIRED(dh.inode.mu)
+// LOCKS_EXCLUDED(dh.inode.fs.mu)
 func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, skipListing map[string]bool) {
 	parent := dh.inode
 	fs := parent.fs
@@ -506,7 +520,6 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 
 	dh.inode.mu.Lock()
 	dh.handleListResult(resp, prefix, dh.inode.fs.completeInflightListing(myList))
-	dh.inode.mu.Unlock()
 
 	if resp.IsTruncated && resp.NextContinuationToken != nil {
 		// :-X idiotic aws-sdk with string pointers was leading to a huge memory leak here
@@ -538,6 +551,8 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	} else {
 		dh.inode.sealDir()
 	}
+
+	dh.inode.mu.Unlock()
 
 	return
 }
