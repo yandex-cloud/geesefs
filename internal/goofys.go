@@ -1622,6 +1622,11 @@ func (fs *Goofys) SetInodeAttributes(
 		return syscall.ESTALE
 	}
 
+	if inode.Parent == nil {
+		// chmod/chown on the root directory of mountpoint is not supported
+		return syscall.ENOTSUP
+	}
+
 	if op.Size != nil || op.Mode != nil || op.Mtime != nil || op.Uid != nil || op.Gid != nil {
 		inode.mu.Lock()
 	}
