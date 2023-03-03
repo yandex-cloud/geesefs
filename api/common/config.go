@@ -42,6 +42,8 @@ type FlagStorage struct {
 	FileMode os.FileMode
 	Uid      uint32
 	Gid      uint32
+	Setuid   int
+	Setgid   int
 
 	// Common Backend Config
 	UseContentType bool

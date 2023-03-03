@@ -19,10 +19,12 @@ package internal
 import (
 	. "github.com/yandex-cloud/geesefs/api/common"
 
+	"fmt"
 	"io"
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"text/template"
 	"time"
@@ -128,6 +130,18 @@ func NewApp() (app *cli.App) {
 			Name:  "gid",
 			Value: gid,
 			Usage: "GID owner of all inodes.",
+		},
+
+		cli.IntFlag{
+			Name:  "setuid",
+			Value: uid,
+			Usage: "Drop root privileges and change to this user ID (defaults to --uid).",
+		},
+
+		cli.IntFlag{
+			Name:  "setgid",
+			Value: gid,
+			Usage: "Drop root group and change to this group ID (defaults to --gid).",
 		},
 	}
 
@@ -671,6 +685,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		FileMode:               os.FileMode(c.Int("file-mode")),
 		Uid:                    uint32(c.Int("uid")),
 		Gid:                    uint32(c.Int("gid")),
+		Setuid:                 c.Int("setuid"),
+		Setgid:                 c.Int("setgid"),
 
 		// Tuning,
 		MemoryLimit:            uint64(1024*1024*c.Int("memory-limit")),
@@ -784,6 +800,19 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 	// Handle the repeated "-o" flag.
 	for _, o := range c.StringSlice("o") {
 		parseOptions(flags.MountOptions, o)
+	}
+
+	if syscall.Getuid() == 0 && !c.IsSet("setuid") && flags.Uid != 0 {
+		flags.Setuid = int(flags.Uid)
+	}
+	if syscall.Getgid() == 0 && !c.IsSet("setgid") && flags.Gid != 0 {
+		flags.Setgid = int(flags.Gid)
+	}
+
+	if flags.Setuid != 0 {
+		if _, ok := flags.MountOptions["user_id"]; !ok {
+			flags.MountOptions["user_id"] = fmt.Sprintf("%v", flags.Setuid)
+		}
 	}
 
 	flags.MountPointArg = c.Args()[1]

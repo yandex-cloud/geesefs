@@ -246,6 +246,14 @@ func main() {
 			// Let the user unmount with Ctrl-C (SIGINT)
 			registerSIGINTHandler(fs, flags)
 
+			// Drop root privileges
+			if flags.Setuid != 0 {
+				syscall.Setuid(flags.Setuid)
+			}
+			if flags.Setgid != 0 {
+				syscall.Setgid(flags.Setgid)
+			}
+
 			// Wait for the file system to be unmounted.
 			err = mfs.Join(context.Background())
 			if err != nil {
