@@ -42,7 +42,7 @@ jobs:
         s3cmd ${{secrets.S3CMD}} put geesefs-tests-linux-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-tests-linux-amd64
 
     - name: Test
-      run: make run-test
+      run: SAME_PROCESS_MOUNT=1 make run-test
 
     - uses: "marvinpinto/action-automatic-releases@latest"
       with:
