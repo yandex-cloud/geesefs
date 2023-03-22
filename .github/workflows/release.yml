@@ -20,6 +20,9 @@ jobs:
     - name: Build linux amd64
       run: env CGO_ENABLED=0 go build -o geesefs-linux-amd64 -v && ln -s geesefs-linux-amd64 geesefs
 
+    - name: Build linux arm64
+      run: env CGO_ENABLED=0 GOARCH=arm64 go build -o geesefs-linux-arm64 -v
+
     - name: Build Mac amd64
       run: env CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o geesefs-mac-amd64 -v
 
@@ -33,10 +36,12 @@ jobs:
       run: |
         sudo apt-get -y install s3cmd
         s3cmd ${{secrets.S3CMD}} put geesefs-linux-amd64 s3://${{secrets.S3BUCKET}}/geesefs-linux-amd64
+        s3cmd ${{secrets.S3CMD}} put geesefs-linux-arm64 s3://${{secrets.S3BUCKET}}/geesefs-linux-arm64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-amd64 s3://${{secrets.S3BUCKET}}/geesefs-mac-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-arm64 s3://${{secrets.S3BUCKET}}/geesefs-mac-arm64
         s3cmd ${{secrets.S3CMD}} put geesefs-tests-linux-amd64 s3://${{secrets.S3BUCKET}}/geesefs-tests-linux-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-linux-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-linux-amd64
+        s3cmd ${{secrets.S3CMD}} put geesefs-linux-arm64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-linux-arm64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-mac-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-arm64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-mac-arm64
         s3cmd ${{secrets.S3CMD}} put geesefs-tests-linux-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-tests-linux-amd64
@@ -50,6 +55,7 @@ jobs:
         prerelease: false
         files: |
           geesefs-linux-amd64
+          geesefs-linux-arm64
           geesefs-mac-amd64
           geesefs-mac-arm64
 
