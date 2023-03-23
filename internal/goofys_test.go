@@ -822,16 +822,6 @@ func (s *GoofysTest) TestLookUpInode(t *C) {
 	t.Assert(err, IsNil)
 }
 
-func (s *GoofysTest) TestPanicWrapper(t *C) {
-	debug.SetTraceback("single")
-
-	fs := FusePanicLogger{s.fs}
-	err := fs.GetInodeAttributes(nil, &fuseops.GetInodeAttributesOp{
-		Inode: 1234,
-	})
-	t.Assert(err, Equals, fuse.EIO)
-}
-
 func (s *GoofysTest) TestGetInodeAttributes(t *C) {
 	inode, err := s.getRoot(t).LookUp("file1", false)
 	t.Assert(err, IsNil)

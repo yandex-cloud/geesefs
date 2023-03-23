@@ -133,7 +133,7 @@ func Mount(
 		err = fmt.Errorf("Mount: initialization failed")
 		return
 	}
-	server := fuseutil.NewFileSystemServer(FusePanicLogger{fs})
+	server := fuseutil.NewFileSystemServer(fs)
 
 	mfs, err = fuse.Mount(flags.MountPoint, server, mountCfg)
 	if err != nil {
