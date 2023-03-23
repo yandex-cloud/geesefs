@@ -4615,3 +4615,16 @@ func (s *GoofysTest) TestReadMyOwnNewFileFuse(t *C) {
 	//t.Assert(err, IsNil)
 	//t.Assert(string(buf), Equals, "filex")
 }
+
+// FIXME Notification tests:
+// 1. Lookup and read a file, modify it out of band, refresh and check that
+//    it returns the new size and data
+// 2. Lookup and read a file, remove it out of band, refresh and check that
+//    it does not exist and does not return an entry in unknown state
+// 3. List a non-root directory, add a file in it, refresh, list it again
+//    and check that it has the new file
+// 4. List a non-root directory, modify a file in it, refresh, list it again
+//    and check that the file is updated
+// 5. List a non-root directory, remove a file in it, refresh, list it again
+//    and check that the file does not exists
+// 6. Same as 3-5, but with the root directory

@@ -51,6 +51,8 @@ import (
 
 type Goofys struct {
 	fuseutil.NotImplementedFileSystem
+	connection *fuse.Connection
+
 	bucket string
 
 	flags *FlagStorage
@@ -884,6 +886,87 @@ func (fs *Goofys) SetXattr(ctx context.Context,
 	if atomic.LoadInt32(&inode.refreshed) == -1 {
 		// Stale inode
 		return syscall.ESTALE
+	}
+
+	if op.Name == fs.flags.RefreshAttr {
+		// Setting xattr with special name (.invalidate) refreshes the inode's cache
+		inode.mu.Lock()
+		parent := inode.Parent
+		parentId := fuseops.InodeID(0)
+		if parent != nil {
+			parentId = parent.Id
+		}
+		name := inode.Name
+		inodeId := inode.Id
+		inode.mu.Unlock()
+		inode.resetDirTimeRec()
+		var mappedErr error
+		if parent == nil {
+			// For regular directories it's enough to send one invalidation
+			// message, the kernel will send forgets for their children and
+			// everything will be refreshed just fine.
+			// But root directory is a special case: we should invalidate all
+			// inodes in it ourselves. Basically this means that we have to do
+			// a listing and notify the kernel about every file in a root
+			// directory.
+			dh := inode.OpenDir()
+			dh.mu.Lock()
+			var notifications []interface{}
+			for {
+				en, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
+				if err != nil {
+					mappedErr = mapAwsError(err)
+					break
+				}
+				if en == nil {
+					break
+				}
+				if dh.lastInternalOffset >= 2 {
+					// Delete notifications are send by ReadDir() itself
+					notifications = append(notifications, &fuseops.NotifyInvalEntry{
+						Parent: inode.Id,
+						Name: en.Name,
+					})
+				}
+				dh.lastInternalOffset++
+				dh.lastExternalOffset++
+			}
+			dh.CloseDir()
+			dh.mu.Unlock()
+			// Send notifications from another goroutine to prevent deadlocks
+			if fs.connection != nil {
+				go func() {
+					for _, n := range notifications {
+						fs.connection.Notify(n)
+					}
+				}()
+			}
+			return mappedErr
+		}
+		inode, err = fs.recheckInode(parent, inode, name)
+		mappedErr = mapAwsError(err)
+		if fs.connection != nil {
+			// Send notifications from another goroutine to prevent deadlocks
+			go func() {
+				if mappedErr == fuse.ENOENT {
+					fs.connection.Notify(&fuseops.NotifyDelete{
+						Parent: parentId,
+						Child: inodeId,
+						Name: name,
+					})
+				} else {
+					fs.connection.Notify(&fuseops.NotifyInvalEntry{
+						Parent: parentId,
+						Name: name,
+					})
+				}
+			}()
+		}
+		if mappedErr == fuse.ENOENT {
+			// We don't mind if the file disappeared
+			return nil
+		}
+		return mappedErr
 	}
 
 	err = inode.SetXattr(op.Name, op.Value, op.Flags)
@@ -1891,4 +1974,8 @@ func (fs *Goofys) Fallocate(
 	inode.mu.Unlock()
 
 	return
+}
+
+func (fs *Goofys) SetConnection(conn *fuse.Connection) {
+	fs.connection = conn
 }

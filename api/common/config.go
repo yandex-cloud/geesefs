@@ -82,6 +82,7 @@ type FlagStorage struct {
 	RdevAttr              string
 	MtimeAttr             string
 	SymlinkAttr           string
+	RefreshAttr           string
 	CachePopularThreshold int64
 	CacheMaxHits          int64
 	CacheAgeInterval      int64

@@ -460,6 +460,13 @@ func NewApp() (app *cli.App) {
 				" Only works correctly if your S3 returns UserMetadata in listings",
 		},
 
+		cli.StringFlag{
+			Name:  "refresh-attr",
+			Value: ".invalidate",
+			Usage: "Setting xattr with this name, without user. prefix, " +
+				" refreshes the cache of the file or directory.",
+		},
+
 		cli.DurationFlag{
 			Name:  "stat-cache-ttl",
 			Value: time.Minute,
@@ -720,6 +727,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		RdevAttr:               c.String("rdev-attr"),
 		MtimeAttr:              c.String("mtime-attr"),
 		SymlinkAttr:            c.String("symlink-attr"),
+		RefreshAttr:            c.String("refresh-attr"),
 		CachePopularThreshold:  int64(c.Int("cache-popular-threshold")),
 		CacheMaxHits:           int64(c.Int("cache-max-hits")),
 		CacheAgeInterval:       int64(c.Int("cache-age-interval")),

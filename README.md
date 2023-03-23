@@ -178,8 +178,9 @@ fio -name=test -ioengine=libaio -direct=1 -bs=4M -iodepth=1 -fallocate=none \
 GeeseFS doesn't support concurrent updates of the same file from multiple hosts. If you try to
 do that you should guarantee that one host calls `fsync()` on the modified file and then waits
 for at least `--stat-cache-ttl` (1 minute by default) before allowing other hosts to start
-updating the file. If you don't do that you may encounter lost updates (conflicts) which are
-reported in the log in the following way:
+updating the file. Other way is to refresh file/directory cache forcibly using `setfattr -n .invalidate <filename>`.
+This forces GeeseFS to recheck file/directory state from the server. If you don't do that
+you may encounter lost updates (conflicts) which are reported in the log in the following way:
 
 ```
 main.WARNING File xxx/yyy is deleted or resized remotely, discarding local changes

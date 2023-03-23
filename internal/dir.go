@@ -659,6 +659,7 @@ func (dh *DirHandle) loadListing() error {
 // LOCKS_EXCLUDED(dh.inode.fs)
 func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, err error) {
 	parent := dh.inode
+	fs := parent.fs
 	if parent.dir == nil {
 		panic("ReadDir non-directory "+parent.FullName())
 	}
@@ -678,6 +679,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 	}
 
 	// Skip stale inodes
+	var notifications []interface{}
 	for i := dh.lastInternalOffset; i < len(parent.dir.Children); i++ {
 		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
 		childTmp := parent.dir.Children[i]
@@ -686,6 +688,11 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 			atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
 			(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
 			childTmp.mu.Lock()
+			notifications = append(notifications, &fuseops.NotifyDelete{
+				Parent: parent.Id,
+				Child: childTmp.Id,
+				Name: childTmp.Name,
+			})
 			atomic.StoreInt32(&childTmp.refreshed, -1)
 			if childTmp.isDir() {
 				childTmp.removeAllChildrenUnlocked()
@@ -694,6 +701,15 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 			childTmp.mu.Unlock()
 			i--
 		}
+	}
+
+	if len(notifications) > 0 && fs.connection != nil {
+		// Notify kernel in a separate thread/goroutine
+		go func() {
+			for _, n := range notifications {
+				fs.connection.Notify(n)
+			}
+		}()
 	}
 
 	// May be -1 if we remove inodes above
@@ -729,6 +745,7 @@ func (dh *DirHandle) CloseDir() error {
 // ACQUIRES_LOCK(inode.mu)
 func (inode *Inode) resetDirTimeRec() {
 	inode.mu.Lock()
+	inode.AttrTime = time.Time{}
 	if inode.dir == nil {
 		inode.mu.Unlock()
 		return
@@ -738,8 +755,8 @@ func (inode *Inode) resetDirTimeRec() {
 	// Make a copy of the child nodes before giving up the lock.
 	// This protects us from any addition/removal of child nodes
 	// under this node.
-	children := make([]*Inode, len(inode.dir.Children))
-	copy(children, inode.dir.Children)
+	children := make([]*Inode, len(inode.dir.Children)-2)
+	copy(children, inode.dir.Children[2:])
 	inode.mu.Unlock()
 	for _, child := range children {
 		child.resetDirTimeRec()
@@ -903,7 +920,9 @@ func (parent *Inode) removeAllChildrenUnlocked() {
 	for _, dh := range parent.dir.handles {
 		dh.lastInternalOffset = -1
 	}
-	parent.dir.Children = parent.dir.Children[0 : 2]
+	if len(parent.dir.Children) > 2 {
+		parent.dir.Children = parent.dir.Children[0 : 2]
+	}
 }
 
 // LOCKS_EXCLUDED(parent.fs.mu)
