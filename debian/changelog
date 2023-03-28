@@ -4,21 +4,21 @@ geesefs (0.35.0) unstable; urgency=medium
   * Remove panic capturing
   * Add linux-arm64 build to CI
 
- -- Vitaliy Filippov <vitalif@yandex-team.ru>  Tue, 28 Mar 2023 18:02:46 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 28 Mar 2023 18:02:46 +0300
 
 geesefs (0.34.6) unstable; urgency=medium
 
   * Drop root privileges when started with --uid or --setuid (new option)
   * Fix crash on chmod/chown of the root directory of mountpoint
 
- -- Vitaliy Filippov <vitalif@yandex-team.ru>  Fri, 03 Mar 2023 23:10:26 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 03 Mar 2023 23:10:26 +0300
 
 geesefs (0.34.5) unstable; urgency=medium
 
   * Fix a possible race condition between rename & list due to the lack of locking around sealDir()
   * Add support for Linux arm64 (use syscall.Dup3 instead of Dup2)
 
- -- Vitaliy Filippov <vitalif@yandex-team.ru>  Wed, 01 Mar 2023 23:45:24 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 01 Mar 2023 23:45:24 +0300
 
 geesefs (0.34.4) unstable; urgency=medium
 
