@@ -1,3 +1,11 @@
+geesefs (0.35.0) unstable; urgency=medium
+
+  * Support forcibly refreshing the inode cache (setfattr -n .invalidate file)
+  * Remove panic capturing
+  * Add linux-arm64 build to CI
+
+ -- Vitaliy Filippov <vitalif@yandex-team.ru>  Tue, 28 Mar 2023 18:02:46 +0300
+
 geesefs (0.34.6) unstable; urgency=medium
 
   * Drop root privileges when started with --uid or --setuid (new option)
