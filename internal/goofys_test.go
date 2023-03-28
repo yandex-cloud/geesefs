@@ -78,6 +78,8 @@ import (
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/jacobsa/fuse/fuseutil"
 
+	"github.com/pkg/xattr"
+
 	"github.com/sirupsen/logrus"
 
 	. "gopkg.in/check.v1"
@@ -559,6 +561,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		MaxMergeCopyMB: 0,
 		IgnoreFsync: false,
 		SymlinkAttr: "--symlink-target",
+		RefreshAttr: ".invalidate",
 		PartSizes: []PartSizeConfig{
 			{ PartSize: 5*1024*1024, PartCount: 1000 },
 			{ PartSize: 25*1024*1024, PartCount: 1000 },
@@ -4616,15 +4619,126 @@ func (s *GoofysTest) TestReadMyOwnNewFileFuse(t *C) {
 	//t.Assert(string(buf), Equals, "filex")
 }
 
-// FIXME Notification tests:
+func containsFile(dir, wantedFile string) bool {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, f := range files {
+		if f.Name() == wantedFile {
+			return true
+		}
+	}
+	return false
+}
+
+// Notification tests:
 // 1. Lookup and read a file, modify it out of band, refresh and check that
 //    it returns the new size and data
 // 2. Lookup and read a file, remove it out of band, refresh and check that
 //    it does not exist and does not return an entry in unknown state
 // 3. List a non-root directory, add a file in it, refresh, list it again
 //    and check that it has the new file
-// 4. List a non-root directory, modify a file in it, refresh, list it again
+// 4. List a non-root directory, modify a file in it, refresh dir, list it again
 //    and check that the file is updated
-// 5. List a non-root directory, remove a file in it, refresh, list it again
+// 5. List a non-root directory, remove a file in it, refresh dir, list it again
 //    and check that the file does not exists
-// 6. Same as 3-5, but with the root directory
+// 6-10. Same as 1-5, but with the root directory
+
+// 3, 1, 2
+func (s *GoofysTest) TestNotifyRefreshFile(t *C) {
+	s.testNotifyRefresh(t, false, false)
+}
+
+// 3, 4, 5
+func (s *GoofysTest) TestNotifyRefreshDir(t *C) {
+	s.testNotifyRefresh(t, false, true)
+}
+
+// 8, 6, 7
+func (s *GoofysTest) TestNotifyRefreshSubdir(t *C) {
+	s.testNotifyRefresh(t, true, false)
+}
+
+// 8, 9, 10
+func (s *GoofysTest) TestNotifyRefreshSubfile(t *C) {
+	s.testNotifyRefresh(t, true, true)
+}
+
+func (s *GoofysTest) testNotifyRefresh(t *C, testInSubdir bool, testRefreshDir bool) {
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
+	s.mount(t, mountPoint)
+	defer s.umount(t, mountPoint)
+
+	testdir := mountPoint
+	subdir := ""
+	if testInSubdir {
+		testdir += "/dir1"
+		subdir = "dir1/"
+	}
+	refreshFile := testdir
+	if !testRefreshDir {
+		refreshFile += "/testnotify"
+	}
+
+	t.Assert(containsFile(testdir, "testnotify"), Equals, false)
+
+	// Create file
+	_, err := s.cloud.PutBlob(&PutBlobInput{
+		Key:  subdir+"testnotify",
+		Body: bytes.NewReader([]byte("foo")),
+		Size: PUInt64(3),
+	})
+	t.Assert(err, IsNil)
+
+	t.Assert(containsFile(testdir, "testnotify"), Equals, false)
+
+	// Force-refresh
+	err = xattr.Set(testdir, ".invalidate", []byte(""))
+	t.Assert(err, IsNil)
+
+	t.Assert(containsFile(testdir, "testnotify"), Equals, true)
+
+	buf, err := ioutil.ReadFile(testdir+"/testnotify")
+	t.Assert(err, IsNil)
+	t.Assert(string(buf), Equals, "foo")
+
+	// Update file
+	_, err = s.cloud.PutBlob(&PutBlobInput{
+		Key:  subdir+"testnotify",
+		Body: bytes.NewReader([]byte("baur")),
+		Size: PUInt64(4),
+	})
+	t.Assert(err, IsNil)
+
+	buf, err = ioutil.ReadFile(testdir+"/testnotify")
+	t.Assert(err, IsNil)
+	t.Assert(string(buf), Equals, "foo")
+
+	// Force-refresh
+	err = xattr.Set(refreshFile, ".invalidate", []byte(""))
+	t.Assert(err, IsNil)
+
+	buf, err = ioutil.ReadFile(testdir+"/testnotify")
+	t.Assert(err, IsNil)
+	t.Assert(string(buf), Equals, "baur")
+
+	// Delete file
+	_, err = s.cloud.DeleteBlob(&DeleteBlobInput{
+		Key: subdir+"testnotify",
+	})
+	t.Assert(err, IsNil)
+
+	buf, err = ioutil.ReadFile(testdir+"/testnotify")
+	t.Assert(err, IsNil)
+	t.Assert(string(buf), Equals, "baur")
+
+	// Force-refresh
+	err = xattr.Set(refreshFile, ".invalidate", []byte(""))
+	t.Assert(err, IsNil)
+
+	_, err = os.Open(testdir+"/testnotify")
+	t.Assert(os.IsNotExist(err), Equals, true)
+
+	t.Assert(containsFile(testdir, "testnotify"), Equals, false)
+}
