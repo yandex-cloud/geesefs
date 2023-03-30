@@ -1156,6 +1156,9 @@ func (fs *Goofys) LookUpInode(
 		if err != nil {
 			return
 		}
+		if inode == nil {
+			return fuse.ENOENT
+		}
 	}
 
 	inode.Ref()
