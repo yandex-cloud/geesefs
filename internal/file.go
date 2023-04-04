@@ -130,7 +130,7 @@ func (inode *Inode) appendBuffer(buf *FileBuffer, data []byte) int64 {
 	return allocated
 }
 
-func (inode *Inode) insertBuffer(pos int, offset uint64, data []byte, state int16, copyData bool, dataPtr *BufferPointer) int64 {
+func (inode *Inode) insertOrAppendBuffer(pos int, offset uint64, data []byte, state int16, copyData bool, dataPtr *BufferPointer) int64 {
 	allocated := int64(0)
 	dirtyID := uint64(0)
 	if state == BUF_DIRTY {
@@ -230,13 +230,13 @@ func (inode *Inode) addBuffer(offset uint64, data []byte, state int16, copyData 
 			if nextEnd > endOffset {
 				nextEnd = endOffset
 			}
-			allocated += inode.insertBuffer(pos, curOffset, data[curOffset-offset : nextEnd-offset], state, copyData, dataPtr)
+			allocated += inode.insertOrAppendBuffer(pos, curOffset, data[curOffset-offset : nextEnd-offset], state, copyData, dataPtr)
 		}
 		curOffset = b.offset + b.length
 	}
 	if curOffset < endOffset {
 		// Insert curOffset->endOffset
-		allocated += inode.insertBuffer(pos, curOffset, data[curOffset-offset : ], state, copyData, dataPtr)
+		allocated += inode.insertOrAppendBuffer(pos, curOffset, data[curOffset-offset : ], state, copyData, dataPtr)
 	}
 
 	return allocated
