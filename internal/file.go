@@ -1494,7 +1494,7 @@ func (inode *Inode) SendUpload() bool {
 
 	if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 && inode.mpu == nil {
 		// Don't flush small files with active file handles (if not under memory pressure)
-		if inode.IsFlushing == 0 && (inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.bufferPool.wantFree) > 0) {
+		if inode.IsFlushing == 0 && (inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0) {
 			// Don't accidentally trigger a parallel multipart flush
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, 1)
@@ -1543,7 +1543,7 @@ func (inode *Inode) SendUpload() bool {
 	// Pick part(s) to flush
 	initiated := false
 	lastPart := uint64(0)
-	flushInode := inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.bufferPool.wantFree) > 0
+	flushInode := inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0
 	partDirty := false
 	partLocked := false
 	partEvicted := false
@@ -1624,7 +1624,7 @@ func (inode *Inode) SendUpload() bool {
 		}
 	}
 	if canComplete && (inode.fileHandles == 0 || inode.forceFlush ||
-		atomic.LoadInt32(&inode.fs.bufferPool.wantFree) > 0 && hasEvictedParts) {
+		atomic.LoadInt32(&inode.fs.wantFree) > 0 && hasEvictedParts) {
 		// Complete the multipart upload
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
@@ -1792,9 +1792,6 @@ func (inode *Inode) FlushSmallObject() {
 				inode.SetCacheState(ST_CACHED)
 			} else {
 				inode.SetCacheState(ST_MODIFIED)
-			}
-			if atomic.LoadInt32(&inode.fs.bufferPool.wantFree) > 0 {
-				inode.fs.bufferPool.cond.Broadcast()
 			}
 		}
 		inode.updateFromFlush(sz, resp.ETag, resp.LastModified, resp.StorageClass)
@@ -1984,9 +1981,6 @@ func (inode *Inode) FlushPart(part uint64) {
 				}
 			}
 		}
-		if atomic.LoadInt32(&inode.fs.bufferPool.wantFree) > 0 {
-			inode.fs.bufferPool.cond.Broadcast()
-		}
 	}
 }
 
@@ -2061,9 +2055,6 @@ func (inode *Inode) completeMultipart() {
 						inode.SetCacheState(ST_CACHED)
 					} else {
 						inode.SetCacheState(ST_MODIFIED)
-					}
-					if atomic.LoadInt32(&inode.fs.bufferPool.wantFree) > 0 {
-						inode.fs.bufferPool.cond.Broadcast()
 					}
 				}
 			}

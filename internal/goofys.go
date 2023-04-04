@@ -63,6 +63,7 @@ type Goofys struct {
 	rootAttrs InodeAttributes
 
 	bufferPool *BufferPool
+	wantFree   int32
 
 	// A lock protecting the state of the file system struct itself (distinct
 	// from per-inode locks). Should be always taken after any inode locks.
@@ -537,18 +538,30 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 		}
 	}
 	if haveDirty {
-		fs.WakeupFlusher()
+		fs.bufferPool.mu.Unlock()
+		atomic.AddInt32(&fs.wantFree, 1)
+		fs.WakeupFlusherAndWait(true)
+		atomic.AddInt32(&fs.wantFree, -1)
+		fs.bufferPool.mu.Lock()
 	}
 	return freed, haveDirty
 }
 
-func (fs *Goofys) WakeupFlusher() {
+func (fs *Goofys) WakeupFlusherAndWait(wait bool) {
 	fs.flusherMu.Lock()
 	if fs.flushPending == 0 {
 		fs.flushPending = 1
 		fs.flusherCond.Broadcast()
+		if wait {
+			// Wait for any result
+			fs.flusherCond.Wait()
+		}
 	}
 	fs.flusherMu.Unlock()
+}
+
+func (fs *Goofys) WakeupFlusher() {
+	fs.WakeupFlusherAndWait(false)
 }
 
 func (fs *Goofys) ScheduleRetryFlush() {

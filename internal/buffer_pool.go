@@ -31,8 +31,6 @@ var bufferLog = GetLogger("buffer")
 // BufferPool tracks memory used by cache buffers
 type BufferPool struct {
 	mu   sync.Mutex
-	cond *sync.Cond
-	wantFree int32
 
 	curDirtyID uint64
 
@@ -184,8 +182,6 @@ func NewBufferPool(limit int64, gcInterval uint64) *BufferPool {
 		gcInterval: gcInterval,
 	}
 
-	pool.cond = sync.NewCond(&pool.mu)
-
 	return &pool
 }
 
@@ -202,9 +198,6 @@ func (pool *BufferPool) recomputeBufferLimit() {
 func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) (err error) {
 	if size <= 0 {
 		atomic.AddInt64(&pool.cur, size)
-		if atomic.LoadInt32(&pool.wantFree) > 0 {
-			pool.cond.Broadcast()
-		}
 	} else {
 		pool.mu.Lock()
 		err = pool.UseUnlocked(size, ignoreMemoryLimit)
@@ -231,9 +224,6 @@ func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) error {
 		freed, canFreeMoreAsync := pool.FreeSomeCleanBuffers(newSize - pool.max)
 		bufferLog.Debugf("Freed %v, now: %v/%v", freed, newSize, pool.max)
 		for atomic.LoadInt64(&pool.cur) > pool.max && canFreeMoreAsync && !ignoreMemoryLimit {
-			atomic.AddInt32(&pool.wantFree, 1)
-			pool.cond.Wait()
-			atomic.AddInt32(&pool.wantFree, -1)
 			freed, canFreeMoreAsync = pool.FreeSomeCleanBuffers(atomic.LoadInt64(&pool.cur) - pool.max)
 			bufferLog.Debugf("Freed %v, now: %v/%v", freed, atomic.LoadInt64(&pool.cur), pool.max)
 		}
@@ -245,15 +235,10 @@ func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) error {
 				// free memory AND correct our limits, yet we still can't allocate.
 				// it's likely that we are simply asking for too much
 				atomic.AddInt64(&pool.cur, -size)
-				pool.cond.Broadcast()
 				log.Errorf("Unable to allocate %d bytes, used %d bytes, limit is %d bytes", size, atomic.LoadInt64(&pool.cur)-size, pool.max)
 				return syscall.ENOMEM
 			}
 		}
-	}
-
-	if size < 0 && atomic.LoadInt32(&pool.wantFree) > 0 {
-		pool.cond.Broadcast()
 	}
 
 	return nil
