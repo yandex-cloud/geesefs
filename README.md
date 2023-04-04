@@ -51,6 +51,8 @@ List of non-POSIX behaviors/limitations for GeeseFS:
   - file modification time can't be set by user (for example with `cp --preserve`, `rsync -a` or utimes(2))
 * Does not support hard links
 * Does not support locking
+* Does not support "invisible" deleted files. If an app keeps an opened file descriptor
+  after deleting the file it will get ENOENT errors from FS operations
 
 In addition to the items above:
 * Default file size limit is 1.03 TB, achieved by splitting the file into 1000x 5MB parts,

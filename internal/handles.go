@@ -38,9 +38,10 @@ import (
 
 const (
 	ST_CACHED int32 = 0
-	ST_CREATED int32 = 1
-	ST_MODIFIED int32 = 2
-	ST_DELETED int32 = 3
+	ST_DEAD int32 = 1
+	ST_CREATED int32 = 2
+	ST_MODIFIED int32 = 3
+	ST_DELETED int32 = 4
 )
 
 type InodeAttributes struct {
@@ -611,6 +612,11 @@ func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 
+	if inode.CacheState == ST_DELETED || inode.CacheState == ST_DEAD {
+		// Oops, it's a deleted file. We don't support changing invisible files
+		return fuse.ENOENT
+	}
+
 	meta, name, err := inode.getXattrMap(name, true)
 	if err != nil {
 		return err
@@ -643,6 +649,11 @@ func (inode *Inode) RemoveXattr(name string) error {
 
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
+
+	if inode.CacheState == ST_DELETED || inode.CacheState == ST_DEAD {
+		// Oops, it's a deleted file. We don't support changing invisible files
+		return fuse.ENOENT
+	}
 
 	meta, name, err := inode.getXattrMap(name, true)
 	if err != nil {

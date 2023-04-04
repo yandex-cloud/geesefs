@@ -457,6 +457,13 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 
 	fh.inode.mu.Lock()
 
+	if fh.inode.CacheState == ST_DELETED || fh.inode.CacheState == ST_DEAD {
+		// Oops, it's a deleted file. We don't support changing invisible files
+		fh.inode.fs.bufferPool.Use(-int64(len(data)), false)
+		fh.inode.mu.Unlock()
+		return fuse.ENOENT
+	}
+
 	fh.inode.checkPauseWriters()
 
 	if fh.inode.Attributes.Size < end {
@@ -1161,7 +1168,7 @@ func (fh *FileHandle) Release() {
 	if n == -1 {
 		panic(fmt.Sprintf("Released more file handles than acquired, n = %v", n))
 	}
-	if n == 0 && atomic.LoadInt32(&fh.inode.CacheState) == ST_CACHED {
+	if n == 0 && atomic.LoadInt32(&fh.inode.CacheState) <= ST_DEAD {
 		fh.inode.Parent.addModified(-1)
 	}
 	fh.inode.fs.WakeupFlusher()
@@ -2085,7 +2092,7 @@ func (inode *Inode) SyncFile() (err error) {
 	for {
 		inode.mu.Lock()
 		inode.forceFlush = false
-		if inode.CacheState == ST_CACHED {
+		if inode.CacheState <= ST_DEAD {
 			inode.mu.Unlock()
 			break
 		}

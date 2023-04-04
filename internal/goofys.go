@@ -1733,6 +1733,11 @@ func (fs *Goofys) SetInodeAttributes(
 
 	if op.Size != nil || op.Mode != nil || op.Mtime != nil || op.Uid != nil || op.Gid != nil {
 		inode.mu.Lock()
+		if inode.CacheState == ST_DELETED || inode.CacheState == ST_DEAD {
+			// Oops, it's a deleted file. We don't support changing invisible files
+			inode.mu.Unlock()
+			return fuse.ENOENT
+		}
 	}
 
 	modified := false

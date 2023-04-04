@@ -685,7 +685,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		childTmp := parent.dir.Children[i]
 		if childTmp.AttrTime.Before(parent.dir.refreshStartTime) &&
 			atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
-			atomic.LoadInt32(&childTmp.CacheState) == ST_CACHED &&
+			atomic.LoadInt32(&childTmp.CacheState) <= ST_DEAD &&
 			(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
 			childTmp.mu.Lock()
 			notifications = append(notifications, &fuseops.NotifyDelete{
@@ -1043,7 +1043,7 @@ func (inode *Inode) SendDelete() {
 		}
 		forget := false
 		if inode.CacheState == ST_DELETED {
-			inode.SetCacheState(ST_CACHED)
+			inode.SetCacheState(ST_DEAD)
 			// We don't remove directories until all children are deleted
 			// So that we don't revive the directory after removing it
 			// by fetching a list of files not all of which are actually deleted
@@ -1313,14 +1313,21 @@ func (inode *Inode) doUnlink() {
 	} else if inode.CacheState != ST_CREATED || inode.IsFlushing > 0 {
 		// resetCache will clear all buffers and abort the multipart upload
 		inode.resetCache()
-		inode.SetCacheState(ST_DELETED)
-		if parent.dir.DeletedChildren == nil {
-			parent.dir.DeletedChildren = make(map[string]*Inode)
+		if parent.dir.DeletedChildren == nil || parent.dir.DeletedChildren[inode.Name] == nil {
+			inode.SetCacheState(ST_DELETED)
+			if parent.dir.DeletedChildren == nil {
+				parent.dir.DeletedChildren = make(map[string]*Inode)
+			}
+			parent.dir.DeletedChildren[inode.Name] = inode
+		} else {
+			// A deleted file is already present, we can just reset the cache
+			inode.SetCacheState(ST_DEAD)
 		}
-		parent.dir.DeletedChildren[inode.Name] = inode
 	} else {
 		inode.resetCache()
+		inode.SetCacheState(ST_DEAD)
 	}
+	inode.Attributes.Size = 0
 
 	parent.removeChildUnlocked(inode)
 }
@@ -1522,7 +1529,9 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 			if parent.dir.DeletedChildren == nil {
 				parent.dir.DeletedChildren = make(map[string]*Inode)
 			}
-			parent.dir.DeletedChildren[fromInode.Name] = fromInode
+			if parent.dir.DeletedChildren[fromInode.Name] == nil {
+				parent.dir.DeletedChildren[fromInode.Name] = fromInode
+			}
 			fromInode.renamingTo = false
 		} else {
 			parent.addModified(-1)
@@ -1538,7 +1547,9 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 		if parent.dir.DeletedChildren == nil {
 			parent.dir.DeletedChildren = make(map[string]*Inode)
 		}
-		parent.dir.DeletedChildren[fromInode.Name] = fromInode
+		if parent.dir.DeletedChildren[fromInode.Name] == nil {
+			parent.dir.DeletedChildren[fromInode.Name] = fromInode
+		}
 		if fromInode.CacheState == ST_CACHED {
 			// Was not modified and we remove it from current parent => add modified
 			parent.addModified(1)
@@ -1637,7 +1648,7 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			}
 		} else if !inode.isDir() {
 			// replace unmodified file item with a directory
-			if atomic.LoadInt32(&inode.CacheState) == ST_CACHED {
+			if atomic.LoadInt32(&inode.CacheState) <= ST_DEAD {
 				inode.mu.Lock()
 				atomic.StoreInt32(&inode.refreshed, -1)
 				parent.removeChildUnlocked(inode)
