@@ -1336,7 +1336,7 @@ func (inode *Inode) SendUpload() bool {
 						err = nil
 						notFoundIgnore = true
 					} else if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
-						s3Log.Warnf("Conflict detected: failed to copy %v to %v: %v. File is removed remotely, dropping cache", from, key, err)
+						s3Log.Warnf("Conflict detected (inode %v): failed to copy %v to %v: %v. File is removed remotely, dropping cache", inode.Id, from, key, err)
 						inode.mu.Lock()
 						newParent := inode.Parent
 						oldParent := inode.oldParent
@@ -1482,7 +1482,7 @@ func (inode *Inode) SendUpload() bool {
 					inode.userMetadataDirty = 2
 					if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 						// Object is deleted or resized remotely (416). Discard local version
-						log.Warnf("Conflict detected: File %v is deleted or resized remotely, discarding local changes", inode.FullName())
+						s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 						inode.resetCache()
 					}
 					log.Errorf("Error flushing metadata using COPY for %v: %v", key, err)
@@ -1726,7 +1726,7 @@ func (inode *Inode) FlushSmallObject() {
 		mappedErr := mapAwsError(err)
 		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
-			log.Warnf("Conflict detected: File %v is deleted or resized remotely, discarding local changes", inode.FullName())
+			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 			inode.resetCache()
 			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
@@ -1780,7 +1780,7 @@ func (inode *Inode) FlushSmallObject() {
 			inode.userMetadataDirty = 2
 		}
 	} else {
-		log.Debugf("Flushed small file %v: etag=%v, size=%v", key, NilStr(resp.ETag), sz)
+		log.Debugf("Flushed small file %v (inode %v): etag=%v, size=%v", key, inode.Id, NilStr(resp.ETag), sz)
 		stillDirty := inode.userMetadataDirty != 0 || inode.oldParent != nil
 		for i := 0; i < len(inode.buffers); i++ {
 			b := inode.buffers[i]
@@ -1924,7 +1924,7 @@ func (inode *Inode) FlushPart(part uint64) {
 		mappedErr := mapAwsError(err)
 		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
-			log.Warnf("Conflict detected: File %v is deleted or resized remotely, discarding local changes", inode.FullName())
+			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 			inode.resetCache()
 			return
 		}
@@ -2008,7 +2008,7 @@ func (inode *Inode) completeMultipart() {
 	mappedErr := mapAwsError(err)
 	if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
 		// Object is deleted or resized remotely (416). Discard local version
-		log.Warnf("Conflict detected: File %v is deleted or resized remotely, discarding local changes", inode.FullName())
+		s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 		inode.resetCache()
 		return
 	}
