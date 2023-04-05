@@ -1,3 +1,15 @@
+geesefs (0.35.1) unstable; urgency=medium
+
+  * Log conflicts with inode ID
+  * Deny modifications of "invisible" deleted files
+  * Fix rare memory allocation deadlocks
+  * Rename inode.insertBuffer to inode.insertOrAppendBuffer
+  * Set GC percent to 20 instead of 100 by default
+  * Fix a crash on lookups possible in some cases
+  * Fix my email
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 05 Apr 2023 13:30:18 +0300
+
 geesefs (0.35.0) unstable; urgency=medium
 
   * Support forcibly refreshing the inode cache (setfattr -n .invalidate file)
