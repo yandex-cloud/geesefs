@@ -375,7 +375,7 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 		panic(fmt.Sprintf("deref inode %v (%v) by %v from %v", inode.Id, inode.FullName(), n, res+n))
 	}
 	inode.logFuse("DeRef", n, res)
-	if res == 0 && inode.CacheState == ST_CACHED {
+	if res == 0 && inode.CacheState <= ST_DEAD {
 		inode.resetCache()
 		inode.fs.mu.Lock()
 		delete(inode.fs.inodes, inode.Id)
