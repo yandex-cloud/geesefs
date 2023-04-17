@@ -64,6 +64,10 @@ func (fs *Goofys) partNum(offset uint64) uint64 {
 		start += s.PartSize * s.PartCount
 		n += s.PartCount
 	}
+	if offset == start {
+		// Sometimes we use partNum() to calculate total part count from end offset - allow it
+		return n
+	}
 	panic(fmt.Sprintf(
 		"Offset too large: %v, max supported file size with current part size configuration is %v",
 		offset, start,
