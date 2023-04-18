@@ -1,3 +1,10 @@
+geesefs (0.35.2) unstable; urgency=medium
+
+  * Fix a crash with files of exactly maximum allowed size
+  * Fix a potential inode leak due to missing dereference of "dead" deleted inodes
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 18 Apr 2023 16:06:25 +0300
+
 geesefs (0.35.1) unstable; urgency=medium
 
   * Log conflicts with inode ID
