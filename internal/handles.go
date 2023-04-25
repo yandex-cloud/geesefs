@@ -372,9 +372,12 @@ func (inode *Inode) Ref() {
 func (inode *Inode) DeRef(n int64) (stale bool) {
 	res := atomic.AddInt64(&inode.refcnt, -n)
 	if res < 0 {
-		panic(fmt.Sprintf("deref inode %v (%v) by %v from %v", inode.Id, inode.FullName(), n, res+n))
+		fuseLog.Errorf("Deref underflow: deref inode %v (%v) by %v from %v", inode.Id, inode.FullName(), n, res+n)
+		atomic.StoreInt64(&inode.refcnt, 0)
+		res = 0
+	} else {
+		inode.logFuse("DeRef", n, res)
 	}
-	inode.logFuse("DeRef", n, res)
 	if res == 0 && inode.CacheState <= ST_DEAD {
 		inode.resetCache()
 		inode.fs.mu.Lock()
