@@ -926,9 +926,17 @@ func (parent *Inode) removeAllChildrenUnlocked() {
 }
 
 // LOCKS_EXCLUDED(parent.fs.mu)
+// LOCKS_EXCLUDED(parent.mu)
+// LOCKS_EXCLUDED(inode.mu)
 func (parent *Inode) removeChild(inode *Inode) {
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
+
+	l := len(parent.dir.Children)
+	i := sort.Search(l, parent.findInodeFunc(inode.Name))
+	if l <= 2 || i >= l || parent.dir.Children[i] != inode {
+		return
+	}
 
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
