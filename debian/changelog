@@ -1,8 +1,14 @@
+geesefs (0.35.4) unstable; urgency=medium
+
+  * Fix a crash on parallel lookup of the same removed file
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 26 Apr 2023 15:25:38 +0300
+
 geesefs (0.35.3) unstable; urgency=medium
 
   * Work around panic on deref underflow (the source of the problem is not known yet)
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Tue, 25 Apr 2023 12:04:28 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 25 Apr 2023 12:04:28 +0300
 
 geesefs (0.35.2) unstable; urgency=medium
 
