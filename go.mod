@@ -14,27 +14,32 @@ require (
 	github.com/Azure/go-autorest/autorest/to v0.4.0 // indirect
 	github.com/Azure/go-autorest/autorest/validation v0.3.1 // indirect
 	github.com/aws/aws-sdk-go v1.38.7
+	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.0
 	github.com/google/uuid v1.1.2
 	github.com/gopherjs/gopherjs v0.0.0-20210202160940-bed99a852dfe // indirect
-	github.com/jacobsa/fuse v0.0.0-20230225155227-86031ac261e8
+	github.com/jacobsa/fuse v0.0.0-20210818065549-10d864429bf7
 	github.com/jtolds/gls v4.2.0+incompatible // indirect
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 	github.com/kr/pretty v0.1.1-0.20190720101428-71e7e4993750 // indirect
 	github.com/mattn/go-ieproxy v0.0.0-20190805055040-f9202b1cfdeb // indirect
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/pkg/xattr v0.4.9 // indirect
+	github.com/pkg/xattr v0.4.9
 	github.com/satori/go.uuid v1.2.1-0.20181028125025-b2ce2384e17b
 	github.com/sevlyar/go-daemon v0.1.5
 	github.com/shirou/gopsutil v0.0.0-20190731134726-d80c43f9c984
 	github.com/sirupsen/logrus v1.8.1
 	github.com/smartystreets/assertions v0.0.0-20160201214316-443d812296a8 // indirect
 	github.com/smartystreets/goconvey v1.6.1-0.20160119221636-995f5b2e021c // indirect
+	github.com/stretchr/testify v1.7.0 // indirect
 	github.com/urfave/cli v1.21.1-0.20190807111034-521735b7608a
 	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a
 	google.golang.org/api v0.49.0
+	google.golang.org/grpc v1.38.0
+	google.golang.org/protobuf v1.26.0
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127
 	gopkg.in/ini.v1 v1.46.0
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 )
 
 replace github.com/aws/aws-sdk-go => ./s3ext

@@ -19,6 +19,8 @@ import (
 	geesefs "github.com/yandex-cloud/geesefs/api"
 	. "github.com/yandex-cloud/geesefs/api/common"
 	. "github.com/yandex-cloud/geesefs/internal"
+	"github.com/yandex-cloud/geesefs/internal/pb"
+	"google.golang.org/grpc"
 
 	"fmt"
 	"os"
@@ -104,9 +106,15 @@ func kill(pid int, s os.Signal) (err error) {
 func mount(
 	ctx context.Context,
 	bucketName string,
-	flags *FlagStorage) (fs *Goofys, mfs *fuse.MountedFileSystem, err error) {
+	flags *FlagStorage) (fs *Goofys, mfs *fuse.MountedFileSystem, conns *ConnPool, err error) {
+	if flags.ClusterMode {
+		return geesefs.MountCluster(ctx, bucketName, flags)
 
-	return geesefs.Mount(ctx, bucketName, flags)
+	} else {
+		fs, mfs, err = geesefs.Mount(ctx, bucketName, flags)
+		conns = nil
+		return
+	}
 }
 
 func messagePath() {
@@ -227,7 +235,8 @@ func main() {
 		// Mount the file system.
 		var mfs *fuse.MountedFileSystem
 		var fs *Goofys
-		fs, mfs, err = mount(
+		var conns *ConnPool
+		fs, mfs, conns, err = mount(
 			context.Background(),
 			bucketName,
 			flags)
@@ -261,6 +270,15 @@ func main() {
 				return
 			}
 			fs.SyncFS(nil)
+			if conns != nil {
+				_ = conns.BroadConfigurable(
+					func(ctx context.Context, conn *grpc.ClientConn) error {
+						_, err := pb.NewRecoveryClient(conn).Unmount(ctx, &pb.UnmountRequest{})
+						return err
+					},
+					false,
+				)
+			}
 
 			log.Println("Successfully exiting.")
 		}
