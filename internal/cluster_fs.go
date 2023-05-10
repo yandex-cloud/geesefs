@@ -753,7 +753,7 @@ func (fs *Fs) tryYield(inode *Inode, newOwner NodeId) *pb.StolenInode {
 				}
 			} else {
 				fuseLog.Infof("could not yield inode %v: len(inode.dir.DeletedChildren) == %v",
-					inode.Id, inode.CacheState, inode.fileHandles, len(inode.dir.DeletedChildren))
+					inode.Id, len(inode.dir.DeletedChildren))
 				return nil
 			}
 		} else {
