@@ -31,6 +31,11 @@ type PartSizeConfig struct {
 	PartCount uint64
 }
 
+type NodeConfig struct {
+	Id uint64
+	Address string
+}
+
 type FlagStorage struct {
 	// File system
 	MountOptions      map[string]string
@@ -100,8 +105,15 @@ type FlagStorage struct {
 	PProf      string
 	Foreground bool
 	LogFile    string
+	DebugGrpc  bool
 
 	StatsInterval time.Duration
+
+	// Cluster Mode
+	ClusterMode    bool
+	ClusterGrpcReflection bool
+	ClusterMe      *NodeConfig
+	ClusterPeers   []*NodeConfig
 }
 
 func (flags *FlagStorage) GetMimeType(fileName string) (retMime *string) {

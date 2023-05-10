@@ -17,6 +17,7 @@ package internal
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -25,7 +26,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"net/url"
 
 	"github.com/aws/aws-sdk-go/aws"
 
@@ -170,6 +170,13 @@ type Inode struct {
 	// the refcnt is an exception, it's protected with atomic access
 	// being part of parent.dir.Children increases refcnt by 1
 	refcnt int64
+
+	// Cluster Mode
+
+	ownerMu    sync.RWMutex
+	ownerTerm  uint64
+	owner      NodeId
+	readyOwner bool
 }
 
 func NewInode(fs *Goofys, parent *Inode, name string) (inode *Inode) {

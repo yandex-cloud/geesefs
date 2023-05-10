@@ -564,6 +564,33 @@ func NewApp() (app *cli.App) {
 			Value: 30 * time.Second,
 			Usage: "I/O statistics printing interval. Set to 0 to disable.",
 		},
+
+		cli.BoolFlag{
+			Name:  "debug_grpc",
+			Usage: "Enable grpc logging in cluster mode.",
+		},
+	}
+
+	clusterFlags := []cli.Flag{
+		cli.BoolFlag{
+			Name: "cluster",
+			Usage: "Enable cluster mode.",
+		},
+
+		cli.BoolFlag{
+			Name: "grpc-reflection",
+			Usage: "Enable grpc reflection (--cluster flag required).",
+		},
+
+		cli.StringFlag{
+			Name: "cluster-me",
+			Usage: "<node-id>:<address> to communicate with this node (--cluster flag required).",
+		},
+
+		cli.StringSliceFlag{
+			Name: "cluster-peer",
+			Usage: "List of all cluster nodes in format <node-id>:<address> (--cluster flag required).",
+		},
 	}
 
 	app = &cli.App{
@@ -572,12 +599,12 @@ func NewApp() (app *cli.App) {
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
 		Writer:   os.Stderr,
-		Flags:    append(append(append(append([]cli.Flag{
+		Flags:    append(append(append(append(append([]cli.Flag{
 			cli.BoolFlag{
 				Name:  "help, h",
 				Usage: "Print this help text and exit successfully.",
 			},
-		}, fsFlags...), s3Flags...), tuningFlags...), debugFlags...),
+		}, fsFlags...), s3Flags...), tuningFlags...), debugFlags...), clusterFlags...),
 	}
 
 	var funcMap = template.FuncMap{
@@ -677,6 +704,21 @@ func parsePartSizes(s string) (result []PartSizeConfig) {
 	return
 }
 
+func parseNode(s string) *NodeConfig {
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		panic("Incorrect syntax for node config, should be: <node-id>:<address>")
+	}
+	nodeId, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil {
+		panic("Incorrect syntax for node config, <node-id> shoud be uint64")
+	}
+	return &NodeConfig{
+		Id: nodeId,
+		Address: parts[1],
+	}
+}
+
 // PopulateFlags adds the flags accepted by run to the supplied flag set, returning the
 // variables into which the flags will parse.
 func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
@@ -749,9 +791,22 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		LogFile:                c.String("log-file"),
 		StatsInterval:          c.Duration("print-stats"),
 		PProf:                  c.String("pprof"),
+		DebugGrpc:              c.Bool("debug_grpc"),
+
+		// Cluster Mode
+		ClusterMode:            c.Bool("cluster"),
+		ClusterGrpcReflection:  c.Bool("grpc-reflection"),
 	}
 
 	flags.PartSizes = parsePartSizes(c.String("part-sizes"))
+
+	if flags.ClusterMode {
+		flags.ClusterMe = parseNode(c.String("cluster-me"))
+
+		for _, peer := range c.StringSlice("cluster-peer") {
+			flags.ClusterPeers = append(flags.ClusterPeers, parseNode(peer))
+		}
+	}
 
 	// S3 by default, if not initialized in api/api.go
 	if flags.Backend == nil {
@@ -832,6 +887,18 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 			flags.Cleanup()
 		}
 	}()
+
+	if !flags.ClusterMode && flags.ClusterGrpcReflection {
+		return nil
+	}
+
+	if flags.ClusterMode != (flags.ClusterMe != nil) {
+		return nil
+	}
+
+	if flags.ClusterMode != (flags.ClusterPeers != nil) {
+		return nil
+	}
 
 	return flags
 }
