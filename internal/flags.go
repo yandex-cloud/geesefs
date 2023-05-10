@@ -800,10 +800,12 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 	flags.PartSizes = parsePartSizes(c.String("part-sizes"))
 
-	flags.ClusterMe = parseNode(c.String("cluster-me"))
+	if flags.ClusterMode {
+		flags.ClusterMe = parseNode(c.String("cluster-me"))
 
-	for _, peer := range c.StringSlice("cluster-peer") {
-		flags.ClusterPeers = append(flags.ClusterPeers, parseNode(peer))
+		for _, peer := range c.StringSlice("cluster-peer") {
+			flags.ClusterPeers = append(flags.ClusterPeers, parseNode(peer))
+		}
 	}
 
 	// S3 by default, if not initialized in api/api.go
