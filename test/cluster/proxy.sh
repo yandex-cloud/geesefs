@@ -14,6 +14,7 @@ jclouds.regions=us-west-2
 EOF
 
 PROXY_BIN="java -DLOG_LEVEL=trace -Djclouds.wire=debug -jar s3proxy.jar --properties s3proxy.properties"
+export S3CMD_ARGS="--access_key=foo --secret_key=bar"
 export AWS_ACCESS_KEY_ID=foo
 export AWS_SECRET_ACCESS_KEY=bar
 export ENDPOINT=http://localhost:$PROXY_PORT
@@ -28,13 +29,14 @@ sleep 15
 
 _kill_s3proxy() {
   echo "=== Kill s3proxy"
-  # kill -9 $PROXY_PID
+  kill -9 $PROXY_PID
 }
 
 echo "=== Create s3://test"
 
 _s3cmd() {
   s3cmd \
+  $S3CMD_ARGS \
   --signature-v2 \
   --no-ssl \
   --host-bucket="" \
