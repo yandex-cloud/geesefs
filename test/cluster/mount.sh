@@ -7,7 +7,6 @@ _mount() {
   shift
   echo "=== Mount $MNT_DIR"
   "$FS_BIN" \
-  -o allow_other \
   --endpoint="$ENDPOINT" \
   --enable-mtime \
   --cluster \
