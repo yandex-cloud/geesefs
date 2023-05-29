@@ -18,13 +18,11 @@ package common
 import (
 	"fmt"
 	glog "log"
-	"log/syslog"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
-	logrus_syslog "github.com/sirupsen/logrus/hooks/syslog"
 )
 
 var mu sync.Mutex
@@ -32,24 +30,10 @@ var loggers = make(map[string]*LogHandle)
 
 var log = GetLogger("main")
 var cloudLogLevel = logrus.InfoLevel
+var appendTime bool
 
-var syslogHook *logrus_syslog.SyslogHook
-
-func InitLoggers(logFile string) {
-	if logFile == "syslog" {
-		var err error
-		syslogHook, err = logrus_syslog.NewSyslogHook("", "", syslog.LOG_DEBUG, "")
-		if err != nil {
-			// we are the child process and we cannot connect to syslog,
-			// probably because we are in a container without syslog
-			// nothing much we can do here, printing to stderr doesn't work
-			return
-		}
-
-		for _, l := range loggers {
-			l.Hooks.Add(syslogHook)
-		}
-	} else if logFile != "stderr" && logFile != "/dev/stderr" && logFile != "" {
+func initFileLoggers(logFile string) {
+	if logFile != "stderr" && logFile != "/dev/stderr" && logFile != "" {
 		file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			log.Errorf("Couldn't open file %v for writing logs", logFile)
@@ -58,7 +42,7 @@ func InitLoggers(logFile string) {
 		for _, l := range loggers {
 			l.Out = file
 		}
-		err = Dup2(int(file.Fd()), int(os.Stderr.Fd()))
+		err = redirectStderr(file)
 		if err != nil {
 			log.Errorf("Couldn't redirect STDERR to the log file %v", logFile)
 			return
@@ -91,7 +75,7 @@ func (l *LogHandle) Format(e *logrus.Entry) ([]byte, error) {
 		lvl = *l.Lvl
 	}
 
-	if syslogHook == nil {
+	if appendTime {
 		const timeFormat = "2006/01/02 15:04:05.000000"
 
 		timestamp = e.Time.Format(timeFormat) + " "
@@ -114,18 +98,6 @@ func (l *LogHandle) Format(e *logrus.Entry) ([]byte, error) {
 // for aws.Logger
 func (l *LogHandle) Log(args ...interface{}) {
 	l.Debugln(args...)
-}
-
-func NewLogger(name string) *LogHandle {
-	l := &LogHandle{name: name}
-	l.Out = os.Stderr
-	l.Formatter = l
-	l.Level = logrus.InfoLevel
-	l.Hooks = make(logrus.LevelHooks)
-	if syslogHook != nil {
-		l.Hooks.Add(syslogHook)
-	}
-	return l
 }
 
 func GetLogger(name string) *LogHandle {

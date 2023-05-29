@@ -15,9 +15,10 @@
 package common
 
 import (
+	"os"
 	"syscall"
 )
 
-func Dup2(oldfd, newfd int) error {
-	return syscall.Dup3(oldfd, newfd, 0)
+func redirectStderr(target *os.File) error {
+	return syscall.Dup3(int(target.Fd()), int(os.Stderr.Fd()), 0)
 }

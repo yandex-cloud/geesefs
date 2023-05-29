@@ -1,5 +1,3 @@
-// +build !linux !arm64
-
 // Copyright 2021 Yandex LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,9 +15,16 @@
 package common
 
 import (
-	"syscall"
+	"os"
+
+	"github.com/sirupsen/logrus"
 )
 
-func Dup2(oldfd, newfd int) error {
-	return syscall.Dup2(oldfd, newfd)
+func NewLogger(name string) *LogHandle {
+	l := &LogHandle{name: name}
+	l.Out = os.Stderr
+	l.Formatter = l
+	l.Level = logrus.InfoLevel
+	l.Hooks = make(logrus.LevelHooks)
+	return l
 }
