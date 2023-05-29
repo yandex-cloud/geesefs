@@ -27,7 +27,6 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 
-	"github.com/jacobsa/fuse"
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/jacobsa/fuse/fuseutil"
 )
@@ -1039,7 +1038,7 @@ func (inode *Inode) SendDelete() {
 		inode.mu.Lock()
 		atomic.AddInt64(&inode.Parent.fs.activeFlushers, -1)
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
-		if mapAwsError(err) == fuse.ENOENT {
+		if mapAwsError(err) == syscall.ENOENT {
 			// object is already deleted
 			err = nil
 		}
@@ -1255,7 +1254,7 @@ func (inode *Inode) ReadSymlink() (target string, err error) {
 	defer inode.mu.Unlock()
 
 	if inode.userMetadata[inode.fs.flags.SymlinkAttr] == nil {
-		return "", fuse.EIO
+		return "", syscall.EIO
 	}
 
 	return string(inode.userMetadata[inode.fs.flags.SymlinkAttr]), nil
@@ -1351,7 +1350,7 @@ func (parent *Inode) RmDir(name string) (err error) {
 	parent.mu.Unlock()
 	if inode != nil {
 		if !inode.isDir() {
-			return fuse.ENOTDIR
+			return syscall.ENOTDIR
 		}
 
 		dh := NewDirHandle(inode)
@@ -1363,7 +1362,7 @@ func (parent *Inode) RmDir(name string) (err error) {
 		}
 		if en != nil {
 			fuseLog.Debugf("Directory %v not empty: still has entry \"%v\"", inode.FullName(), en.Name)
-			return fuse.ENOTEMPTY
+			return syscall.ENOTEMPTY
 		}
 
 		parent.mu.Lock()
@@ -1419,7 +1418,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 	toCloud, toPath := newParent.cloud()
 	if fromCloud != toCloud {
 		// cannot rename across cloud backend
-		err = fuse.EINVAL
+		err = syscall.EINVAL
 		return
 	}
 
@@ -1427,21 +1426,21 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 	fromInode := parent.findChildUnlocked(from)
 	toInode := newParent.findChildUnlocked(to)
 	if fromInode == nil {
-		return fuse.ENOENT
+		return syscall.ENOENT
 	}
 	fromInode.mu.Lock()
 	defer fromInode.mu.Unlock()
 	if toInode != nil {
 		if fromInode.isDir() {
 			if !toInode.isDir() {
-				return fuse.ENOTDIR
+				return syscall.ENOTDIR
 			}
 			toEmpty, err := toInode.isEmptyDir()
 			if err != nil {
 				return err
 			}
 			if !toEmpty {
-				return fuse.ENOTEMPTY
+				return syscall.ENOTEMPTY
 			}
 		} else if toInode.isDir() {
 			return syscall.EISDIR
@@ -1800,7 +1799,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		}
 		if parent.fs.flags.Cheap {
 			<- results
-			if mapAwsError(objectError) != fuse.ENOENT {
+			if mapAwsError(objectError) != syscall.ENOENT {
 				break
 			}
 		}
@@ -1813,7 +1812,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 			}()
 			if parent.fs.flags.Cheap {
 				<- results
-				if mapAwsError(dirError) != fuse.ENOENT {
+				if mapAwsError(dirError) != syscall.ENOENT {
 					break
 				}
 			}
@@ -1859,14 +1858,14 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		}
 	}
 
-	if objectError != nil && mapAwsError(objectError) != fuse.ENOENT {
+	if objectError != nil && mapAwsError(objectError) != syscall.ENOENT {
 		return nil, objectError
 	}
-	if dirError != nil && mapAwsError(dirError) != fuse.ENOENT {
+	if dirError != nil && mapAwsError(dirError) != syscall.ENOENT {
 		return nil, dirError
 	}
-	if prefixError != nil && mapAwsError(prefixError) != fuse.ENOENT {
+	if prefixError != nil && mapAwsError(prefixError) != syscall.ENOENT {
 		return nil, prefixError
 	}
-	return nil, fuse.ENOENT
+	return nil, syscall.ENOENT
 }

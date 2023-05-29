@@ -810,7 +810,7 @@ func (s *GoofysTest) TestLookUpInode(t *C) {
 	t.Assert(err, IsNil)
 
 	_, err = s.LookUpInode(t, "fileNotFound")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	_, err = s.LookUpInode(t, "dir1/file3")
 	t.Assert(err, IsNil)
@@ -969,7 +969,7 @@ func (s *GoofysTest) TestReadDirWithExternalChanges(t *C) {
 	s.assertHasEntries(t, s.getRoot(t), newEntries)
 
 	_, err = s.LookUpInode(t, "file1")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	s.setupBlobs(s.cloud, t, map[string]*string{"file1": nil, "dir1/file3": nil})
 	s.removeBlob(s.cloud, t, "file3")
@@ -1108,7 +1108,7 @@ func (s *GoofysTest) TestUnlink(t *C) {
 
 	// make sure that it's gone from s3
 	_, err = s.cloud.GetBlob(&GetBlobInput{Key: fileName})
-	t.Assert(mapAwsError(err), Equals, fuse.ENOENT)
+	t.Assert(mapAwsError(err), Equals, syscall.ENOENT)
 }
 
 type FileHandleReader struct {
@@ -1156,7 +1156,7 @@ func (s *GoofysTest) testCreateAndWrite(t *C, fileName string, size int64, write
 	}
 	err := s.fs.LookUpInode(nil, &lookup)
 	if err != nil {
-		if err == fuse.ENOENT {
+		if err == syscall.ENOENT {
 			create := fuseops.CreateFileOp{
 				Parent: root.Id,
 				Name:   fileName,
@@ -1364,12 +1364,12 @@ func (s *GoofysTest) TestMkDir(t *C) {
 			err := inode.Unlink(fileName)
 			t.Assert(err, IsNil)
 		} else {
-			t.Assert(err, Equals, fuse.ENOENT)
+			t.Assert(err, Equals, syscall.ENOENT)
 		}
 		err = s.getRoot(t).RmDir(dirName)
 		t.Assert(err, IsNil)
 	} else {
-		t.Assert(err, Equals, fuse.ENOENT)
+		t.Assert(err, Equals, syscall.ENOENT)
 	}
 
 	inode, err = s.getRoot(t).MkDir(dirName)
@@ -1402,12 +1402,12 @@ func (s *GoofysTest) TestRmDir(t *C) {
 	_, err = s.LookUpInode(t, "test_rmdir/dir1")
 	t.Assert(err, IsNil)
 	err = root.RmDir("dir1")
-	t.Assert(err, Equals, fuse.ENOTEMPTY)
+	t.Assert(err, Equals, syscall.ENOTEMPTY)
 
 	_, err = s.LookUpInode(t, "test_rmdir/dir2")
 	t.Assert(err, IsNil)
 	err = root.RmDir("dir2")
-	t.Assert(err, Equals, fuse.ENOTEMPTY)
+	t.Assert(err, Equals, syscall.ENOTEMPTY)
 
 	_, err = s.LookUpInode(t, "test_rmdir/empty_dir")
 	t.Assert(err, IsNil)
@@ -1440,7 +1440,7 @@ func (s *GoofysTest) TestRenamePreserveMetadata(t *C) {
 
 	toInode, err := s.LookUpInode(t, to)
 	if err != nil {
-		t.Assert(err, Equals, fuse.ENOENT)
+		t.Assert(err, Equals, syscall.ENOENT)
 	} else {
 		err = root.Unlink(to)
 		t.Assert(err, IsNil)
@@ -1521,11 +1521,11 @@ func (s *GoofysTest) TestRenameOpenedUnmodified(t *C) {
 	var fh *FileHandle
 
 	in, err := s.LookUpInode(t, "file20")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	in, err = s.LookUpInode(t, "file10")
-	t.Assert(err == nil || err == fuse.ENOENT, Equals, true)
-	if err == fuse.ENOENT {
+	t.Assert(err == nil || err == syscall.ENOENT, Equals, true)
+	if err == syscall.ENOENT {
 		op := &fuseops.CreateFileOp{
 			Parent: root.Id,
 			Name:   "file10",
@@ -1559,7 +1559,7 @@ func (s *GoofysTest) TestRenameOpenedUnmodified(t *C) {
 	// Check that the file is actually renamed
 	_, err = s.cloud.HeadBlob(&HeadBlobInput{Key: "file10"})
 	t.Assert(err, NotNil)
-	t.Assert(mapAwsError(err), Equals, fuse.ENOENT)
+	t.Assert(mapAwsError(err), Equals, syscall.ENOENT)
 	_, err = s.cloud.HeadBlob(&HeadBlobInput{Key: "file20"})
 	t.Assert(err, IsNil)
 }
@@ -1745,7 +1745,7 @@ func (s *GoofysTest) TestRenameDir(t *C) {
 	t.Assert(err, IsNil)
 
 	err = root.Rename("empty_dir", root, "dir1")
-	t.Assert(err, Equals, fuse.ENOTEMPTY)
+	t.Assert(err, Equals, syscall.ENOTEMPTY)
 
 	err = root.Rename("empty_dir", root, "new_dir")
 	t.Assert(err, IsNil)
@@ -1756,7 +1756,7 @@ func (s *GoofysTest) TestRenameDir(t *C) {
 	oldId := dir2.Id
 
 	_, err = s.LookUpInode(t, "new_dir2")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	err = s.fs.Rename(nil, &fuseops.RenameOp{
 		OldParent: root.Id,
@@ -1767,13 +1767,13 @@ func (s *GoofysTest) TestRenameDir(t *C) {
 	t.Assert(err, IsNil)
 
 	_, err = s.LookUpInode(t, "dir2/dir3")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	_, err = s.LookUpInode(t, "dir2/dir3/file4")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	_, err = s.LookUpInode(t, "dir2")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	new_dir2, err := s.LookUpInode(t, "new_dir2")
 	t.Assert(err, IsNil)
@@ -1785,7 +1785,7 @@ func (s *GoofysTest) TestRenameDir(t *C) {
 	t.Assert(old, NotNil)
 
 	_, err = s.LookUpInode(t, "new_dir3")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	err = s.fs.Rename(nil, &fuseops.RenameOp{
 		OldParent: root.Id,
@@ -1801,10 +1801,10 @@ func (s *GoofysTest) TestRenameDir(t *C) {
 	t.Assert(old.Id, Equals, new.Id)
 
 	_, err = s.LookUpInode(t, "new_dir2/dir3")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	_, err = s.LookUpInode(t, "new_dir2/dir3/file4")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 }
 
 func (s *GoofysTest) TestRename(t *C) {
@@ -1816,7 +1816,7 @@ func (s *GoofysTest) TestRename(t *C) {
 	_, err = s.LookUpInode(t, to)
 	t.Assert(err, IsNil)
 	err = root.Rename(from, root, to)
-	t.Assert(err, Equals, fuse.ENOTDIR)
+	t.Assert(err, Equals, syscall.ENOTDIR)
 
 	from, to = "file1", "empty_dir"
 	_, err = s.LookUpInode(t, from)
@@ -1831,7 +1831,7 @@ func (s *GoofysTest) TestRename(t *C) {
 	t.Assert(err, IsNil)
 	_, err = s.LookUpInode(t, to)
 	if err != nil {
-		t.Assert(err, Equals, fuse.ENOENT)
+		t.Assert(err, Equals, syscall.ENOENT)
 	}
 	err = root.Rename(from, root, to)
 	t.Assert(err, IsNil)
@@ -1844,7 +1844,7 @@ func (s *GoofysTest) TestRename(t *C) {
 	t.Assert(err, IsNil)
 
 	_, err = s.cloud.HeadBlob(&HeadBlobInput{Key: from})
-	t.Assert(mapAwsError(err), Equals, fuse.ENOENT)
+	t.Assert(mapAwsError(err), Equals, syscall.ENOENT)
 
 	from, to = "file3", "new_file2"
 	dir, _ := s.LookUpInode(t, "dir1")
@@ -1852,7 +1852,7 @@ func (s *GoofysTest) TestRename(t *C) {
 	t.Assert(err, IsNil)
 	_, err = s.LookUpInode(t, to)
 	if err != nil {
-		t.Assert(err, Equals, fuse.ENOENT)
+		t.Assert(err, Equals, syscall.ENOENT)
 	}
 	err = dir.Rename(from, root, to)
 	t.Assert(err, IsNil)
@@ -1865,11 +1865,11 @@ func (s *GoofysTest) TestRename(t *C) {
 	t.Assert(err, IsNil)
 
 	_, err = s.cloud.HeadBlob(&HeadBlobInput{Key: from})
-	t.Assert(mapAwsError(err), Equals, fuse.ENOENT)
+	t.Assert(mapAwsError(err), Equals, syscall.ENOENT)
 
 	from, to = "no_such_file", "new_file"
 	err = root.Rename(from, root, to)
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	if s3, ok := s.cloud.Delegate().(*S3Backend); ok {
 		if !hasEnv("GCS") {
@@ -2080,7 +2080,7 @@ func (s *GoofysTest) testExplicitDir(t *C) {
 	t.Assert(err, IsNil)
 
 	_, err = s.LookUpInode(t, "fileNotFound")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	_, err = s.LookUpInode(t, "dir4/file5")
 	t.Assert(err, IsNil)
@@ -2236,7 +2236,7 @@ func (s *GoofysTest) TestPutMimeType(t *C) {
 	t.Assert(err, IsNil)
 	_, err = s.LookUpInode(t, file)
 	if err != nil {
-		t.Assert(err, Equals, fuse.ENOENT)
+		t.Assert(err, Equals, syscall.ENOENT)
 	}
 	err = root.Rename(jpg, root, file)
 	t.Assert(err, IsNil)
@@ -2250,7 +2250,7 @@ func (s *GoofysTest) TestPutMimeType(t *C) {
 
 	_, err = s.LookUpInode(t, jpg2)
 	if err != nil {
-		t.Assert(err, Equals, fuse.ENOENT)
+		t.Assert(err, Equals, syscall.ENOENT)
 	}
 	err = root.Rename(file, root, jpg2)
 	t.Assert(err, IsNil)
@@ -2295,7 +2295,7 @@ func (s *GoofysTest) TestRenameCache(t *C) {
 	t.Assert(err, IsNil)
 
 	err = s.fs.LookUpInode(nil, &lookupOp2)
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	renameOp := fuseops.RenameOp{
 		OldParent: root.Id,
@@ -2311,7 +2311,7 @@ func (s *GoofysTest) TestRenameCache(t *C) {
 	lookupOp2.Entry = fuseops.ChildInodeEntry{}
 
 	err = s.fs.LookUpInode(nil, &lookupOp1)
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	err = s.fs.LookUpInode(nil, &lookupOp2)
 	t.Assert(err, IsNil)
@@ -2483,7 +2483,7 @@ func (s *GoofysTest) TestIssue162(t *C) {
 	t.Assert(err, IsNil)
 	toInode, err := s.LookUpInode(t, "dir1/myfile.jpg")
 	if err != nil {
-		t.Assert(err, Equals, fuse.ENOENT)
+		t.Assert(err, Equals, syscall.ENOENT)
 	} else {
 		err = s.getRoot(t).Unlink("dir1/myfile.jpg")
 		t.Assert(err, IsNil)
@@ -2722,7 +2722,7 @@ func (s *GoofysTest) TestXAttrCopied(t *C) {
 
 	_, err = s.LookUpInode(t, "file0")
 	if err != nil {
-		t.Assert(err, Equals, fuse.ENOENT)
+		t.Assert(err, Equals, syscall.ENOENT)
 	}
 
 	err = root.Rename("file1", root, "file0")
@@ -2939,7 +2939,7 @@ func (s *GoofysTest) TestCreateRenameBeforeCloseFuse(t *C) {
 	t.Assert(err, NotNil)
 	pathErr, ok := err.(*os.PathError)
 	t.Assert(ok, Equals, true)
-	t.Assert(pathErr.Err, Equals, fuse.ENOENT)
+	t.Assert(pathErr.Err, Equals, syscall.ENOENT)
 
 	content, err := ioutil.ReadFile(to)
 	t.Assert(err, IsNil)
@@ -2981,7 +2981,7 @@ func (s *GoofysTest) TestRenameBeforeCloseFuse(t *C) {
 	t.Assert(err, NotNil)
 	pathErr, ok := err.(*os.PathError)
 	t.Assert(ok, Equals, true)
-	t.Assert(pathErr.Err, Equals, fuse.ENOENT)
+	t.Assert(pathErr.Err, Equals, syscall.ENOENT)
 
 	content, err := ioutil.ReadFile(to)
 	t.Assert(err, IsNil)
@@ -3754,7 +3754,7 @@ func (s *GoofysTest) TestVFS(t *C) {
 
 	// the mount would shadow dir4/file5
 	_, err = in.LookUp("file5", false)
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	_, fh := in.Create("testfile")
 	err = fh.inode.SyncFile()
@@ -3805,7 +3805,7 @@ func (s *GoofysTest) TestVFS(t *C) {
 	t.Assert(err, IsNil)
 
 	_, err = cloud2.GetBlob(&GetBlobInput{Key: "cloud2Prefix/subdir/testfile2"})
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	resp, err = cloud2.GetBlob(&GetBlobInput{Key: "cloud2Prefix/testfile2"})
 	t.Assert(err, IsNil)
@@ -3815,7 +3815,7 @@ func (s *GoofysTest) TestVFS(t *C) {
 	t.Assert(err, IsNil)
 
 	_, err = cloud2.GetBlob(&GetBlobInput{Key: "cloud2Prefix/testfile2"})
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	resp, err = cloud2.GetBlob(&GetBlobInput{Key: "cloud2Prefix/subdir/testfile2"})
 	t.Assert(err, IsNil)
@@ -3874,7 +3874,7 @@ func (s *GoofysTest) TestMountsNewDir(t *C) {
 	s.clearPrefix(t, s.cloud, "dir5")
 
 	_, err := s.LookUpInode(t, "dir5")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	s.fs.MountAll([]*Mount{
 		&Mount{"dir5/cloud1", s.cloud, "", false},
@@ -3911,7 +3911,7 @@ func (s *GoofysTest) TestMountsNewMounts(t *C) {
 	t.Assert(c1.dir.cloud == cloud, Equals, true)
 
 	_, err = s.LookUpInode(t, "dir4/cloud2")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	s.fs.MountAll([]*Mount{
 		&Mount{"dir4/cloud1", cloud, "", false},
@@ -3976,14 +3976,14 @@ func (s *GoofysTest) TestMountsError(t *C) {
 	t.Assert(errfile.isDir(), Equals, false)
 
 	_, err = s.LookUpInode(t, "dir4/newerror/not_there")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	errfile, err = s.LookUpInode(t, "dir4/initerror/"+INIT_ERR_BLOB)
 	t.Assert(err, IsNil)
 	t.Assert(errfile.isDir(), Equals, false)
 
 	_, err = s.LookUpInode(t, "dir4/initerror/not_there")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	in, err := s.LookUpInode(t, "dir4/initerror")
 	t.Assert(err, IsNil)
@@ -4050,7 +4050,7 @@ func (s *GoofysTest) testMountsNested(t *C, cloud StorageBackend,
 	s.clearPrefix(t, cloud, "test_nested")
 
 	_, err := s.LookUpInode(t, "dir5")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 
 	s.fs.MountAll(mounts)
 
@@ -4079,7 +4079,7 @@ func (s *GoofysTest) testMountsNested(t *C, cloud StorageBackend,
 	t.Assert(dir_dir.dir.cloud == cloud, Equals, true)
 
 	_, err = s.LookUpInode(t, "dir5/in/testfile")
-	t.Assert(err, Equals, fuse.ENOENT)
+	t.Assert(err, Equals, syscall.ENOENT)
 	_, fh := dir_in.Create("testfile")
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
@@ -4575,7 +4575,7 @@ func (s *GoofysTest) testReadMyOwnWriteFuse(t *C, externalUpdate bool) {
 		// return the mtime, so the open above will think the
 		// file is updated and not re-use cache
 		if _, adlv1 := s.cloud.(*ADLv1); !adlv1 {
-			cloud.err = fuse.EINVAL
+			cloud.err = syscall.EINVAL
 		}
 	} else {
 		// if there was externalUpdate, we wrote our own

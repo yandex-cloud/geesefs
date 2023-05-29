@@ -23,7 +23,6 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/jacobsa/fuse"
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 )
@@ -135,7 +134,7 @@ func (s *GCS3) DeleteBlobs(param *DeleteBlobsInput) (*DeleteBlobsOutput, error) 
 			_, err := s.DeleteBlob(&DeleteBlobInput{
 				Key: key,
 			})
-			if err != nil && err != fuse.ENOENT {
+			if err != nil && err != syscall.ENOENT {
 				overallErr = err
 			}
 			wg.Done()

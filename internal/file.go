@@ -25,8 +25,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"github.com/jacobsa/fuse"
 )
 
 type FileHandle struct {
@@ -465,7 +463,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 		// Oops, it's a deleted file. We don't support changing invisible files
 		fh.inode.fs.bufferPool.Use(-int64(len(data)), false)
 		fh.inode.mu.Unlock()
-		return fuse.ENOENT
+		return syscall.ENOENT
 	}
 
 	fh.inode.checkPauseWriters()
@@ -818,7 +816,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 				// One of the buffers disappeared => read error
 				requestErr = inode.readError
 				if requestErr == nil {
-					requestErr = fuse.EIO
+					requestErr = syscall.EIO
 				}
 				return
 			}
@@ -833,7 +831,7 @@ func (inode *Inode) LoadRange(offset uint64, size uint64, readAheadSize uint64, 
 				// One of the buffers disappeared => read error
 				requestErr = inode.readError
 				if requestErr == nil {
-					requestErr = fuse.EIO
+					requestErr = syscall.EIO
 				}
 				return
 			}
@@ -1092,7 +1090,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	mappedErr := mapAwsError(requestErr)
 	if requestErr != nil {
 		err = requestErr
-		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
+		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			log.Warnf("File %v is deleted or resized remotely, discarding local changes", fh.inode.FullName())
 			fh.inode.resetCache()
@@ -1118,7 +1116,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 			} else {
 				err = requestErr
 				if err == nil {
-					err = fuse.EIO
+					err = syscall.EIO
 				}
 				return
 			}
@@ -1146,7 +1144,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 		} else {
 			err = requestErr
 			if err == nil {
-				err = fuse.EIO
+				err = syscall.EIO
 			}
 			return
 		}
@@ -1336,10 +1334,10 @@ func (inode *Inode) SendUpload() bool {
 					// Rename the old directory object to copy xattrs from it if it has them
 					// We're almost never sure if the directory is implicit or not so we
 					// always try to rename the directory object, but ignore NotFound errors
-					if mappedErr == fuse.ENOENT && skipRename {
+					if mappedErr == syscall.ENOENT && skipRename {
 						err = nil
 						notFoundIgnore = true
-					} else if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
+					} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 						s3Log.Warnf("Conflict detected (inode %v): failed to copy %v to %v: %v. File is removed remotely, dropping cache", inode.Id, from, key, err)
 						inode.mu.Lock()
 						newParent := inode.Parent
@@ -1484,7 +1482,7 @@ func (inode *Inode) SendUpload() bool {
 				if err != nil {
 					mappedErr := mapAwsError(err)
 					inode.userMetadataDirty = 2
-					if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
+					if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 						// Object is deleted or resized remotely (416). Discard local version
 						s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 						inode.resetCache()
@@ -1728,7 +1726,7 @@ func (inode *Inode) FlushSmallObject() {
 	if inode.CacheState == ST_MODIFIED {
 		_, err := inode.LoadRange(0, sz, 0, true)
 		mappedErr := mapAwsError(err)
-		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
+		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 			inode.resetCache()
@@ -1867,7 +1865,7 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 				if inode.mpu == nil {
 					// Upload was canceled (file deleted)
 					inode.mu.Unlock()
-					err = fuse.ENOENT
+					err = syscall.ENOENT
 				} else {
 					inode.mu.Unlock()
 					log.Debugf("Copying unmodified range %v-%v MB of object %v",
@@ -1926,7 +1924,7 @@ func (inode *Inode) FlushPart(part uint64) {
 			return
 		}
 		mappedErr := mapAwsError(err)
-		if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
+		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 			// Object is deleted or resized remotely (416). Discard local version
 			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 			inode.resetCache()
@@ -2010,7 +2008,7 @@ func (inode *Inode) completeMultipart() {
 		return
 	}
 	mappedErr := mapAwsError(err)
-	if mappedErr == fuse.ENOENT || mappedErr == syscall.ERANGE {
+	if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 		// Object is deleted or resized remotely (416). Discard local version
 		s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 		inode.resetCache()

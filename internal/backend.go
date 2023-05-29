@@ -21,9 +21,8 @@ import (
 	"io/ioutil"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
-
-	"github.com/jacobsa/fuse"
 )
 
 type Capabilities struct {
@@ -456,7 +455,7 @@ func (e StorageBackendInitError) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput
 			ContentType: PString("text/plain"),
 		}, nil
 	} else {
-		return nil, fuse.ENOENT
+		return nil, syscall.ENOENT
 	}
 }
 
@@ -508,7 +507,7 @@ func (e StorageBackendInitError) GetBlob(param *GetBlobInput) (*GetBlobOutput, e
 			Body: ioutil.NopCloser(strings.NewReader(errStr)),
 		}, nil
 	} else {
-		return nil, fuse.ENOENT
+		return nil, syscall.ENOENT
 	}
 }
 

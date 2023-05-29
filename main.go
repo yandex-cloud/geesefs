@@ -205,7 +205,7 @@ func main() {
 				if waitedForSignal == syscall.SIGUSR1 {
 					return
 				} else {
-					return fuse.EINVAL
+					return syscall.EINVAL
 				}
 			} else {
 				// kill our own waiting goroutine

@@ -34,7 +34,6 @@ import (
 	"github.com/Azure/azure-storage-blob-go/azblob"
 
 	"github.com/google/uuid"
-	"github.com/jacobsa/fuse"
 	"github.com/sirupsen/logrus"
 )
 
@@ -305,7 +304,7 @@ func (b *AZBlob) updateToken() (*azblob.ContainerURL, error) {
 	u, err := url.Parse(sUrl)
 	if err != nil {
 		azbLog.Errorf("Unable to construct service URL: %v", sUrl)
-		return nil, fuse.EINVAL
+		return nil, syscall.EINVAL
 	}
 
 	serviceURL := azblob.NewServiceURL(*u, b.pipeline)
@@ -325,7 +324,7 @@ func (b *AZBlob) testBucket(key string) (err error) {
 	_, err = b.HeadBlob(&HeadBlobInput{Key: key})
 	if err != nil {
 		err = mapAZBError(err)
-		if err == fuse.ENOENT {
+		if err == syscall.ENOENT {
 			err = nil
 		}
 	}
@@ -353,7 +352,7 @@ func mapAZBError(err error) error {
 		case azblob.ServiceCodeBlobAlreadyExists:
 			return syscall.EACCES
 		case azblob.ServiceCodeBlobNotFound:
-			return fuse.ENOENT
+			return syscall.ENOENT
 		case azblob.ServiceCodeContainerAlreadyExists:
 			return syscall.EEXIST
 		case azblob.ServiceCodeContainerBeingDeleted:
@@ -363,17 +362,17 @@ func mapAZBError(err error) error {
 		case azblob.ServiceCodeContainerNotFound:
 			return syscall.ENODEV
 		case azblob.ServiceCodeCopyAcrossAccountsNotSupported:
-			return fuse.EINVAL
+			return syscall.EINVAL
 		case azblob.ServiceCodeSourceConditionNotMet:
-			return fuse.EINVAL
+			return syscall.EINVAL
 		case azblob.ServiceCodeSystemInUse:
 			return syscall.EAGAIN
 		case azblob.ServiceCodeTargetConditionNotMet:
-			return fuse.EINVAL
+			return syscall.EINVAL
 		case azblob.ServiceCodeBlobBeingRehydrated:
 			return syscall.EAGAIN
 		case azblob.ServiceCodeBlobArchived:
-			return fuse.EINVAL
+			return syscall.EINVAL
 		case azblob.ServiceCodeAccountBeingCreated:
 			return syscall.EAGAIN
 		case azblob.ServiceCodeAuthenticationFailed:
@@ -387,7 +386,7 @@ func mapAZBError(err error) error {
 		case azblob.ServiceCodeOperationTimedOut:
 			return syscall.EAGAIN
 		case azblob.ServiceCodeResourceNotFound:
-			return fuse.ENOENT
+			return syscall.ENOENT
 		case azblob.ServiceCodeServerBusy:
 			return syscall.EAGAIN
 		case "AuthorizationFailure": // from Azurite emulator
@@ -426,7 +425,7 @@ func (b *AZBlob) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
 		if err == nil {
 			if !dirBlob.IsDirBlob {
 				// we requested for a dir suffix, but this isn't one
-				err = fuse.ENOENT
+				err = syscall.ENOENT
 			}
 		}
 		return dirBlob, err
@@ -604,7 +603,7 @@ func (b *AZBlob) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 			*dirBlob.Key += "/"
 			items = append(items, dirBlob.BlobItemOutput)
 			sortItems = true
-		} else if err == fuse.ENOENT {
+		} else if err == syscall.ENOENT {
 			err = nil
 		} else {
 			return nil, err
@@ -672,7 +671,7 @@ func (b *AZBlob) DeleteBlobs(param *DeleteBlobsInput) (ret *DeleteBlobsOutput, d
 			_, err := b.DeleteBlob(&DeleteBlobInput{key})
 			if err != nil {
 				err = mapAZBError(err)
-				if err != fuse.ENOENT {
+				if err != syscall.ENOENT {
 					deleteError = err
 				}
 			}

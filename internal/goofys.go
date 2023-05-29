@@ -966,7 +966,7 @@ func (fs *Goofys) SetXattr(ctx context.Context,
 		if fs.connection != nil {
 			// Send notifications from another goroutine to prevent deadlocks
 			go func() {
-				if mappedErr == fuse.ENOENT {
+				if mappedErr == syscall.ENOENT {
 					fs.connection.Notify(&fuseops.NotifyDelete{
 						Parent: parentId,
 						Child: inodeId,
@@ -980,7 +980,7 @@ func (fs *Goofys) SetXattr(ctx context.Context,
 				}
 			}()
 		}
-		if mappedErr == fuse.ENOENT {
+		if mappedErr == syscall.ENOENT {
 			// We don't mind if the file disappeared
 			return nil
 		}
@@ -1038,13 +1038,13 @@ func (fs *Goofys) ReadSymlink(ctx context.Context,
 func mapHttpError(status int) error {
 	switch status {
 	case 400:
-		return fuse.EINVAL
+		return syscall.EINVAL
 	case 401:
 		return syscall.EACCES
 	case 403:
 		return syscall.EACCES
 	case 404:
-		return fuse.ENOENT
+		return syscall.ENOENT
 	case 405:
 		return syscall.ENOTSUP
 	case http.StatusConflict:
@@ -1073,7 +1073,7 @@ func mapAwsError(err error) error {
 		case "NoSuchBucket":
 			return syscall.ENXIO
 		case "BucketAlreadyOwnedByYou":
-			return fuse.EEXIST
+			return syscall.EEXIST
 		}
 
 		if reqErr, ok := err.(awserr.RequestFailure); ok {
@@ -1157,13 +1157,13 @@ func (fs *Goofys) LookUpInode(
 			if _, ok := parent.dir.DeletedChildren[op.Name]; ok {
 				// File is deleted locally
 				parent.mu.Unlock()
-				return fuse.ENOENT
+				return syscall.ENOENT
 			}
 		}
 		if !expired(parent.dir.DirTime, fs.flags.StatCacheTTL) {
 			// Don't recheck from the server if directory cache is actual
 			parent.mu.Unlock()
-			return fuse.ENOENT
+			return syscall.ENOENT
 		}
 	}
 	parent.mu.Unlock()
@@ -1175,7 +1175,7 @@ func (fs *Goofys) LookUpInode(
 			return
 		}
 		if inode == nil {
-			return fuse.ENOENT
+			return syscall.ENOENT
 		}
 	}
 
@@ -1736,7 +1736,7 @@ func (fs *Goofys) SetInodeAttributes(
 		if inode.CacheState == ST_DELETED || inode.CacheState == ST_DEAD {
 			// Oops, it's a deleted file. We don't support changing invisible files
 			inode.mu.Unlock()
-			return fuse.ENOENT
+			return syscall.ENOENT
 		}
 	}
 

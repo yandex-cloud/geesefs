@@ -538,7 +538,7 @@ func (inode *Inode) fillXattr() (err error) {
 		inode.mu.Lock()
 		if err != nil {
 			err = mapAwsError(err)
-			if err == fuse.ENOENT {
+			if err == syscall.ENOENT {
 				err = nil
 				if inode.isDir() {
 					inode.ImplicitDir = true
@@ -624,7 +624,7 @@ func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
 
 	if inode.CacheState == ST_DELETED || inode.CacheState == ST_DEAD {
 		// Oops, it's a deleted file. We don't support changing invisible files
-		return fuse.ENOENT
+		return syscall.ENOENT
 	}
 
 	meta, name, err := inode.getXattrMap(name, true)
@@ -662,7 +662,7 @@ func (inode *Inode) RemoveXattr(name string) error {
 
 	if inode.CacheState == ST_DELETED || inode.CacheState == ST_DEAD {
 		// Oops, it's a deleted file. We don't support changing invisible files
-		return fuse.ENOENT
+		return syscall.ENOENT
 	}
 
 	meta, name, err := inode.getXattrMap(name, true)

@@ -28,7 +28,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jacobsa/fuse"
 	uuid "github.com/satori/go.uuid"
 	"github.com/sirupsen/logrus"
 
@@ -355,7 +354,7 @@ func (b *ADLv1) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 
 	_, prefixes, items, err := b.appendToListResults(NilStr(param.Prefix),
 		recursive, NilStr(continuationToken), param.MaxKeys, nil, nil)
-	if err == fuse.ENOENT {
+	if err == syscall.ENOENT {
 		err = nil
 	} else if err != nil {
 		return nil, err
@@ -375,7 +374,7 @@ func (b *ADLv1) DeleteBlob(param *DeleteBlobInput) (*DeleteBlobOutput, error) {
 		return nil, err
 	}
 	if !*res.OperationResult {
-		return nil, fuse.ENOENT
+		return nil, syscall.ENOENT
 	}
 	return &DeleteBlobOutput{}, nil
 }
@@ -417,7 +416,7 @@ func (b *ADLv1) RenameBlob(param *RenameBlobInput) (*RenameBlobOutput, error) {
 		// (the reverse, renaming a file to a directory works
 		// in ADLv1 and is the same as moving the file into
 		// the directory)
-		return nil, fuse.ENOENT
+		return nil, syscall.ENOENT
 	}
 
 	return &RenameBlobOutput{}, nil
@@ -556,7 +555,7 @@ func (b *ADLv1) uploadPart(param *MultipartBlobAddInput, offset uint64) error {
 				// created. The behavior is odd: seems
 				// like the first stream will error
 				// but the latter stream works fine
-				err = fuse.EINVAL
+				err = syscall.EINVAL
 				return err
 			} else if adlErr.resp.StatusCode == 400 &&
 				adlErr.RemoteException.Exception == "BadOffsetException" {
@@ -641,7 +640,7 @@ func (b *ADLv1) MultipartBlobCommit(param *MultipartBlobCommitInput) (*Multipart
 		&ReadSeekerCloser{bytes.NewReader([]byte(""))}, PInt64(int64(commitData.Size)),
 		adl.CLOSE, &leaseId, &leaseId)
 	err = mapADLv1Error(res.Response, err, false)
-	if err == fuse.ENOENT {
+	if err == syscall.ENOENT {
 		// either the blob was concurrently deleted or we got
 		// another CREATE which broke our lease. Either way
 		// technically we did finish uploading data so swallow
@@ -661,7 +660,7 @@ func (b *ADLv1) MultipartExpire(param *MultipartExpireInput) (*MultipartExpireOu
 
 func (b *ADLv1) RemoveBucket(param *RemoveBucketInput) (*RemoveBucketOutput, error) {
 	if b.bucket == "" {
-		return nil, fuse.EINVAL
+		return nil, syscall.EINVAL
 	}
 
 	res, err := b.client.Delete(context.TODO(), b.account, b.path(""), PBool(false))
@@ -670,7 +669,7 @@ func (b *ADLv1) RemoveBucket(param *RemoveBucketInput) (*RemoveBucketOutput, err
 		return nil, err
 	}
 	if !*res.OperationResult {
-		return nil, fuse.ENOENT
+		return nil, syscall.ENOENT
 	}
 
 	return &RemoveBucketOutput{}, nil
@@ -678,7 +677,7 @@ func (b *ADLv1) RemoveBucket(param *RemoveBucketInput) (*RemoveBucketOutput, err
 
 func (b *ADLv1) MakeBucket(param *MakeBucketInput) (*MakeBucketOutput, error) {
 	if b.bucket == "" {
-		return nil, fuse.EINVAL
+		return nil, syscall.EINVAL
 	}
 
 	err := b.mkdir("")
@@ -697,7 +696,7 @@ func (b *ADLv1) mkdir(dir string) error {
 		return err
 	}
 	if !*res.OperationResult {
-		return fuse.EEXIST
+		return syscall.EEXIST
 	}
 	return nil
 }

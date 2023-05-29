@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jacobsa/fuse"
 	"github.com/sirupsen/logrus"
 
 	adl2 "github.com/Azure/azure-sdk-for-go/services/storage/datalake/2018-11-09/storagedatalake"
@@ -197,7 +196,7 @@ func (b *ADLv2) Delegate() interface{} {
 
 func (b *ADLv2) Init(key string) (err error) {
 	_, err = b.HeadBlob(&HeadBlobInput{Key: key})
-	if err == fuse.ENOENT {
+	if err == syscall.ENOENT {
 		err = nil
 	}
 	return
@@ -439,7 +438,7 @@ func (b *ADLv2) listBlobs(param *ListBlobsInput, maxResults *int32) (adl2PathLis
 
 func (b *ADLv2) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 	if param.Delimiter != nil && *param.Delimiter != "/" {
-		return nil, fuse.EINVAL
+		return nil, syscall.EINVAL
 	}
 
 	var maxResults *int32
@@ -449,7 +448,7 @@ func (b *ADLv2) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 
 	res, err := b.listBlobs(param, maxResults)
 	if err != nil {
-		if err == fuse.ENOENT {
+		if err == syscall.ENOENT {
 			return &ListBlobsOutput{
 				RequestId: res.Response.Response.Header.Get(ADL2_REQUEST_ID),
 			}, nil
@@ -724,7 +723,7 @@ func (b *ADLv2) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 func (b *ADLv2) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlobCommitInput, error) {
 	leaseId := uuid.New().String()
 	err := b.lease(adl2.Acquire, param.Key, leaseId, 60, "")
-	if err == fuse.ENOENT {
+	if err == syscall.ENOENT {
 		// the file didn't exist, we will create the file
 		// first and then acquire the lease
 		create, err := b.create(param.Key, adl2.File, param.ContentType, param.Metadata, "")

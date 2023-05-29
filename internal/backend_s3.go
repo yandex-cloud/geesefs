@@ -38,8 +38,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/s3"
-
-	"github.com/jacobsa/fuse"
 )
 
 type S3Backend struct {
@@ -323,7 +321,7 @@ func (s *S3Backend) detectBucketLocationByHEAD() (err error, isAws bool) {
 			s.awsConfig.Endpoint = aws.String("")
 		}
 	case 400:
-		err = fuse.EINVAL
+		err = syscall.EINVAL
 	case 403:
 		err = syscall.EACCES
 	case 404:
@@ -351,7 +349,7 @@ func (s *S3Backend) detectBucketLocationByHEAD() (err error, isAws bool) {
 func (s *S3Backend) testBucket(key string) (err error) {
 	_, err = s.HeadBlob(&HeadBlobInput{Key: key})
 	if err != nil {
-		if mapAwsError(err) == fuse.ENOENT {
+		if mapAwsError(err) == syscall.ENOENT {
 			err = nil
 		}
 	}
@@ -361,7 +359,7 @@ func (s *S3Backend) testBucket(key string) (err error) {
 
 func (s *S3Backend) fallbackV2Signer() (err error) {
 	if s.v2Signer {
-		return fuse.EINVAL
+		return syscall.EINVAL
 	}
 
 	s3Log.Infoln("Falling back to v2 signer")
@@ -399,7 +397,7 @@ func (s *S3Backend) Init(key string) error {
 			// swift3, ceph-s3 returns 400
 			// Amplidata just gives up and return 500
 			code := mapAwsError(err)
-			if code == syscall.EACCES || code == fuse.EINVAL || code == syscall.EAGAIN {
+			if code == syscall.EACCES || code == syscall.EINVAL || code == syscall.EAGAIN {
 				err = s.fallbackV2Signer()
 				if err != nil {
 					return err
