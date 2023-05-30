@@ -34,10 +34,10 @@ type ClusterFs struct {
 	Flags  *FlagStorage
 	Conns  *ConnPool
 	Goofys *Goofys
+	mfs    MountedFS
 
 	stat Stat
 }
-
 
 func NewClusterGoofys(ctx context.Context, bucket string, flags *FlagStorage, conns *ConnPool) *Goofys {
 	fs := NewGoofys(ctx, bucket, flags)

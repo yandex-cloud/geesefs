@@ -879,7 +879,7 @@ func MountCluster(
 	ctx context.Context,
 	bucketName string,
 	flags *common.FlagStorage,
-) (*Goofys, *fuse.MountedFileSystem, *ConnPool, error) {
+) (*Goofys, MountedFS, error) {
 
 	if flags.DebugS3 {
 		common.SetCloudLogLevel(logrus.DebugLevel)
@@ -939,8 +939,26 @@ func MountCluster(
 	)
 	if err != nil {
 		err = fmt.Errorf("Mount: %v", err)
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
+	fs.mfs = mfs
 
-	return goofys, mfs, conns, nil
+	return goofys, fs, nil
+}
+
+func (fs *ClusterFs) Join(ctx context.Context) error {
+	err := fs.mfs.Join(ctx)
+	if err != nil {
+		return err
+	}
+	if fs.Conns != nil {
+		_ = fs.Conns.BroadConfigurable(
+			func(ctx context.Context, conn *grpc.ClientConn) error {
+				_, err := pb.NewRecoveryClient(conn).Unmount(ctx, &pb.UnmountRequest{})
+				return err
+			},
+			false,
+		)
+	}
+	return nil
 }

@@ -18,8 +18,6 @@ package main
 import (
 	. "github.com/yandex-cloud/geesefs/api/common"
 	. "github.com/yandex-cloud/geesefs/internal"
-	"github.com/yandex-cloud/geesefs/internal/pb"
-	"google.golang.org/grpc"
 
 	"fmt"
 	"os"
@@ -31,7 +29,6 @@ import (
 
 	"context"
 
-	"github.com/jacobsa/fuse"
 	"github.com/kardianos/osext"
 	"github.com/urfave/cli"
 
@@ -101,18 +98,15 @@ func kill(pid int, s os.Signal) (err error) {
 }
 
 // Mount the file system based on the supplied arguments, returning a
-// fuse.MountedFileSystem that can be joined to wait for unmounting.
+// MountedFS that can be joined to wait for unmounting.
 func mount(
 	ctx context.Context,
 	bucketName string,
-	flags *FlagStorage) (fs *Goofys, mfs *fuse.MountedFileSystem, conns *ConnPool, err error) {
+	flags *FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
 	if flags.ClusterMode {
 		return MountCluster(ctx, bucketName, flags)
-
 	} else {
-		fs, mfs, err = MountFuse(ctx, bucketName, flags)
-		conns = nil
-		return
+		return MountFuse(ctx, bucketName, flags)
 	}
 }
 
@@ -232,10 +226,7 @@ func main() {
 		}
 
 		// Mount the file system.
-		var mfs *fuse.MountedFileSystem
-		var fs *Goofys
-		var conns *ConnPool
-		fs, mfs, conns, err = mount(
+		fs, mfs, err := mount(
 			context.Background(),
 			bucketName,
 			flags)
@@ -269,15 +260,6 @@ func main() {
 				return
 			}
 			fs.SyncFS(nil)
-			if conns != nil {
-				_ = conns.BroadConfigurable(
-					func(ctx context.Context, conn *grpc.ClientConn) error {
-						_, err := pb.NewRecoveryClient(conn).Unmount(ctx, &pb.UnmountRequest{})
-						return err
-					},
-					false,
-				)
-			}
 
 			log.Println("Successfully exiting.")
 		}

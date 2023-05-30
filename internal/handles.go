@@ -16,6 +16,7 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -42,6 +43,10 @@ const (
 	ST_MODIFIED int32 = 3
 	ST_DELETED int32 = 4
 )
+
+type MountedFS interface {
+	Join(ctx context.Context) error
+}
 
 type InodeAttributes struct {
 	Size  uint64

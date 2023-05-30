@@ -2010,10 +2010,12 @@ func (fs *Goofys) SetConnection(conn *fuse.Connection) {
 	fs.connection = conn
 }
 
+// Mount the file system based on the supplied arguments, returning a
+// fuse.MountedFileSystem that can be joined to wait for unmounting.
 func MountFuse(
 	ctx context.Context,
 	bucketName string,
-	flags *FlagStorage) (fs *Goofys, mfs *fuse.MountedFileSystem, err error) {
+	flags *FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
 
 	if flags.DebugS3 {
 		SetCloudLogLevel(logrus.DebugLevel)
