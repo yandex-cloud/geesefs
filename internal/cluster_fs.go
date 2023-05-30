@@ -30,7 +30,7 @@ const (
 	UNKNOWN_OWNER = 0
 )
 
-type Fs struct {
+type ClusterFs struct {
 	Flags  *FlagStorage
 	Conns  *ConnPool
 	Goofys *Goofys
@@ -65,7 +65,7 @@ func NewClusterGoofys(ctx context.Context, bucket string, flags *FlagStorage, co
 }
 
 // REQUIRED_LOCK(parent.KeepOwnerLock)
-func (fs *Fs) createFile(parent *Inode, name string, mode os.FileMode) (
+func (fs *ClusterFs) createFile(parent *Inode, name string, mode os.FileMode) (
 	*pb.Inode,
 	uint64, // childId
 	*pb.Attributes,
@@ -102,7 +102,7 @@ func (fs *Fs) createFile(parent *Inode, name string, mode os.FileMode) (
 }
 
 // REQUIRED_LOCK(parent.KeepOwnerLock)
-func (fs *Fs) unlink(parent *Inode, name string) error {
+func (fs *ClusterFs) unlink(parent *Inode, name string) error {
 	parent.UpgradeToStateLock()
 
 	child := parent.findChildUnlocked(name)
@@ -138,7 +138,7 @@ func (fs *Fs) unlink(parent *Inode, name string) error {
 }
 
 // REQUIRED_LOCK(inode.KeepOwnerLock)
-func (fs *Fs) createSymlink(parent *Inode, name string, target string) (
+func (fs *ClusterFs) createSymlink(parent *Inode, name string, target string) (
 	*pb.Inode,
 	uint64, // childId
 	*pb.Attributes,
@@ -168,7 +168,7 @@ func (fs *Fs) createSymlink(parent *Inode, name string, target string) (
 }
 
 // REQUIRED_LOCK(inode.KeepOwnerLock)
-func (fs *Fs) readSymlink(inode *Inode) (target string, err error) {
+func (fs *ClusterFs) readSymlink(inode *Inode) (target string, err error) {
 	inode.UpgradeToStateLock()
 	defer inode.DowngradeToKeepOwnerLock()
 
@@ -180,7 +180,7 @@ func (fs *Fs) readSymlink(inode *Inode) (target string, err error) {
 }
 
 // REQUIRED_LOCK(inode.KeepOwnerLock)
-func (fs *Fs) openFile(inode *Inode) fuseops.HandleID {
+func (fs *ClusterFs) openFile(inode *Inode) fuseops.HandleID {
 	fh := NewFileHandle(inode)
 
 	n := atomic.AddInt32(&inode.fileHandles, 1)
@@ -197,7 +197,7 @@ func (fs *Fs) openFile(inode *Inode) fuseops.HandleID {
 	return handleId
 }
 
-func (fs *Fs) releaseFileHandle(handleId fuseops.HandleID) {
+func (fs *ClusterFs) releaseFileHandle(handleId fuseops.HandleID) {
 	fuseLog.Debugf("-> releaseFileHandle(%v)", handleId)
 	defer fuseLog.Debugf("<- releaseFileHandle(%v)", handleId)
 
@@ -210,7 +210,7 @@ func (fs *Fs) releaseFileHandle(handleId fuseops.HandleID) {
 }
 
 // REQUIRED_LOCK(inode.mu)
-func (fs *Fs) readFile(handleId fuseops.HandleID, offset int64, size int64) (data [][]byte, bytesRead int, err error) {
+func (fs *ClusterFs) readFile(handleId fuseops.HandleID, offset int64, size int64) (data [][]byte, bytesRead int, err error) {
 	fs.Goofys.mu.RLock()
 	fh := fs.Goofys.fileHandles[handleId]
 	fs.Goofys.mu.RUnlock()
@@ -219,7 +219,7 @@ func (fs *Fs) readFile(handleId fuseops.HandleID, offset int64, size int64) (dat
 }
 
 // REQUIRED_LOCK(inode.mu)
-func (fs *Fs) writeFile(handleId fuseops.HandleID, offset int64, data []byte) (suppressReuse bool, err error) {
+func (fs *ClusterFs) writeFile(handleId fuseops.HandleID, offset int64, data []byte) (suppressReuse bool, err error) {
 	fs.Goofys.mu.RLock()
 	fh := fs.Goofys.fileHandles[handleId]
 	fs.Goofys.mu.RUnlock()
@@ -235,7 +235,7 @@ func (fs *Fs) writeFile(handleId fuseops.HandleID, offset int64, data []byte) (s
 }
 
 // LOCK_REQUIRED(parent.KeepOwnerLock)
-func (fs *Fs) mkDir(parent *Inode, name string, mode os.FileMode) (
+func (fs *ClusterFs) mkDir(parent *Inode, name string, mode os.FileMode) (
 	*pb.Inode,
 	uint64,
 	*pb.Attributes,
@@ -332,7 +332,7 @@ func (fs *Fs) mkDir(parent *Inode, name string, mode os.FileMode) (
 }
 
 // REQUIRED_LOCK(parent.KeepOwnerLock)
-func (fs *Fs) rmDir(parent *Inode, name string) error {
+func (fs *ClusterFs) rmDir(parent *Inode, name string) error {
 	parent.UpgradeToStateLock()
 
 	child := parent.findChildUnlocked(name)
@@ -376,7 +376,7 @@ func (fs *Fs) rmDir(parent *Inode, name string) error {
 }
 
 // REQUIRED_LOCK(inode.KeepOwnerLock)
-func (fs *Fs) openDir(inode *Inode) fuseops.HandleID {
+func (fs *ClusterFs) openDir(inode *Inode) fuseops.HandleID {
 	fs.Goofys.mu.Lock()
 	handleId := fs.Goofys.nextHandleID
 	fs.Goofys.nextHandleID++
@@ -395,7 +395,7 @@ func (fs *Fs) openDir(inode *Inode) fuseops.HandleID {
 	return handleId
 }
 
-func (fs *Fs) releaseDirHandle(handleId fuseops.HandleID) {
+func (fs *ClusterFs) releaseDirHandle(handleId fuseops.HandleID) {
 	fs.Goofys.mu.RLock()
 	dh := fs.Goofys.dirHandles[handleId]
 	fs.Goofys.mu.RUnlock()
@@ -408,7 +408,7 @@ func (fs *Fs) releaseDirHandle(handleId fuseops.HandleID) {
 }
 
 // REQUIRED_LOCK(dh.inode.KeepOwnerLock)
-func (fs *Fs) readDir(handleId fuseops.HandleID, offset fuseops.DirOffset, dst []byte, bytesRead *int) (err error) {
+func (fs *ClusterFs) readDir(handleId fuseops.HandleID, offset fuseops.DirOffset, dst []byte, bytesRead *int) (err error) {
 	fs.Goofys.mu.RLock()
 	dh := fs.Goofys.dirHandles[handleId]
 	fs.Goofys.mu.RUnlock()
@@ -461,7 +461,7 @@ func (fs *Fs) readDir(handleId fuseops.HandleID, offset fuseops.DirOffset, dst [
 }
 
 // REQUIRED_LOCK(parent.KeepOwnerLock)
-func (fs *Fs) lookUpInode1(parent *Inode, name string) (
+func (fs *ClusterFs) lookUpInode1(parent *Inode, name string) (
 	*pb.Inode,
 	uint64,
 	*pb.Attributes,
@@ -500,7 +500,7 @@ func (fs *Fs) lookUpInode1(parent *Inode, name string) (
 }
 
 // REQUIRED_LOCK(parent.StateLock)
-func (fs *Fs) lookUpInode2(inode *Inode) (pbAttr *pb.Attributes, err error) {
+func (fs *ClusterFs) lookUpInode2(inode *Inode) (pbAttr *pb.Attributes, err error) {
 	fs.route(
 		func() *Inode { return inode },
 		false,
@@ -537,7 +537,7 @@ func (fs *Fs) lookUpInode2(inode *Inode) (pbAttr *pb.Attributes, err error) {
 }
 
 // REQUIRED_LOCK(inode.KeepOwnerLock)
-func (fs *Fs) getInodeAttributes(inode *Inode, size *uint64, mtime *time.Time, ctime *time.Time, mode *os.FileMode) {
+func (fs *ClusterFs) getInodeAttributes(inode *Inode, size *uint64, mtime *time.Time, ctime *time.Time, mode *os.FileMode) {
 	inode.mu.Lock()
 	attr, _ := inode.GetAttributes()
 	inode.mu.Unlock()
@@ -549,7 +549,7 @@ func (fs *Fs) getInodeAttributes(inode *Inode, size *uint64, mtime *time.Time, c
 }
 
 // REQUIRED_LOCK(inode.KeepOwnerLock)
-func (fs *Fs) setInodeAttributes(inode *Inode, size *uint64, mtime *time.Time, ctime *time.Time, mode *os.FileMode) error {
+func (fs *ClusterFs) setInodeAttributes(inode *Inode, size *uint64, mtime *time.Time, ctime *time.Time, mode *os.FileMode) error {
 	modified := false
 
 	if size != nil && inode.Attributes.Size != *size {
@@ -595,19 +595,19 @@ func (fs *Fs) setInodeAttributes(inode *Inode, size *uint64, mtime *time.Time, c
 
 // getting of inode
 
-func (fs *Fs) inodeById(inodeId fuseops.InodeID) *Inode {
+func (fs *ClusterFs) inodeById(inodeId fuseops.InodeID) *Inode {
 	fs.Goofys.mu.RLock()
 	defer fs.Goofys.mu.RUnlock()
 	return fs.Goofys.getInodeOrDie(inodeId)
 }
 
-func (fs *Fs) inodeByFileHandleId(handleId fuseops.HandleID) *Inode {
+func (fs *ClusterFs) inodeByFileHandleId(handleId fuseops.HandleID) *Inode {
 	fs.Goofys.mu.RLock()
 	defer fs.Goofys.mu.RUnlock()
 	return fs.Goofys.fileHandles[handleId].inode
 }
 
-func (fs *Fs) inodeByDirHandleId(handleId fuseops.HandleID) *Inode {
+func (fs *ClusterFs) inodeByDirHandleId(handleId fuseops.HandleID) *Inode {
 	fs.Goofys.mu.RLock()
 	defer fs.Goofys.mu.RUnlock()
 	return fs.Goofys.dirHandles[handleId].inode
@@ -616,7 +616,7 @@ func (fs *Fs) inodeByDirHandleId(handleId fuseops.HandleID) *Inode {
 // stealing
 
 // REQUIRED_LOCK(inode.KeepOwnerLock)
-func (fs *Fs) trySteal(inode *Inode) (success bool, err error) {
+func (fs *ClusterFs) trySteal(inode *Inode) (success bool, err error) {
 	defer func() {
 		atomic.AddUint64(&fs.stat.tryStealCnt, 1)
 		if success {
@@ -673,7 +673,7 @@ func (fs *Fs) trySteal(inode *Inode) (success bool, err error) {
 }
 
 // REQUIRED_LOCK(inode.ChangeOwner)
-func (fs *Fs) applyStolenInode(inode *Inode, stolenInode *pb.StolenInode) {
+func (fs *ClusterFs) applyStolenInode(inode *Inode, stolenInode *pb.StolenInode) {
 	if inode.isDir() {
 		for _, pbInode := range stolenInode.Children {
 			child := fs.ensure(inode, pbInode)
@@ -694,7 +694,7 @@ func (fs *Fs) applyStolenInode(inode *Inode, stolenInode *pb.StolenInode) {
 }
 
 // REQUIRED_LOCK(inode.KeepOwnerLock)
-func (fs *Fs) steal(inode *Inode) error {
+func (fs *ClusterFs) steal(inode *Inode) error {
 	for {
 		stolen, err := fs.trySteal(inode)
 		if err != nil {
@@ -708,7 +708,7 @@ func (fs *Fs) steal(inode *Inode) error {
 }
 
 // REQUIRED_LOCK(inode.ChangeOwnerLock)
-func (fs *Fs) tryYield(inode *Inode, newOwner NodeId) *pb.StolenInode {
+func (fs *ClusterFs) tryYield(inode *Inode, newOwner NodeId) *pb.StolenInode {
 	if inode.CacheState == ST_CACHED && inode.fileHandles == 0 {
 		if inode.isDir() {
 			var children []*pb.Inode
@@ -798,7 +798,7 @@ type Stat struct {
 	resurectionCnt uint64
 }
 
-func (fs *Fs) StatPrinter() {
+func (fs *ClusterFs) StatPrinter() {
 	for {
 		time.Sleep(STAT_PRINT_INTERVAL)
 		statLog.Infof(
@@ -834,7 +834,7 @@ func (parent *Inode) loadChild(name string) (child *Inode, err error) {
 	return
 }
 
-func (fs *Fs) unshadow(inode *Inode) {
+func (fs *ClusterFs) unshadow(inode *Inode) {
 	atomic.AddUint64(&fs.stat.createInodeCnt, 1)
 
 	inode.ownerTerm = 0
@@ -845,7 +845,7 @@ func (fs *Fs) unshadow(inode *Inode) {
 }
 
 // Returns inode with StateLock!
-func (fs *Fs) ensure(parent *Inode, pbInode *pb.Inode) *Inode {
+func (fs *ClusterFs) ensure(parent *Inode, pbInode *pb.Inode) *Inode {
 	fs.Goofys.mu.RLock()
 	child, ok := fs.Goofys.inodes[fuseops.InodeID(pbInode.Id)]
 	fs.Goofys.mu.RUnlock()
@@ -880,7 +880,7 @@ func (fs *Fs) ensure(parent *Inode, pbInode *pb.Inode) *Inode {
 
 // REQUIRED_LOCK(parent.StateLock)
 // Returns inode with StateLock!
-func (fs *Fs) createChild(parent *Inode, name string, mode iofs.FileMode) *Inode {
+func (fs *ClusterFs) createChild(parent *Inode, name string, mode iofs.FileMode) *Inode {
 	atomic.AddUint64(&fs.stat.createInodeCnt, 1)
 
 	child := NewInode(fs.Goofys, parent, name)
@@ -930,7 +930,7 @@ func (fs *Fs) createChild(parent *Inode, name string, mode iofs.FileMode) *Inode
 	return child
 }
 
-func (fs *Fs) broadcastForget2(inodeId fuseops.InodeID) {
+func (fs *ClusterFs) broadcastForget2(inodeId fuseops.InodeID) {
 	fs.Conns.Broad(func(ctx context.Context, conn *grpc.ClientConn) error {
 		req := &pb.ForgetInode2Request{
 			InodeId: uint64(inodeId),
@@ -942,7 +942,7 @@ func (fs *Fs) broadcastForget2(inodeId fuseops.InodeID) {
 
 // utils
 
-func (fs *Fs) routeByInodeId(
+func (fs *ClusterFs) routeByInodeId(
 	inodeId fuseops.InodeID,
 	trySteal bool,
 	execLocally func(inode *Inode),
@@ -958,7 +958,7 @@ func (fs *Fs) routeByInodeId(
 	)
 }
 
-func (fs *Fs) routeByFileHandle(
+func (fs *ClusterFs) routeByFileHandle(
 	handleId fuseops.HandleID,
 	execLocally func(inode *Inode),
 	tryExecRemotely func(inode *Inode, inodeOwner NodeId) *pb.Owner,
@@ -973,7 +973,7 @@ func (fs *Fs) routeByFileHandle(
 	)
 }
 
-func (fs *Fs) routeByDirHandle(
+func (fs *ClusterFs) routeByDirHandle(
 	handleId fuseops.HandleID,
 	execLocally func(inode *Inode),
 	tryExecRemotely func(inode *Inode, inodeOwner NodeId) *pb.Owner,
@@ -990,7 +990,7 @@ func (fs *Fs) routeByDirHandle(
 
 const READY_OWNER_BACKOFF = 100 * time.Millisecond
 
-func (fs *Fs) route(
+func (fs *ClusterFs) route(
 	getInode func() *Inode,
 	trySteal bool,
 	execLocally func(inode *Inode),

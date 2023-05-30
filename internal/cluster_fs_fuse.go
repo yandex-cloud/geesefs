@@ -12,20 +12,20 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type FsFuse struct {
+type ClusterFsFuse struct {
 	fuseutil.NotImplementedFileSystem
-	*Fs
+	*ClusterFs
 }
 
 // fs
 
-func (fs *FsFuse) StatFS(ctx context.Context, op *fuseops.StatFSOp) error {
+func (fs *ClusterFsFuse) StatFS(ctx context.Context, op *fuseops.StatFSOp) error {
 	return fs.Goofys.StatFS(ctx, op)
 }
 
 // file
 
-func (fs *FsFuse) CreateFile(ctx context.Context, op *fuseops.CreateFileOp) (err error) {
+func (fs *ClusterFsFuse) CreateFile(ctx context.Context, op *fuseops.CreateFileOp) (err error) {
 	fs.routeByInodeId(
 		op.Parent,
 		false,
@@ -106,7 +106,7 @@ func (fs *FsFuse) CreateFile(ctx context.Context, op *fuseops.CreateFileOp) (err
 	return
 }
 
-func (fs *FsFuse) OpenFile(ctx context.Context, op *fuseops.OpenFileOp) (err error) {
+func (fs *ClusterFsFuse) OpenFile(ctx context.Context, op *fuseops.OpenFileOp) (err error) {
 	fs.routeByInodeId(
 		op.Inode,
 		true,
@@ -147,7 +147,7 @@ func (fs *FsFuse) OpenFile(ctx context.Context, op *fuseops.OpenFileOp) (err err
 	return
 }
 
-func (fs *FsFuse) ReadFile(ctx context.Context, op *fuseops.ReadFileOp) (err error) {
+func (fs *ClusterFsFuse) ReadFile(ctx context.Context, op *fuseops.ReadFileOp) (err error) {
 	fs.routeByFileHandle(
 		op.Handle,
 		func(inode *Inode) {
@@ -188,7 +188,7 @@ func (fs *FsFuse) ReadFile(ctx context.Context, op *fuseops.ReadFileOp) (err err
 	return
 }
 
-func (fs *FsFuse) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) (err error) {
+func (fs *ClusterFsFuse) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) (err error) {
 	fs.routeByFileHandle(
 		op.Handle,
 		func(inode *Inode) {
@@ -225,7 +225,7 @@ func (fs *FsFuse) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) (err e
 	return
 }
 
-func (fs *FsFuse) ReleaseFileHandle(ctx context.Context, op *fuseops.ReleaseFileHandleOp) (err error) {
+func (fs *ClusterFsFuse) ReleaseFileHandle(ctx context.Context, op *fuseops.ReleaseFileHandleOp) (err error) {
 	fs.routeByFileHandle(
 		op.Handle,
 		func(inode *Inode) {
@@ -262,7 +262,7 @@ func (fs *FsFuse) ReleaseFileHandle(ctx context.Context, op *fuseops.ReleaseFile
 	return nil
 }
 
-func (fs *FsFuse) Unlink(ctx context.Context, op *fuseops.UnlinkOp) (err error) {
+func (fs *ClusterFsFuse) Unlink(ctx context.Context, op *fuseops.UnlinkOp) (err error) {
 	fs.routeByInodeId(
 		op.Parent,
 		false,
@@ -301,7 +301,7 @@ func (fs *FsFuse) Unlink(ctx context.Context, op *fuseops.UnlinkOp) (err error) 
 
 // symlinks
 
-func (fs *FsFuse) CreateSymlink(ctx context.Context, op *fuseops.CreateSymlinkOp) (err error) {
+func (fs *ClusterFsFuse) CreateSymlink(ctx context.Context, op *fuseops.CreateSymlinkOp) (err error) {
 	fs.routeByInodeId(
 		op.Parent,
 		false,
@@ -369,7 +369,7 @@ func (fs *FsFuse) CreateSymlink(ctx context.Context, op *fuseops.CreateSymlinkOp
 	return err
 }
 
-func (fs *FsFuse) ReadSymlink(ctx context.Context, op *fuseops.ReadSymlinkOp) (err error) {
+func (fs *ClusterFsFuse) ReadSymlink(ctx context.Context, op *fuseops.ReadSymlinkOp) (err error) {
 	fs.routeByInodeId(
 		op.Inode,
 		false,
@@ -409,7 +409,7 @@ func (fs *FsFuse) ReadSymlink(ctx context.Context, op *fuseops.ReadSymlinkOp) (e
 
 // dir
 
-func (fs *FsFuse) MkDir(ctx context.Context, op *fuseops.MkDirOp) (err error) {
+func (fs *ClusterFsFuse) MkDir(ctx context.Context, op *fuseops.MkDirOp) (err error) {
 	fs.routeByInodeId(
 		op.Parent,
 		false,
@@ -484,7 +484,7 @@ func (fs *FsFuse) MkDir(ctx context.Context, op *fuseops.MkDirOp) (err error) {
 	return
 }
 
-func (fs *FsFuse) OpenDir(ctx context.Context, op *fuseops.OpenDirOp) (err error) {
+func (fs *ClusterFsFuse) OpenDir(ctx context.Context, op *fuseops.OpenDirOp) (err error) {
 	fs.routeByInodeId(
 		op.Inode,
 		true,
@@ -525,7 +525,7 @@ func (fs *FsFuse) OpenDir(ctx context.Context, op *fuseops.OpenDirOp) (err error
 	return
 }
 
-func (fs *FsFuse) ReadDir(ctx context.Context, op *fuseops.ReadDirOp) (err error) {
+func (fs *ClusterFsFuse) ReadDir(ctx context.Context, op *fuseops.ReadDirOp) (err error) {
 	fs.routeByDirHandle(
 		op.Handle,
 		func(inode *Inode) {
@@ -562,7 +562,7 @@ func (fs *FsFuse) ReadDir(ctx context.Context, op *fuseops.ReadDirOp) (err error
 	return
 }
 
-func (fs *FsFuse) ReleaseDirHandle(ctx context.Context, op *fuseops.ReleaseDirHandleOp) (err error) {
+func (fs *ClusterFsFuse) ReleaseDirHandle(ctx context.Context, op *fuseops.ReleaseDirHandleOp) (err error) {
 	fs.routeByDirHandle(
 		op.Handle,
 		func(inode *Inode) {
@@ -599,7 +599,7 @@ func (fs *FsFuse) ReleaseDirHandle(ctx context.Context, op *fuseops.ReleaseDirHa
 	return nil
 }
 
-func (fs *FsFuse) LookUpInode(ctx context.Context, op *fuseops.LookUpInodeOp) (err error) {
+func (fs *ClusterFsFuse) LookUpInode(ctx context.Context, op *fuseops.LookUpInodeOp) (err error) {
 	fs.routeByInodeId(
 		op.Parent,
 		false,
@@ -676,7 +676,7 @@ func (fs *FsFuse) LookUpInode(ctx context.Context, op *fuseops.LookUpInodeOp) (e
 	return
 }
 
-func (fs *FsFuse) RmDir(ctx context.Context, op *fuseops.RmDirOp) (err error) {
+func (fs *ClusterFsFuse) RmDir(ctx context.Context, op *fuseops.RmDirOp) (err error) {
 	fs.routeByInodeId(
 		op.Parent,
 		false,
@@ -716,7 +716,7 @@ func (fs *FsFuse) RmDir(ctx context.Context, op *fuseops.RmDirOp) (err error) {
 
 // both
 
-func (fs *FsFuse) GetInodeAttributes(ctx context.Context, op *fuseops.GetInodeAttributesOp) (err error) {
+func (fs *ClusterFsFuse) GetInodeAttributes(ctx context.Context, op *fuseops.GetInodeAttributesOp) (err error) {
 	fs.routeByInodeId(
 		op.Inode,
 		false,
@@ -768,7 +768,7 @@ func (fs *FsFuse) GetInodeAttributes(ctx context.Context, op *fuseops.GetInodeAt
 	return
 }
 
-func (fs *FsFuse) SetInodeAttributes(ctx context.Context, op *fuseops.SetInodeAttributesOp) (err error) {
+func (fs *ClusterFsFuse) SetInodeAttributes(ctx context.Context, op *fuseops.SetInodeAttributesOp) (err error) {
 	fs.routeByInodeId(
 		op.Inode,
 		false,
@@ -827,7 +827,7 @@ func (fs *FsFuse) SetInodeAttributes(ctx context.Context, op *fuseops.SetInodeAt
 	return
 }
 
-func (fs *FsFuse) ForgetInode(ctx context.Context, op *fuseops.ForgetInodeOp) (err error) {
+func (fs *ClusterFsFuse) ForgetInode(ctx context.Context, op *fuseops.ForgetInodeOp) (err error) {
 	fs.routeByInodeId(
 		op.Inode,
 		false,
