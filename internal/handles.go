@@ -29,7 +29,6 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 
-	"github.com/jacobsa/fuse"
 	"github.com/jacobsa/fuse/fuseops"
 	"golang.org/x/sys/unix"
 
@@ -468,7 +467,7 @@ func (inode *Inode) setMetadata(metadata map[string]*string) {
 			if modeStr != nil {
 				i, err := strconv.ParseUint(string(modeStr), 0, 32)
 				if err == nil {
-					fm := fuse.ConvertFileMode(uint32(i))
+					fm := fuseops.ConvertFileMode(uint32(i))
 					var mask os.FileMode
 					if inode.fs.flags.EnablePerms {
 						mask = os.ModePerm
@@ -513,7 +512,7 @@ func (inode *Inode) setFileMode(newMode os.FileMode) (changed bool, err error) {
 		inode.setUserMeta(inode.fs.flags.RdevAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Rdev)))
 	}
 	if inode.Attributes.Mode != defaultMode {
-		inode.setUserMeta(inode.fs.flags.FileModeAttr, []byte(fmt.Sprintf("%d", fuse.ConvertGolangMode(inode.Attributes.Mode))))
+		inode.setUserMeta(inode.fs.flags.FileModeAttr, []byte(fmt.Sprintf("%d", fuseops.ConvertGolangMode(inode.Attributes.Mode))))
 	} else {
 		inode.setUserMeta(inode.fs.flags.FileModeAttr, nil)
 	}
