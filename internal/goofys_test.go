@@ -1006,7 +1006,7 @@ func (s *GoofysTest) TestReadFiles(t *C) {
 	entries := s.readDirFully(t, dh)
 
 	for _, en := range entries {
-		if en.Type == fuseutil.DT_File && (en.Name == "file1" || en.Name == "file2" || en.Name == "zero") {
+		if !en.IsDir && (en.Name == "file1" || en.Name == "file2" || en.Name == "zero") {
 			in, err := parent.LookUp(en.Name, false)
 			t.Assert(err, IsNil)
 

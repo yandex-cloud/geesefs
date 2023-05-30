@@ -28,7 +28,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 
 	"github.com/jacobsa/fuse/fuseops"
-	"github.com/jacobsa/fuse/fuseutil"
 )
 
 type SlurpGap struct {
@@ -64,7 +63,7 @@ type DirInodeData struct {
 type DirHandleEntry struct {
 	Name   string
 	Inode  fuseops.InodeID
-	Type   fuseutil.DirentType
+	IsDir  bool
 	Offset fuseops.DirOffset
 }
 
@@ -564,9 +563,7 @@ func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffs
 		Offset: offset + 1,
 	}
 	if child.isDir() {
-		en.Type = fuseutil.DT_Directory
-	} else {
-		en.Type = fuseutil.DT_File
+		en.IsDir = true
 	}
 
 	if dh.inode.dir.lastFromCloud != nil && en.Name == *dh.inode.dir.lastFromCloud {

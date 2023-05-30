@@ -1295,9 +1295,13 @@ func (fs *Goofys) OpenDir(
 }
 
 func makeDirEntry(en *DirHandleEntry) fuseutil.Dirent {
+	dt := fuseutil.DT_File
+	if en.IsDir {
+		dt = fuseutil.DT_Directory
+	}
 	return fuseutil.Dirent{
 		Name:   en.Name,
-		Type:   en.Type,
+		Type:   dt,
 		Inode:  en.Inode,
 		Offset: en.Offset,
 	}
