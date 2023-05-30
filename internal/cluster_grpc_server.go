@@ -5,21 +5,20 @@ import (
 	"net"
 
 	"github.com/yandex-cloud/geesefs/api/common"
-	. "github.com/yandex-cloud/geesefs/api/common"
 	"github.com/yandex-cloud/geesefs/internal/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 )
 
-var grpcLog = GetLogger("grpc")
+var grpcLog = common.GetLogger("grpc")
 
 type GrpcServer struct {
 	*grpc.Server
-	flags *FlagStorage
+	flags *common.FlagStorage
 }
 
-func NewGrpcServer(flags *FlagStorage) *GrpcServer {
+func NewGrpcServer(flags *common.FlagStorage) *GrpcServer {
 	return &GrpcServer{
 		Server: grpc.NewServer(grpc.ChainUnaryInterceptor(
 			LogServerInterceptor,

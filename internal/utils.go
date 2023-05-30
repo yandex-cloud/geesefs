@@ -19,8 +19,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"github.com/jacobsa/fuse"
 )
 
 var TIME_MAX = time.Unix(1<<63-62135596801, 999999999)
@@ -153,18 +151,6 @@ func Dup(value []byte) []byte {
 	ret := make([]byte, len(value))
 	copy(ret, value)
 	return ret
-}
-
-func TryUnmount(mountPoint string) (err error) {
-	for i := 0; i < 20; i++ {
-		err = fuse.Unmount(mountPoint)
-		if err != nil {
-			time.Sleep(time.Second)
-		} else {
-			break
-		}
-	}
-	return
 }
 
 type empty struct{}

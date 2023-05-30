@@ -2009,3 +2009,129 @@ func (fs *Goofys) Fallocate(
 func (fs *Goofys) SetConnection(conn *fuse.Connection) {
 	fs.connection = conn
 }
+
+func MountFuse(
+	ctx context.Context,
+	bucketName string,
+	flags *FlagStorage) (fs *Goofys, mfs *fuse.MountedFileSystem, err error) {
+
+	if flags.DebugS3 {
+		SetCloudLogLevel(logrus.DebugLevel)
+	}
+	// Mount the file system.
+	mountCfg := &fuse.MountConfig{
+		FSName:                  bucketName,
+		Subtype:                 "geesefs",
+		Options:                 flags.MountOptions,
+		ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
+		DisableWritebackCaching: true,
+		UseVectoredRead:         true,
+	}
+
+	if flags.DebugFuse {
+		fuseLog := GetLogger("fuse")
+		fuseLog.Level = logrus.DebugLevel
+		mountCfg.DebugLogger = GetStdLogger(fuseLog, logrus.DebugLevel)
+	}
+
+	if flags.DebugFuse || flags.DebugMain {
+		log.Level = logrus.DebugLevel
+	}
+
+	if flags.Backend == nil {
+		if spec, err := ParseBucketSpec(bucketName); err == nil {
+			switch spec.Scheme {
+			case "adl":
+				auth, err := AzureAuthorizerConfig{
+					Log: GetLogger("adlv1"),
+				}.Authorizer()
+				if err != nil {
+					err = fmt.Errorf("couldn't load azure credentials: %v",
+						err)
+					return nil, nil, err
+				}
+				flags.Backend = &ADLv1Config{
+					Endpoint:   spec.Bucket,
+					Authorizer: auth,
+				}
+				// adlv1 doesn't really have bucket
+				// names, but we will rebuild the
+				// prefix
+				bucketName = ""
+				if spec.Prefix != "" {
+					bucketName = ":" + spec.Prefix
+				}
+			case "wasb":
+				config, err := AzureBlobConfig(flags.Endpoint, spec.Bucket, "blob")
+				if err != nil {
+					return nil, nil, err
+				}
+				flags.Backend = &config
+				if config.Container != "" {
+					bucketName = config.Container
+				} else {
+					bucketName = spec.Bucket
+				}
+				if config.Prefix != "" {
+					spec.Prefix = config.Prefix
+				}
+				if spec.Prefix != "" {
+					bucketName += ":" + spec.Prefix
+				}
+			case "abfs":
+				config, err := AzureBlobConfig(flags.Endpoint, spec.Bucket, "dfs")
+				if err != nil {
+					return nil, nil, err
+				}
+				flags.Backend = &config
+				if config.Container != "" {
+					bucketName = config.Container
+				} else {
+					bucketName = spec.Bucket
+				}
+				if config.Prefix != "" {
+					spec.Prefix = config.Prefix
+				}
+				if spec.Prefix != "" {
+					bucketName += ":" + spec.Prefix
+				}
+
+				flags.Backend = &ADLv2Config{
+					Endpoint:   config.Endpoint,
+					Authorizer: &config,
+				}
+				bucketName = spec.Bucket
+				if spec.Prefix != "" {
+					bucketName += ":" + spec.Prefix
+				}
+			}
+		}
+	}
+
+	fs = NewGoofys(ctx, bucketName, flags)
+	if fs == nil {
+		err = fmt.Errorf("Mount: initialization failed")
+		return
+	}
+	server := fuseutil.NewFileSystemServer(fs)
+
+	mfs, err = fuse.Mount(flags.MountPoint, server, mountCfg)
+	if err != nil {
+		err = fmt.Errorf("Mount: %v", err)
+		return
+	}
+
+	return
+}
+
+func TryUnmount(mountPoint string) (err error) {
+	for i := 0; i < 20; i++ {
+		err = fuse.Unmount(mountPoint)
+		if err != nil {
+			time.Sleep(time.Second)
+		} else {
+			break
+		}
+	}
+	return
+}

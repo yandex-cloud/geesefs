@@ -16,7 +16,6 @@
 package main
 
 import (
-	geesefs "github.com/yandex-cloud/geesefs/api"
 	. "github.com/yandex-cloud/geesefs/api/common"
 	. "github.com/yandex-cloud/geesefs/internal"
 	"github.com/yandex-cloud/geesefs/internal/pb"
@@ -108,10 +107,10 @@ func mount(
 	bucketName string,
 	flags *FlagStorage) (fs *Goofys, mfs *fuse.MountedFileSystem, conns *ConnPool, err error) {
 	if flags.ClusterMode {
-		return geesefs.MountCluster(ctx, bucketName, flags)
+		return MountCluster(ctx, bucketName, flags)
 
 	} else {
-		fs, mfs, err = geesefs.Mount(ctx, bucketName, flags)
+		fs, mfs, err = MountFuse(ctx, bucketName, flags)
 		conns = nil
 		return
 	}
