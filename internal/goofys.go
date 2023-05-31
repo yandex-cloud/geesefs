@@ -59,7 +59,6 @@ type Goofys struct {
 
 	umask uint32
 
-	gcs       bool
 	rootAttrs InodeAttributes
 
 	bufferPool *BufferPool
@@ -239,7 +238,6 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		log.Errorf("Unable to setup backend: %v", err)
 		return nil
 	}
-	_, fs.gcs = cloud.Delegate().(*GCS3)
 
 	randomObjectName := prefix + (RandStringBytesMaskImprSrc(32))
 	err = cloud.Init(randomObjectName)
