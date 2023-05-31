@@ -1711,6 +1711,66 @@ func (parent *Inode) findChildMaxTime() (maxMtime, maxCtime time.Time) {
 	return
 }
 
+func (parent *Inode) LookUpCached(name string) (inode *Inode, err error) {
+	parent.mu.Lock()
+	ok := false
+	inode = parent.findChildUnlocked(name)
+	if inode != nil {
+		ok = true
+		if expired(inode.AttrTime, parent.fs.flags.StatCacheTTL) {
+			ok = false
+			if inode.CacheState != ST_CACHED ||
+				inode.isDir() && atomic.LoadInt64(&inode.dir.ModifiedChildren) > 0 {
+				// we have an open file handle, object
+				// in S3 may not represent the true
+				// state of the file anyway, so just
+				// return what we know which is
+				// potentially more accurate
+				ok = true
+			} else {
+				inode.logFuse("lookup expired")
+			}
+		}
+	} else {
+		ok = false
+		if parent.dir.DeletedChildren != nil {
+			if _, ok := parent.dir.DeletedChildren[name]; ok {
+				// File is deleted locally
+				parent.mu.Unlock()
+				return nil, syscall.ENOENT
+			}
+		}
+		if !expired(parent.dir.DirTime, parent.fs.flags.StatCacheTTL) {
+			// Don't recheck from the server if directory cache is actual
+			parent.mu.Unlock()
+			return nil, syscall.ENOENT
+		}
+	}
+	parent.mu.Unlock()
+	if !ok {
+		inode, err = parent.recheckInode(inode, name)
+		err = mapAwsError(err)
+		if err != nil {
+			return nil, err
+		}
+		if inode == nil {
+			return nil, syscall.ENOENT
+		}
+	}
+	return inode, nil
+}
+
+func (parent *Inode) recheckInode(inode *Inode, name string) (newInode *Inode, err error) {
+	newInode, err = parent.LookUp(name, inode == nil)
+	if err != nil {
+		if inode != nil {
+			parent.removeChild(inode)
+		}
+		return nil, err
+	}
+	return newInode, nil
+}
+
 func (parent *Inode) LookUp(name string, doSlurp bool) (*Inode, error) {
 	_, parentKey := parent.cloud()
 	key := appendChildName(parentKey, name)

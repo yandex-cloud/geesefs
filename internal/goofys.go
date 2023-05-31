@@ -808,7 +808,7 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 		}
 		return mappedErr
 	}
-	inode, err := fs.recheckInode(parent, inode, name)
+	inode, err := parent.recheckInode(inode, name)
 	mappedErr = mapAwsError(err)
 	if fs.connection != nil {
 		// Send notifications from another goroutine to prevent deadlocks
@@ -1127,58 +1127,15 @@ func (fs *Goofys) LookUpInode(
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
-	var inode *Inode
-	var ok bool
 	defer func() { fuseLog.Debugf("<-- LookUpInode %v %v %v", op.Parent, op.Name, err) }()
 
 	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
 	fs.mu.RUnlock()
 
-	parent.mu.Lock()
-	inode = parent.findChildUnlocked(op.Name)
-	if inode != nil {
-		ok = true
-		if expired(inode.AttrTime, fs.flags.StatCacheTTL) {
-			ok = false
-			if inode.CacheState != ST_CACHED ||
-				inode.isDir() && atomic.LoadInt64(&inode.dir.ModifiedChildren) > 0 {
-				// we have an open file handle, object
-				// in S3 may not represent the true
-				// state of the file anyway, so just
-				// return what we know which is
-				// potentially more accurate
-				ok = true
-			} else {
-				inode.logFuse("lookup expired")
-			}
-		}
-	} else {
-		ok = false
-		if parent.dir.DeletedChildren != nil {
-			if _, ok := parent.dir.DeletedChildren[op.Name]; ok {
-				// File is deleted locally
-				parent.mu.Unlock()
-				return syscall.ENOENT
-			}
-		}
-		if !expired(parent.dir.DirTime, fs.flags.StatCacheTTL) {
-			// Don't recheck from the server if directory cache is actual
-			parent.mu.Unlock()
-			return syscall.ENOENT
-		}
-	}
-	parent.mu.Unlock()
-
-	if !ok {
-		inode, err = fs.recheckInode(parent, inode, op.Name)
-		err = mapAwsError(err)
-		if err != nil {
-			return
-		}
-		if inode == nil {
-			return syscall.ENOENT
-		}
+	inode, err := parent.LookUpCached(op.Name)
+	if err != nil {
+		return err
 	}
 
 	inode.Ref()
@@ -1188,17 +1145,6 @@ func (fs *Goofys) LookUpInode(
 	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 
 	return
-}
-
-func (fs *Goofys) recheckInode(parent *Inode, inode *Inode, name string) (newInode *Inode, err error) {
-	newInode, err = parent.LookUp(name, inode == nil)
-	if err != nil {
-		if inode != nil {
-			parent.removeChild(inode)
-		}
-		return nil, err
-	}
-	return newInode, nil
 }
 
 // LOCKS_REQUIRED(parent.mu)
