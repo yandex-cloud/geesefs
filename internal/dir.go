@@ -651,6 +651,35 @@ func (dh *DirHandle) loadListing() error {
 }
 
 // LOCKS_REQUIRED(dh.mu)
+func (dh *DirHandle) Seek(newOffset fuseops.DirOffset) {
+	if newOffset != 0 && newOffset != dh.lastExternalOffset {
+		// Do our best to support directory seeks even though we can't guarantee
+		// consistent listings in this case (i.e. files may be duplicated or skipped on changes)
+		// 'Normal' software doesn't seek within the directory.
+		// nfs-kernel-server, though, does: it closes the dir between paged listing calls.
+		fuseLog.Debugf("Directory seek from %v to %v in %v", newOffset, dh.lastExternalOffset, dh.inode.FullName())
+		dh.inode.mu.Lock()
+		dh.lastExternalOffset = newOffset
+		dh.lastInternalOffset = int(newOffset)
+		if dh.lastInternalOffset > len(dh.inode.dir.Children) {
+			dh.lastInternalOffset = len(dh.inode.dir.Children)
+		}
+		if len(dh.inode.dir.Children) > 0 {
+			dh.inode.dir.Children[dh.lastInternalOffset-1].mu.Lock()
+			dh.lastName = dh.inode.dir.Children[dh.lastInternalOffset-1].Name
+			dh.inode.dir.Children[dh.lastInternalOffset-1].mu.Unlock()
+		} else {
+			dh.lastName = ""
+		}
+		dh.inode.mu.Unlock()
+	} else if newOffset == 0 {
+		dh.lastExternalOffset = 0
+		dh.lastInternalOffset = 0
+		dh.lastName = ""
+	}
+}
+
+// LOCKS_REQUIRED(dh.mu)
 // LOCKS_EXCLUDED(dh.inode.mu)
 // LOCKS_EXCLUDED(dh.inode.fs)
 func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, err error) {
