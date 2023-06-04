@@ -50,9 +50,6 @@ import (
 // close-to-open.
 
 type Goofys struct {
-	fuseutil.NotImplementedFileSystem
-	connection *fuse.Connection
-
 	bucket string
 
 	flags *FlagStorage
@@ -114,6 +111,8 @@ type Goofys struct {
 	diskFdCount int64
 
 	stats OpStats
+
+	NotifyCallback func(notifications []interface{})
 }
 
 type OpStats struct {
@@ -125,6 +124,12 @@ type OpStats struct {
 	metadataWrites int64
 	noops int64
 	ts time.Time
+}
+
+type GoofysFuse struct {
+	fuseutil.NotImplementedFileSystem
+	*Goofys
+	connection *fuse.Connection
 }
 
 var s3Log = GetLogger("s3")
@@ -296,6 +301,23 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 	}
 
 	return fs
+}
+
+func NewGoofysFuse(fs *Goofys) *GoofysFuse {
+	fsint := &GoofysFuse{
+		Goofys: fs,
+	}
+	fs.NotifyCallback = func(notifications []interface{}) {
+		if fsint.connection != nil {
+			// Notify kernel in a separate thread/goroutine
+			go func() {
+				for _, n := range notifications {
+					fsint.connection.Notify(n)
+				}
+			}()
+		}
+	}
+	return fsint
 }
 
 // from https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-golang
@@ -766,6 +788,7 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 	inode.mu.Unlock()
 	inode.resetDirTimeRec()
 	var mappedErr error
+	var notifications []interface{}
 	if parent == nil {
 		// For regular directories it's enough to send one invalidation
 		// message, the kernel will send forgets for their children and
@@ -776,7 +799,6 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 		// directory.
 		dh := inode.OpenDir()
 		dh.mu.Lock()
-		var notifications []interface{}
 		for {
 			en, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
 			if err != nil {
@@ -798,35 +820,24 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 		}
 		dh.CloseDir()
 		dh.mu.Unlock()
-		// Send notifications from another goroutine to prevent deadlocks
-		if fs.connection != nil {
-			go func() {
-				for _, n := range notifications {
-					fs.connection.Notify(n)
-				}
-			}()
-		}
+		fs.NotifyCallback(notifications)
 		return mappedErr
 	}
 	inode, err := parent.recheckInode(inode, name)
 	mappedErr = mapAwsError(err)
-	if fs.connection != nil {
-		// Send notifications from another goroutine to prevent deadlocks
-		go func() {
-			if mappedErr == syscall.ENOENT {
-				fs.connection.Notify(&fuseops.NotifyDelete{
-					Parent: parentId,
-					Child: inodeId,
-					Name: name,
-				})
-			} else {
-				fs.connection.Notify(&fuseops.NotifyInvalEntry{
-					Parent: parentId,
-					Name: name,
-				})
-			}
-		}()
+	if mappedErr == syscall.ENOENT {
+		notifications = append(notifications, &fuseops.NotifyDelete{
+			Parent: parentId,
+			Child: inodeId,
+			Name: name,
+		})
+	} else {
+		notifications = append(notifications, &fuseops.NotifyInvalEntry{
+			Parent: parentId,
+			Name: name,
+		})
 	}
+	fs.NotifyCallback(notifications)
 	if mappedErr == syscall.ENOENT {
 		// We don't mind if the file disappeared
 		return nil
@@ -834,7 +845,7 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 	return mappedErr
 }
 
-func (fs *Goofys) StatFS(
+func (fs *GoofysFuse) StatFS(
 	ctx context.Context,
 	op *fuseops.StatFSOp) (err error) {
 
@@ -854,7 +865,7 @@ func (fs *Goofys) StatFS(
 	return
 }
 
-func (fs *Goofys) GetInodeAttributes(
+func (fs *GoofysFuse) GetInodeAttributes(
 	ctx context.Context,
 	op *fuseops.GetInodeAttributesOp) (err error) {
 
@@ -879,7 +890,7 @@ func (fs *Goofys) GetInodeAttributes(
 	return
 }
 
-func (fs *Goofys) GetXattr(ctx context.Context,
+func (fs *GoofysFuse) GetXattr(ctx context.Context,
 	op *fuseops.GetXattrOp) (err error) {
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
@@ -910,7 +921,7 @@ func (fs *Goofys) GetXattr(ctx context.Context,
 	return
 }
 
-func (fs *Goofys) ListXattr(ctx context.Context,
+func (fs *GoofysFuse) ListXattr(ctx context.Context,
 	op *fuseops.ListXattrOp) (err error) {
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
@@ -948,7 +959,7 @@ func (fs *Goofys) ListXattr(ctx context.Context,
 	return
 }
 
-func (fs *Goofys) RemoveXattr(ctx context.Context,
+func (fs *GoofysFuse) RemoveXattr(ctx context.Context,
 	op *fuseops.RemoveXattrOp) (err error) {
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
@@ -971,7 +982,7 @@ func (fs *Goofys) RemoveXattr(ctx context.Context,
 	return
 }
 
-func (fs *Goofys) SetXattr(ctx context.Context,
+func (fs *GoofysFuse) SetXattr(ctx context.Context,
 	op *fuseops.SetXattrOp) (err error) {
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
@@ -998,7 +1009,7 @@ func (fs *Goofys) SetXattr(ctx context.Context,
 	return
 }
 
-func (fs *Goofys) CreateSymlink(ctx context.Context,
+func (fs *GoofysFuse) CreateSymlink(ctx context.Context,
 	op *fuseops.CreateSymlinkOp) (err error) {
 	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
@@ -1019,7 +1030,7 @@ func (fs *Goofys) CreateSymlink(ctx context.Context,
 	return
 }
 
-func (fs *Goofys) ReadSymlink(ctx context.Context,
+func (fs *GoofysFuse) ReadSymlink(ctx context.Context,
 	op *fuseops.ReadSymlinkOp) (err error) {
 	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
@@ -1121,7 +1132,7 @@ func expired(cache time.Time, ttl time.Duration) bool {
 	return !cache.Add(ttl).After(now)
 }
 
-func (fs *Goofys) LookUpInode(
+func (fs *GoofysFuse) LookUpInode(
 	ctx context.Context,
 	op *fuseops.LookUpInodeOp) (err error) {
 
@@ -1192,7 +1203,7 @@ func (fs *Goofys) addDotAndDotDot(dir *Inode) {
 	fs.insertInode(dir, dot)
 }
 
-func (fs *Goofys) ForgetInode(
+func (fs *GoofysFuse) ForgetInode(
 	ctx context.Context,
 	op *fuseops.ForgetInodeOp) (err error) {
 
@@ -1209,7 +1220,7 @@ func (fs *Goofys) ForgetInode(
 	return
 }
 
-func (fs *Goofys) OpenDir(
+func (fs *GoofysFuse) OpenDir(
 	ctx context.Context,
 	op *fuseops.OpenDirOp) (err error) {
 
@@ -1255,7 +1266,7 @@ func makeDirEntry(en *DirHandleEntry) fuseutil.Dirent {
 	}
 }
 
-func (fs *Goofys) ReadDir(
+func (fs *GoofysFuse) ReadDir(
 	ctx context.Context,
 	op *fuseops.ReadDirOp) (err error) {
 
@@ -1358,7 +1369,7 @@ func (fs *Goofys) completeInflightListing(id int) map[string]bool {
 	return m
 }
 
-func (fs *Goofys) ReleaseDirHandle(
+func (fs *GoofysFuse) ReleaseDirHandle(
 	ctx context.Context,
 	op *fuseops.ReleaseDirHandleOp) (err error) {
 
@@ -1379,7 +1390,7 @@ func (fs *Goofys) ReleaseDirHandle(
 	return
 }
 
-func (fs *Goofys) OpenFile(
+func (fs *GoofysFuse) OpenFile(
 	ctx context.Context,
 	op *fuseops.OpenFileOp) (err error) {
 	fs.mu.RLock()
@@ -1424,7 +1435,7 @@ func (fs *Goofys) OpenFile(
 	return
 }
 
-func (fs *Goofys) ReadFile(
+func (fs *GoofysFuse) ReadFile(
 	ctx context.Context,
 	op *fuseops.ReadFileOp) (err error) {
 
@@ -1440,7 +1451,7 @@ func (fs *Goofys) ReadFile(
 	return
 }
 
-func (fs *Goofys) SyncFile(
+func (fs *GoofysFuse) SyncFile(
 	ctx context.Context,
 	op *fuseops.SyncFileOp) (err error) {
 
@@ -1464,7 +1475,7 @@ func (fs *Goofys) SyncFile(
 	return
 }
 
-func (fs *Goofys) FlushFile(
+func (fs *GoofysFuse) FlushFile(
 	ctx context.Context,
 	op *fuseops.FlushFileOp) (err error) {
 
@@ -1476,7 +1487,7 @@ func (fs *Goofys) FlushFile(
 	return
 }
 
-func (fs *Goofys) ReleaseFileHandle(
+func (fs *GoofysFuse) ReleaseFileHandle(
 	ctx context.Context,
 	op *fuseops.ReleaseFileHandleOp) (err error) {
 	fs.mu.Lock()
@@ -1495,7 +1506,7 @@ func (fs *Goofys) ReleaseFileHandle(
 	return
 }
 
-func (fs *Goofys) CreateFile(
+func (fs *GoofysFuse) CreateFile(
 	ctx context.Context,
 	op *fuseops.CreateFileOp) (err error) {
 
@@ -1539,7 +1550,7 @@ func (fs *Goofys) CreateFile(
 // MkNode is required for NFS even with regular files
 // because kernel nfsd uses vfs_create() -> fuse_create() -> fuse_mknod()
 // and then separate fuse_open() for file creation instead of fuse_create_open()
-func (fs *Goofys) MkNode(
+func (fs *GoofysFuse) MkNode(
 	ctx context.Context,
 	op *fuseops.MkNodeOp) (err error) {
 
@@ -1583,7 +1594,7 @@ func (fs *Goofys) MkNode(
 	return
 }
 
-func (fs *Goofys) MkDir(
+func (fs *GoofysFuse) MkDir(
 	ctx context.Context,
 	op *fuseops.MkDirOp) (err error) {
 
@@ -1618,7 +1629,7 @@ func (fs *Goofys) MkDir(
 	return
 }
 
-func (fs *Goofys) RmDir(
+func (fs *GoofysFuse) RmDir(
 	ctx context.Context,
 	op *fuseops.RmDirOp) (err error) {
 
@@ -1639,7 +1650,7 @@ func (fs *Goofys) RmDir(
 	return
 }
 
-func (fs *Goofys) SetInodeAttributes(
+func (fs *GoofysFuse) SetInodeAttributes(
 	ctx context.Context,
 	op *fuseops.SetInodeAttributesOp) (err error) {
 
@@ -1737,7 +1748,7 @@ func (fs *Goofys) SetInodeAttributes(
 	return
 }
 
-func (fs *Goofys) WriteFile(
+func (fs *GoofysFuse) WriteFile(
 	ctx context.Context,
 	op *fuseops.WriteFileOp) (err error) {
 
@@ -1761,7 +1772,7 @@ func (fs *Goofys) WriteFile(
 	return
 }
 
-func (fs *Goofys) Unlink(
+func (fs *GoofysFuse) Unlink(
 	ctx context.Context,
 	op *fuseops.UnlinkOp) (err error) {
 
@@ -1783,7 +1794,7 @@ func (fs *Goofys) Unlink(
 
 // rename("from", "to") causes the kernel to send lookup of "from" and
 // "to" prior to sending rename to us
-func (fs *Goofys) Rename(
+func (fs *GoofysFuse) Rename(
 	ctx context.Context,
 	op *fuseops.RenameOp) (err error) {
 
@@ -1856,7 +1867,7 @@ const (
 	FALLOC_FL_INSERT_RANGE   = uint32(0x20)
 )
 
-func (fs *Goofys) Fallocate(
+func (fs *GoofysFuse) Fallocate(
 	ctx context.Context,
 	op *fuseops.FallocateOp) (err error) {
 
@@ -1930,7 +1941,7 @@ func (fs *Goofys) Fallocate(
 	return
 }
 
-func (fs *Goofys) SetConnection(conn *fuse.Connection) {
+func (fs *GoofysFuse) SetConnection(conn *fuse.Connection) {
 	fs.connection = conn
 }
 
@@ -2039,7 +2050,8 @@ func MountFuse(
 		err = fmt.Errorf("Mount: initialization failed")
 		return
 	}
-	server := fuseutil.NewFileSystemServer(fs)
+	fsint := NewGoofysFuse(fs)
+	server := fuseutil.NewFileSystemServer(fsint)
 
 	mfs, err = fuse.Mount(flags.MountPoint, server, mountCfg)
 	if err != nil {

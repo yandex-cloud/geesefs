@@ -123,7 +123,7 @@ func currentGid() uint32 {
 }
 
 type GoofysTest struct {
-	fs        *Goofys
+	fs        *GoofysFuse
 	ctx       context.Context
 	awsConfig *aws.Config
 	cloud     StorageBackend
@@ -724,7 +724,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 	s.setupDefaultEnv(t, "")
 
 	if hasEnv("EVENTUAL_CONSISTENCY") {
-		s.fs = newGoofys(context.Background(), bucket, flags,
+		fs := newGoofys(context.Background(), bucket, flags,
 			func(bucket string, flags *FlagStorage) (StorageBackend, error) {
 				cloud, err := NewBackend(bucket, flags)
 				if err != nil {
@@ -732,8 +732,10 @@ func (s *GoofysTest) SetUpTest(t *C) {
 				}
 				return NewS3BucketEventualConsistency(cloud.(*S3Backend)), nil
 			})
+		s.fs = NewGoofysFuse(fs)
 	} else {
-		s.fs = NewGoofys(context.Background(), bucket, flags)
+		fs := NewGoofys(context.Background(), bucket, flags)
+		s.fs = NewGoofysFuse(fs)
 	}
 	t.Assert(s.fs, NotNil)
 
@@ -1112,7 +1114,7 @@ func (s *GoofysTest) TestUnlink(t *C) {
 }
 
 type FileHandleReader struct {
-	fs     *Goofys
+	fs     *GoofysFuse
 	fh     *FileHandle
 	offset int64
 }
@@ -2264,17 +2266,20 @@ func (s *GoofysTest) TestPutMimeType(t *C) {
 }
 
 func (s *GoofysTest) TestBucketPrefixSlash(t *C) {
-	s.fs = NewGoofys(context.Background(), s.fs.bucket+":dir2", s.fs.flags)
+	fs := NewGoofys(context.Background(), s.fs.bucket+":dir2", s.fs.flags)
+	s.fs = NewGoofysFuse(fs)
 	t.Assert(s.getRoot(t).dir.mountPrefix, Equals, "dir2/")
 
-	s.fs = NewGoofys(context.Background(), s.fs.bucket+":dir2///", s.fs.flags)
+	fs = NewGoofys(context.Background(), s.fs.bucket+":dir2///", s.fs.flags)
+	s.fs = NewGoofysFuse(fs)
 	t.Assert(s.getRoot(t).dir.mountPrefix, Equals, "dir2/")
 }
 
 func (s *GoofysTest) TestFuseWithPrefix(t *C) {
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
-	s.fs = NewGoofys(context.Background(), s.fs.bucket+":testprefix", s.fs.flags)
+	fs := NewGoofys(context.Background(), s.fs.bucket+":testprefix", s.fs.flags)
+	s.fs = NewGoofysFuse(fs)
 
 	s.runFuseTest(t, mountPoint, true, s.tmp+"/fuse-test.sh", mountPoint)
 }
@@ -2343,7 +2348,8 @@ func (s *GoofysTest) anonymous(t *C) {
 		t.Skip("cloud does not support canned ACL")
 	}
 
-	s.fs = NewGoofys(context.Background(), bucket, s.fs.flags)
+	fs := NewGoofys(context.Background(), bucket, s.fs.flags)
+	s.fs = NewGoofysFuse(fs)
 	t.Assert(s.fs, NotNil)
 
 	// should have auto-detected by S3 backend
@@ -2991,18 +2997,18 @@ func (s *GoofysTest) TestRenameBeforeCloseFuse(t *C) {
 func (s *GoofysTest) TestInodeInsert(t *C) {
 	root := s.getRoot(t)
 
-	in := NewInode(s.fs, root, "2")
+	in := NewInode(s.fs.Goofys, root, "2")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
 	t.Assert(root.dir.Children[2].Name, Equals, "2")
 
-	in = NewInode(s.fs, root, "1")
+	in = NewInode(s.fs.Goofys, root, "1")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
 	t.Assert(root.dir.Children[2].Name, Equals, "1")
 	t.Assert(root.dir.Children[3].Name, Equals, "2")
 
-	in = NewInode(s.fs, root, "4")
+	in = NewInode(s.fs.Goofys, root, "4")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
 	t.Assert(root.dir.Children[2].Name, Equals, "1")

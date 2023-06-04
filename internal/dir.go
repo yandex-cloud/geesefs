@@ -728,13 +728,8 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		}
 	}
 
-	if len(notifications) > 0 && fs.connection != nil {
-		// Notify kernel in a separate thread/goroutine
-		go func() {
-			for _, n := range notifications {
-				fs.connection.Notify(n)
-			}
-		}()
+	if len(notifications) > 0 {
+		fs.NotifyCallback(notifications)
 	}
 
 	// May be -1 if we remove inodes above
