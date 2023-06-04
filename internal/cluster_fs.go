@@ -36,7 +36,7 @@ type ClusterFs struct {
 	Flags  *FlagStorage
 	Conns  *ConnPool
 	Goofys *Goofys
-	mfs    MountedFS
+	mfs    Joinable
 
 	stat Stat
 }

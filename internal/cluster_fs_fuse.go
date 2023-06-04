@@ -979,3 +979,7 @@ func (fs *ClusterFs) Join(ctx context.Context) error {
 	}
 	return nil
 }
+
+func (fs *ClusterFs) Unmount() error {
+	return TryUnmount(fs.Flags.MountPoint)
+}

@@ -29,7 +29,6 @@ import (
 
 	"context"
 
-	"github.com/kardianos/osext"
 	"github.com/urfave/cli"
 
 	daemon "github.com/sevlyar/go-daemon"
@@ -40,16 +39,16 @@ import (
 
 var log = GetLogger("main")
 
-func registerSIGINTHandler(fs *Goofys, flags *FlagStorage) {
+func registerSIGINTHandler(fs *Goofys, mfs MountedFS, flags *FlagStorage) {
 	// Register for SIGINT.
 	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1)
+	signal.Notify(signalChan, signalsToHandle...)
 
 	// Start a goroutine that will unmount when the signal is received.
 	go func() {
 		for {
 			s := <-signalChan
-			if s == syscall.SIGUSR1 {
+			if isSigUsr1(s) {
 				log.Infof("Received %v", s)
 				fs.SigUsr1()
 				continue
@@ -57,7 +56,7 @@ func registerSIGINTHandler(fs *Goofys, flags *FlagStorage) {
 
 			log.Infof("Received %v, attempting to unmount...", s)
 
-			err := TryUnmount(flags.MountPoint)
+			err := mfs.Unmount()
 			if err != nil {
 				log.Errorf("Failed to unmount in response to %v: %v", s, err)
 			} else {
@@ -69,72 +68,7 @@ func registerSIGINTHandler(fs *Goofys, flags *FlagStorage) {
 	}()
 }
 
-var waitedForSignal os.Signal
-
-func waitForSignal(wg *sync.WaitGroup) {
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGUSR1, syscall.SIGUSR2)
-
-	wg.Add(1)
-	go func() {
-		waitedForSignal = <-signalChan
-		wg.Done()
-	}()
-}
-
-func kill(pid int, s os.Signal) (err error) {
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-
-	defer p.Release()
-
-	err = p.Signal(s)
-	if err != nil {
-		return err
-	}
-	return
-}
-
-// Mount the file system based on the supplied arguments, returning a
-// MountedFS that can be joined to wait for unmounting.
-func mount(
-	ctx context.Context,
-	bucketName string,
-	flags *FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
-	if flags.ClusterMode {
-		return MountCluster(ctx, bucketName, flags)
-	} else {
-		return MountFuse(ctx, bucketName, flags)
-	}
-}
-
-func messagePath() {
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "PATH=") {
-			return
-		}
-	}
-
-	// mount -a seems to run goofys without PATH
-	// usually fusermount is in /bin
-	os.Setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-}
-
-func messageArg0() {
-	var err error
-	os.Args[0], err = osext.Executable()
-	if err != nil {
-		panic(fmt.Sprintf("Unable to discover current executable: %v", err))
-	}
-}
-
-var Version = "use `make build' to fill version hash correctly"
-
 func main() {
-	VersionHash = Version
-
 	messagePath()
 
 	app := NewApp()
@@ -195,15 +129,12 @@ func main() {
 			if child != nil {
 				// attempt to wait for child to notify parent
 				wg.Wait()
-				if waitedForSignal == syscall.SIGUSR1 {
+				if waitedForSignalOk() {
 					return
 				} else {
 					return syscall.EINVAL
 				}
 			} else {
-				// kill our own waiting goroutine
-				kill(os.Getpid(), syscall.SIGUSR1)
-				wg.Wait()
 				defer ctx.Release()
 			}
 
@@ -233,24 +164,24 @@ func main() {
 
 		if err != nil {
 			if !flags.Foreground {
-				kill(os.Getppid(), syscall.SIGUSR2)
+				notifyParent(false)
 			}
 			log.Fatalf("Mounting file system: %v", err)
 			// fatal also terminates itself
 		} else {
 			if !flags.Foreground {
-				kill(os.Getppid(), syscall.SIGUSR1)
+				notifyParent(true)
 			}
 			log.Println("File system has been successfully mounted.")
 			// Let the user unmount with Ctrl-C (SIGINT)
-			registerSIGINTHandler(fs, flags)
+			registerSIGINTHandler(fs, mfs, flags)
 
 			// Drop root privileges
 			if flags.Setuid != 0 {
-				syscall.Setuid(flags.Setuid)
+				setuid(flags.Setuid)
 			}
 			if flags.Setgid != 0 {
-				syscall.Setgid(flags.Setgid)
+				setgid(flags.Setgid)
 			}
 
 			// Wait for the file system to be unmounted.

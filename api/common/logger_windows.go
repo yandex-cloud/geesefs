@@ -20,6 +20,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+func InitLoggers(logFile string) {
+	initFileLoggers(logFile)
+}
+
 func NewLogger(name string) *LogHandle {
 	l := &LogHandle{name: name}
 	l.Out = os.Stderr

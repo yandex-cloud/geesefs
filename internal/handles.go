@@ -45,8 +45,13 @@ const (
 
 type NodeId uint64
 
+type Joinable interface {
+	Join(ctx context.Context) error
+}
+
 type MountedFS interface {
 	Join(ctx context.Context) error
+	Unmount() error
 }
 
 type InodeAttributes struct {

@@ -958,6 +958,15 @@ func (fs *GoofysFuse) SetConnection(conn *fuse.Connection) {
 	fs.connection = conn
 }
 
+type FuseMfsWrapper struct {
+	*fuse.MountedFileSystem
+	mountPoint string
+}
+
+func (m *FuseMfsWrapper) Unmount() error {
+	return TryUnmount(m.mountPoint)
+}
+
 // Mount the file system based on the supplied arguments, returning a
 // fuse.MountedFileSystem that can be joined to wait for unmounting.
 func MountFuse(
@@ -1066,10 +1075,15 @@ func MountFuse(
 	fsint := NewGoofysFuse(fs)
 	server := fuseutil.NewFileSystemServer(fsint)
 
-	mfs, err = fuse.Mount(flags.MountPoint, server, mountCfg)
+	fuseMfs, err := fuse.Mount(flags.MountPoint, server, mountCfg)
 	if err != nil {
 		err = fmt.Errorf("Mount: %v", err)
 		return
+	}
+
+	mfs = &FuseMfsWrapper{
+		MountedFileSystem: fuseMfs,
+		mountPoint: flags.MountPoint,
 	}
 
 	return
