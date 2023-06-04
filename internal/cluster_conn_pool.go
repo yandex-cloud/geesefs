@@ -1,3 +1,5 @@
+// +build !windows
+
 package internal
 
 import (
@@ -15,8 +17,6 @@ import (
 const OUTSTAGE_TIMEOUT = 10 * time.Second
 
 var connsLog = GetLogger("conns")
-
-type NodeId uint64
 
 type Peer struct {
 	mu      sync.RWMutex

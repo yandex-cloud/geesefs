@@ -31,7 +31,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 
 	"github.com/jacobsa/fuse/fuseops"
-	"golang.org/x/sys/unix"
 
 	"github.com/sirupsen/logrus"
 )
@@ -43,6 +42,8 @@ const (
 	ST_MODIFIED int32 = 3
 	ST_DELETED int32 = 4
 )
+
+type NodeId uint64
 
 type MountedFS interface {
 	Join(ctx context.Context) error
@@ -583,12 +584,12 @@ func (inode *Inode) getXattrMap(name string, userOnly bool) (
 		if userOnly {
 			return nil, "", syscall.EPERM
 		} else {
-			return nil, "", unix.ENODATA
+			return nil, "", syscall.ENODATA
 		}
 	}
 
 	if meta == nil {
-		return nil, "", unix.ENODATA
+		return nil, "", syscall.ENODATA
 	}
 
 	return
@@ -638,11 +639,11 @@ func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
 
 	if flags != 0x0 {
 		_, ok := meta[name]
-		if flags == unix.XATTR_CREATE {
+		if flags == XATTR_CREATE {
 			if ok {
 				return syscall.EEXIST
 			}
-		} else if flags == unix.XATTR_REPLACE {
+		} else if flags == XATTR_REPLACE {
 			if !ok {
 				return syscall.ENODATA
 			}
