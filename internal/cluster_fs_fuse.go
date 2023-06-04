@@ -5,6 +5,7 @@ import (
 	iofs "io/fs"
 	"fmt"
 	"syscall"
+	"sync/atomic"
 
 	"github.com/yandex-cloud/geesefs/api/common"
 	"github.com/jacobsa/fuse"
@@ -24,7 +25,21 @@ type ClusterFsFuse struct {
 // fs
 
 func (fs *ClusterFsFuse) StatFS(ctx context.Context, op *fuseops.StatFSOp) error {
-	return fs.Goofys.StatFS(ctx, op)
+	atomic.AddInt64(&fs.Goofys.stats.metadataReads, 1)
+
+	const BLOCK_SIZE = 4096
+	const TOTAL_SPACE = 1 * 1024 * 1024 * 1024 * 1024 * 1024 // 1PB
+	const TOTAL_BLOCKS = TOTAL_SPACE / BLOCK_SIZE
+	const INODES = 1 * 1000 * 1000 * 1000 // 1 billion
+	op.BlockSize = BLOCK_SIZE
+	op.Blocks = TOTAL_BLOCKS
+	op.BlocksFree = TOTAL_BLOCKS
+	op.BlocksAvailable = TOTAL_BLOCKS
+	op.IoSize = 1 * 1024 * 1024 // 1MB
+	op.Inodes = INODES
+	op.InodesFree = INODES
+
+	return nil
 }
 
 // file
