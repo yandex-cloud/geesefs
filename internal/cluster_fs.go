@@ -41,8 +41,11 @@ type ClusterFs struct {
 	stat Stat
 }
 
-func NewClusterGoofys(ctx context.Context, bucket string, flags *FlagStorage, conns *ConnPool) *Goofys {
-	fs := NewGoofys(ctx, bucket, flags)
+func NewClusterGoofys(ctx context.Context, bucket string, flags *FlagStorage, conns *ConnPool) (*Goofys, error) {
+	fs, err := NewGoofys(ctx, bucket, flags)
+	if err != nil {
+		return nil, err
+	}
 
 	// choose node with min id as root owner
 	var rootOwner NodeId
@@ -62,8 +65,8 @@ func NewClusterGoofys(ctx context.Context, bucket string, flags *FlagStorage, co
 	fs.inodes[fuseops.RootInodeID].readyOwner = true
 	fs.nextHandleID = N_HANDLES * fuseops.HandleID(conns.id)
 	fs.nextInodeID = N_INODES * fuseops.InodeID(conns.id)
-	
-	return fs
+
+	return fs, nil
 }
 
 // REQUIRED_LOCK(parent.KeepOwnerLock)

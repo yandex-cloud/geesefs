@@ -931,7 +931,10 @@ func MountCluster(
 	rec := &Recovery{
 		Flags: flags,
 	}
-	goofys := NewClusterGoofys(context.Background(), bucketName, flags, conns)
+	goofys, err := NewClusterGoofys(context.Background(), bucketName, flags, conns)
+	if err != nil {
+		return nil, nil, err
+	}
 	fs := &ClusterFs{
 		Flags:  flags,
 		Conns:  conns,

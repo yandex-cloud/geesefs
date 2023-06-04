@@ -724,7 +724,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 	s.setupDefaultEnv(t, "")
 
 	if hasEnv("EVENTUAL_CONSISTENCY") {
-		fs := newGoofys(context.Background(), bucket, flags,
+		fs, _ := newGoofys(context.Background(), bucket, flags,
 			func(bucket string, flags *FlagStorage) (StorageBackend, error) {
 				cloud, err := NewBackend(bucket, flags)
 				if err != nil {
@@ -734,7 +734,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 			})
 		s.fs = NewGoofysFuse(fs)
 	} else {
-		fs := NewGoofys(context.Background(), bucket, flags)
+		fs, _ := NewGoofys(context.Background(), bucket, flags)
 		s.fs = NewGoofysFuse(fs)
 	}
 	t.Assert(s.fs, NotNil)
@@ -2266,11 +2266,11 @@ func (s *GoofysTest) TestPutMimeType(t *C) {
 }
 
 func (s *GoofysTest) TestBucketPrefixSlash(t *C) {
-	fs := NewGoofys(context.Background(), s.fs.bucket+":dir2", s.fs.flags)
+	fs, _ := NewGoofys(context.Background(), s.fs.bucket+":dir2", s.fs.flags)
 	s.fs = NewGoofysFuse(fs)
 	t.Assert(s.getRoot(t).dir.mountPrefix, Equals, "dir2/")
 
-	fs = NewGoofys(context.Background(), s.fs.bucket+":dir2///", s.fs.flags)
+	fs, _ = NewGoofys(context.Background(), s.fs.bucket+":dir2///", s.fs.flags)
 	s.fs = NewGoofysFuse(fs)
 	t.Assert(s.getRoot(t).dir.mountPrefix, Equals, "dir2/")
 }
@@ -2278,7 +2278,7 @@ func (s *GoofysTest) TestBucketPrefixSlash(t *C) {
 func (s *GoofysTest) TestFuseWithPrefix(t *C) {
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
-	fs := NewGoofys(context.Background(), s.fs.bucket+":testprefix", s.fs.flags)
+	fs, _ := NewGoofys(context.Background(), s.fs.bucket+":testprefix", s.fs.flags)
 	s.fs = NewGoofysFuse(fs)
 
 	s.runFuseTest(t, mountPoint, true, s.tmp+"/fuse-test.sh", mountPoint)
@@ -2348,7 +2348,7 @@ func (s *GoofysTest) anonymous(t *C) {
 		t.Skip("cloud does not support canned ACL")
 	}
 
-	fs := NewGoofys(context.Background(), bucket, s.fs.flags)
+	fs, _ := NewGoofys(context.Background(), bucket, s.fs.flags)
 	s.fs = NewGoofysFuse(fs)
 	t.Assert(s.fs, NotNil)
 

@@ -193,12 +193,84 @@ func ParseBucketSpec(bucket string) (spec BucketSpec, err error) {
 	return
 }
 
-func NewGoofys(ctx context.Context, bucket string, flags *FlagStorage) *Goofys {
-	return newGoofys(ctx, bucket, flags, NewBackend)
+func NewGoofys(ctx context.Context, bucketName string, flags *FlagStorage) (*Goofys, error) {
+	if flags.DebugS3 {
+		SetCloudLogLevel(logrus.DebugLevel)
+	}
+	if flags.Backend == nil {
+		if spec, err := ParseBucketSpec(bucketName); err == nil {
+			switch spec.Scheme {
+			case "adl":
+				auth, err := AzureAuthorizerConfig{
+					Log: GetLogger("adlv1"),
+				}.Authorizer()
+				if err != nil {
+					err = fmt.Errorf("couldn't load azure credentials: %v",
+						err)
+					return nil, err
+				}
+				flags.Backend = &ADLv1Config{
+					Endpoint:   spec.Bucket,
+					Authorizer: auth,
+				}
+				// adlv1 doesn't really have bucket
+				// names, but we will rebuild the
+				// prefix
+				bucketName = ""
+				if spec.Prefix != "" {
+					bucketName = ":" + spec.Prefix
+				}
+			case "wasb":
+				config, err := AzureBlobConfig(flags.Endpoint, spec.Bucket, "blob")
+				if err != nil {
+					return nil, err
+				}
+				flags.Backend = &config
+				if config.Container != "" {
+					bucketName = config.Container
+				} else {
+					bucketName = spec.Bucket
+				}
+				if config.Prefix != "" {
+					spec.Prefix = config.Prefix
+				}
+				if spec.Prefix != "" {
+					bucketName += ":" + spec.Prefix
+				}
+			case "abfs":
+				config, err := AzureBlobConfig(flags.Endpoint, spec.Bucket, "dfs")
+				if err != nil {
+					return nil, err
+				}
+				flags.Backend = &config
+				if config.Container != "" {
+					bucketName = config.Container
+				} else {
+					bucketName = spec.Bucket
+				}
+				if config.Prefix != "" {
+					spec.Prefix = config.Prefix
+				}
+				if spec.Prefix != "" {
+					bucketName += ":" + spec.Prefix
+				}
+
+				flags.Backend = &ADLv2Config{
+					Endpoint:   config.Endpoint,
+					Authorizer: &config,
+				}
+				bucketName = spec.Bucket
+				if spec.Prefix != "" {
+					bucketName += ":" + spec.Prefix
+				}
+			}
+		}
+	}
+	return newGoofys(ctx, bucketName, flags, NewBackend)
 }
 
 func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
-	newBackend func(string, *FlagStorage) (StorageBackend, error)) *Goofys {
+	newBackend func(string, *FlagStorage) (StorageBackend, error)) (*Goofys, error) {
 	// Set up the basic struct.
 	fs := &Goofys{
 		bucket: bucket,
@@ -232,15 +304,13 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 
 	cloud, err := newBackend(bucket, flags)
 	if err != nil {
-		log.Errorf("Unable to setup backend: %v", err)
-		return nil
+		return nil, fmt.Errorf("Unable to setup backend: %v", err)
 	}
 
 	randomObjectName := prefix + (RandStringBytesMaskImprSrc(32))
 	err = cloud.Init(randomObjectName)
 	if err != nil {
-		log.Errorf("Unable to access '%v': %v", bucket, err)
-		return nil
+		return nil, fmt.Errorf("Unable to access '%v': %v", bucket, err)
 	}
 	cloud.MultipartExpire(&MultipartExpireInput{})
 
@@ -292,7 +362,7 @@ func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
 		go fs.FDCloser()
 	}
 
-	return fs
+	return fs, nil
 }
 
 // from https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-golang
