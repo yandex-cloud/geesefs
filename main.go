@@ -23,7 +23,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -100,9 +99,9 @@ func main() {
 			flags.Cleanup()
 		}()
 
+		var notifier *ParentNotifier
 		if !flags.Foreground {
-			var wg sync.WaitGroup
-			waitForSignal(&wg)
+			notifier = NewParentNotifier()
 
 			messageArg0()
 
@@ -128,13 +127,13 @@ func main() {
 
 			if child != nil {
 				// attempt to wait for child to notify parent
-				wg.Wait()
-				if waitedForSignalOk() {
+				if notifier.Wait() {
 					return
 				} else {
 					return syscall.EINVAL
 				}
 			} else {
+				notifier.Cancel()
 				defer ctx.Release()
 			}
 
@@ -164,13 +163,13 @@ func main() {
 
 		if err != nil {
 			if !flags.Foreground {
-				notifyParent(false)
+				notifier.Notify(false)
 			}
 			log.Fatalf("Mounting file system: %v", err)
 			// fatal also terminates itself
 		} else {
 			if !flags.Foreground {
-				notifyParent(true)
+				notifier.Notify(true)
 			}
 			log.Println("File system has been successfully mounted.")
 			// Let the user unmount with Ctrl-C (SIGINT)

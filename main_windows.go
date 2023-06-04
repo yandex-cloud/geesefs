@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 	"syscall"
 
 	"github.com/yandex-cloud/geesefs/api/common"
@@ -31,14 +30,21 @@ func isSigUsr1(s os.Signal) bool {
 	return false
 }
 
-func waitForSignal(wg *sync.WaitGroup) {
+type ParentNotifier struct {
 }
 
-func waitedForSignalOk() bool {
+func NewParentNotifier() *ParentNotifier {
+	return &ParentNotifier{}
+}
+
+func (p *ParentNotifier) Cancel() {
+}
+
+func (p *ParentNotifier) Wait() bool {
 	return true
 }
 
-func notifyParent(success bool) {
+func (p *ParentNotifier) Notify(success bool) {
 }
 
 // Mount the file system based on the supplied arguments, returning a

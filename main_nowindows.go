@@ -37,8 +37,6 @@ func isSigUsr1(s os.Signal) bool {
 	return s == syscall.SIGUSR1
 }
 
-var waitedForSignal os.Signal
-
 func kill(pid int, s os.Signal) (err error) {
 	p, err := os.FindProcess(pid)
 	if err != nil {
@@ -54,22 +52,38 @@ func kill(pid int, s os.Signal) (err error) {
 	return
 }
 
-func waitForSignal(wg *sync.WaitGroup) {
+type ParentNotifier struct {
+	result os.Signal
+	wg sync.WaitGroup
+}
+
+func NewParentNotifier() *ParentNotifier {
+	p := &ParentNotifier{}
+
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGUSR1, syscall.SIGUSR2)
 
-	wg.Add(1)
+	p.wg.Add(1)
 	go func() {
-		waitedForSignal = <-signalChan
-		wg.Done()
+		p.result = <-signalChan
+		p.wg.Done()
 	}()
+
+	return p
 }
 
-func waitedForSignalOk() bool {
-	return waitedForSignal == syscall.SIGUSR1
+func (p *ParentNotifier) Cancel() {
+	// kill our own waiting goroutine
+	kill(os.Getpid(), syscall.SIGUSR1)
+	p.wg.Wait()
 }
 
-func notifyParent(success bool) {
+func (p *ParentNotifier) Wait() bool {
+	p.wg.Wait()
+	return p.result == syscall.SIGUSR1
+}
+
+func (p *ParentNotifier) Notify(success bool) {
 	sig := syscall.SIGUSR1
 	if !success {
 		sig = syscall.SIGUSR2
