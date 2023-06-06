@@ -2887,7 +2887,10 @@ func (s *GoofysTest) TestXAttrSet(t *C) {
 	t.Assert(string(value2), DeepEquals, "world")
 
 	err = in.SetXattr("s3.bar", []byte("hello"), unix.XATTR_CREATE)
-	t.Assert(err, Equals, syscall.EPERM)
+	t.Assert(err, IsNil)
+	// But check that the change is silently ignored
+	value, err = in.GetXattr("s3.bar")
+	t.Assert(err, Equals, syscall.ENODATA)
 }
 
 func (s *GoofysTest) TestPythonCopyTree(t *C) {

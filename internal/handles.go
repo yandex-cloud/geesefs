@@ -641,6 +641,10 @@ func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
 	}
 
 	meta, name, err := inode.getXattrMap(name, true)
+	if err == syscall.EPERM {
+		// Silently ignore forbidden xattr operations
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -679,6 +683,10 @@ func (inode *Inode) RemoveXattr(name string) error {
 	}
 
 	meta, name, err := inode.getXattrMap(name, true)
+	if err == syscall.EPERM {
+		// Silently ignore forbidden xattr operations
+		return nil
+	}
 	if err != nil {
 		return err
 	}

@@ -184,13 +184,7 @@ func (fs *GoofysFuse) RemoveXattr(ctx context.Context,
 	}
 
 	err = inode.RemoveXattr(op.Name)
-	err = mapAwsError(err)
-	if err == syscall.EPERM {
-		// Silently ignore forbidden xattr operations
-		err = nil
-	}
-
-	return
+	return mapAwsError(err)
 }
 
 func (fs *GoofysFuse) SetXattr(ctx context.Context,
@@ -212,12 +206,7 @@ func (fs *GoofysFuse) SetXattr(ctx context.Context,
 	}
 
 	err = inode.SetXattr(op.Name, op.Value, op.Flags)
-	err = mapAwsError(err)
-	if err == syscall.EPERM {
-		// Silently ignore forbidden xattr operations
-		err = nil
-	}
-	return
+	return mapAwsError(err)
 }
 
 func (fs *GoofysFuse) CreateSymlink(ctx context.Context,
