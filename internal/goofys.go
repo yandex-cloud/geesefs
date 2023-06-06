@@ -1095,8 +1095,8 @@ func (fs *Goofys) LookupParent(path string) (parent *Inode, child string, err er
 	parts := strings.Split(path, "/")
 	child = parts[len(parts)-1]
 	fs.mu.RLock()
-	defer fs.mu.RUnlock()
 	parent = fs.inodes[fuseops.RootInodeID]
+	fs.mu.RUnlock()
 	for i := 0; i < len(parts)-1; i++ {
 		if parts[i] != "" {
 			parent, err = parent.LookUpCached(parts[i])
@@ -1118,8 +1118,8 @@ func (fs *Goofys) LookupParent(path string) (parent *Inode, child string, err er
 func (fs *Goofys) LookupPath(path string) (inode *Inode, err error) {
 	parts := strings.Split(path, "/")
 	fs.mu.RLock()
-	defer fs.mu.RUnlock()
 	inode = fs.inodes[fuseops.RootInodeID]
+	fs.mu.RUnlock()
 	for i := 0; i < len(parts); i++ {
 		if parts[i] != "" {
 			if !inode.isDir() {

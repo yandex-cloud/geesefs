@@ -2116,3 +2116,85 @@ func (inode *Inode) SyncFile() (err error) {
 	inode.logFuse("Done SyncFile")
 	return
 }
+
+func (inode *Inode) SetAttributes(size *uint64, mode *os.FileMode,
+	mtime *time.Time, uid *uint32, gid *uint32) (err error) {
+
+	if inode.Parent == nil {
+		// chmod/chown on the root directory of mountpoint is not supported
+		return syscall.ENOTSUP
+	}
+
+	fs := inode.fs
+
+	if size != nil || mode != nil || mtime != nil || uid != nil || gid != nil {
+		inode.mu.Lock()
+		if inode.CacheState == ST_DELETED || inode.CacheState == ST_DEAD {
+			// Oops, it's a deleted file. We don't support changing invisible files
+			inode.mu.Unlock()
+			return syscall.ENOENT
+		}
+	}
+
+	modified := false
+
+	if size != nil && inode.Attributes.Size != *size {
+		if *size > fs.getMaxFileSize() {
+			// File size too large
+			log.Warnf(
+				"Maximum file size exceeded when trying to truncate %v to %v bytes",
+				inode.FullName(), *size,
+			)
+			inode.mu.Unlock()
+			return syscall.EFBIG
+		}
+		inode.ResizeUnlocked(*size, true, true)
+		modified = true
+	}
+
+	if mode != nil {
+		m, err := inode.setFileMode(*mode)
+		if err != nil {
+			inode.mu.Unlock()
+			return err
+		}
+		modified = modified || m
+	}
+
+	if mtime != nil && fs.flags.EnableMtime && inode.Attributes.Mtime != *mtime {
+		inode.Attributes.Mtime = *mtime
+		inode.setUserMeta(fs.flags.MtimeAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Mtime.Unix())))
+		modified = true
+	}
+
+	if uid != nil && fs.flags.EnablePerms && inode.Attributes.Uid != *uid {
+		inode.Attributes.Uid = *uid
+		if inode.Attributes.Uid != fs.flags.Uid {
+			inode.setUserMeta(fs.flags.UidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Uid)))
+		} else {
+			inode.setUserMeta(fs.flags.UidAttr, nil)
+		}
+		modified = true
+	}
+
+	if gid != nil && fs.flags.EnablePerms && inode.Attributes.Gid != *gid {
+		inode.Attributes.Gid = *gid
+		if inode.Attributes.Gid != fs.flags.Gid {
+			inode.setUserMeta(fs.flags.GidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Gid)))
+		} else {
+			inode.setUserMeta(fs.flags.GidAttr, nil)
+		}
+		modified = true
+	}
+
+	if modified && inode.CacheState == ST_CACHED {
+		inode.SetCacheState(ST_MODIFIED)
+		inode.fs.WakeupFlusher()
+	}
+
+	if size != nil || mode != nil || mtime != nil || uid != nil || gid != nil {
+		inode.mu.Unlock()
+	}
+
+	return
+}

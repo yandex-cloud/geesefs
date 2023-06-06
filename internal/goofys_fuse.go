@@ -704,78 +704,9 @@ func (fs *GoofysFuse) SetInodeAttributes(
 		return syscall.ESTALE
 	}
 
-	if inode.Parent == nil {
-		// chmod/chown on the root directory of mountpoint is not supported
-		return syscall.ENOTSUP
-	}
-
-	if op.Size != nil || op.Mode != nil || op.Mtime != nil || op.Uid != nil || op.Gid != nil {
-		inode.mu.Lock()
-		if inode.CacheState == ST_DELETED || inode.CacheState == ST_DEAD {
-			// Oops, it's a deleted file. We don't support changing invisible files
-			inode.mu.Unlock()
-			return syscall.ENOENT
-		}
-	}
-
-	modified := false
-
-	if op.Size != nil && inode.Attributes.Size != *op.Size {
-		if *op.Size > fs.getMaxFileSize() {
-			// File size too large
-			log.Warnf(
-				"Maximum file size exceeded when trying to truncate %v to %v bytes",
-				inode.FullName(), *op.Size,
-			)
-			inode.mu.Unlock()
-			return syscall.EFBIG
-		}
-		inode.ResizeUnlocked(*op.Size, true, true)
-		modified = true
-	}
-
-	if op.Mode != nil {
-		m, err := inode.setFileMode(*op.Mode)
-		if err != nil {
-			inode.mu.Unlock()
-			return err
-		}
-		modified = modified || m
-	}
-
-	if op.Mtime != nil && fs.flags.EnableMtime && inode.Attributes.Mtime != *op.Mtime {
-		inode.Attributes.Mtime = *op.Mtime
-		inode.setUserMeta(fs.flags.MtimeAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Mtime.Unix())))
-		modified = true
-	}
-
-	if op.Uid != nil && fs.flags.EnablePerms && inode.Attributes.Uid != *op.Uid {
-		inode.Attributes.Uid = *op.Uid
-		if inode.Attributes.Uid != fs.flags.Uid {
-			inode.setUserMeta(fs.flags.UidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Uid)))
-		} else {
-			inode.setUserMeta(fs.flags.UidAttr, nil)
-		}
-		modified = true
-	}
-
-	if op.Gid != nil && fs.flags.EnablePerms && inode.Attributes.Gid != *op.Gid {
-		inode.Attributes.Gid = *op.Gid
-		if inode.Attributes.Gid != fs.flags.Gid {
-			inode.setUserMeta(fs.flags.GidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Gid)))
-		} else {
-			inode.setUserMeta(fs.flags.GidAttr, nil)
-		}
-		modified = true
-	}
-
-	if modified && inode.CacheState == ST_CACHED {
-		inode.SetCacheState(ST_MODIFIED)
-		inode.fs.WakeupFlusher()
-	}
-
-	if op.Size != nil || op.Mode != nil || op.Mtime != nil || op.Uid != nil || op.Gid != nil {
-		inode.mu.Unlock()
+	err = inode.SetAttributes(op.Size, op.Mode, op.Mtime, op.Uid, op.Gid)
+	if err != nil {
+		return
 	}
 
 	attr, err := inode.GetAttributes()
