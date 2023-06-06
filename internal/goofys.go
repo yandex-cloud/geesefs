@@ -1090,3 +1090,50 @@ func (fs *Goofys) SyncFS(parent *Inode) (err error) {
 	}
 	return
 }
+
+func (fs *Goofys) LookupParent(path string) (parent *Inode, child string, err error) {
+	parts := strings.Split(path, "/")
+	child = parts[len(parts)-1]
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	parent = fs.inodes[fuseops.RootInodeID]
+	for i := 0; i < len(parts)-1; i++ {
+		if parts[i] != "" {
+			parent, err = parent.LookUpCached(parts[i])
+			if err != nil {
+				return
+			}
+			if !parent.isDir() {
+				return nil, "", syscall.ENOTDIR
+			}
+			if atomic.LoadInt32(&parent.refreshed) == -1 {
+				// Stale inode
+				return nil, "", syscall.ESTALE
+			}
+		}
+	}
+	return
+}
+
+func (fs *Goofys) LookupPath(path string) (inode *Inode, err error) {
+	parts := strings.Split(path, "/")
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	inode = fs.inodes[fuseops.RootInodeID]
+	for i := 0; i < len(parts); i++ {
+		if parts[i] != "" {
+			if !inode.isDir() {
+				return nil, syscall.ENOTDIR
+			}
+			inode, err = inode.LookUpCached(parts[i])
+			if err != nil {
+				return
+			}
+			if atomic.LoadInt32(&inode.refreshed) == -1 {
+				// Stale inode
+				return nil, syscall.ESTALE
+			}
+		}
+	}
+	return
+}
