@@ -15,11 +15,20 @@
 package internal
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"runtime"
 	"sync/atomic"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/winfsp/cgofuse/fuse"
 	"github.com/jacobsa/fuse/fuseops"
+	"github.com/sirupsen/logrus"
+
+	"github.com/yandex-cloud/geesefs/api/common"
 )
 
 // winfsp/cgofuse interface to the file system
@@ -27,21 +36,32 @@ import (
 type GoofysWin struct {
 	fuse.FileSystemBase
 	*Goofys
+	host        *fuse.FileSystemHost
+	initialized bool
+	initCh      chan int
 }
 
 func NewGoofysWin(fs *Goofys) *GoofysWin {
 	fsint := &GoofysWin{
 		Goofys: fs,
 	}
+	fsint.initCh = make(chan int)
+	fs.NotifyCallback = func(notifications []interface{}) {
+		fsint.Notify(notifications)
+	}
 	return fsint
 }
 
 // Init is called when the file system is created.
 func (fs *GoofysWin) Init() {
+	fs.initialized = true
+	fs.initCh <- 1
 }
 
 // Destroy is called when the file system is destroyed.
 func (fs *GoofysWin) Destroy() {
+	fs.initialized = false
+	fs.initCh <- 2
 }
 
 // Statfs gets file system statistics.
@@ -64,6 +84,15 @@ func (fs *GoofysWin) Statfs(path string, stat *fuse.Statfs_t) int {
 }
 
 func mapWinError(err error) int {
+	if err == nil {
+		return 0
+	}
+	if fuseLog.Level == logrus.DebugLevel {
+		pc, _, _, _ := runtime.Caller(1)
+		details := runtime.FuncForPC(pc)
+		fuseLog.Debugf("%v: error %v", details, err)
+	}
+	err = mapAwsError(err)
 	switch err {
 	case syscall.EINVAL:
 		return -fuse.EINVAL
@@ -79,11 +108,12 @@ func mapWinError(err error) int {
 		return -fuse.ERANGE
 	case syscall.EAGAIN:
 		return -fuse.EAGAIN
+	case syscall.ESTALE:
+		return -fuse.EINVAL
 	default:
 		return -fuse.EIO
 	}
 }
-
 
 // Mknod creates a file node.
 func (fs *GoofysWin) Mknod(path string, mode uint32, dev uint64) int {
@@ -104,7 +134,7 @@ func (fs *GoofysWin) Mknod(path string, mode uint32, dev uint64) int {
 	if (mode & fuse.S_IFDIR) != 0 {
 		inode, err = parent.MkDir(child)
 		if err != nil {
-			return mapWinError(mapAwsError(err))
+			return mapWinError(err)
 		}
 	} else {
 		var fh *FileHandle
@@ -118,956 +148,102 @@ func (fs *GoofysWin) Mknod(path string, mode uint32, dev uint64) int {
 }
 
 // Mkdir creates a directory.
-// The FileSystemBase implementation returns -ENOSYS.
 func (fs *GoofysWin) Mkdir(path string, mode uint32) int {
-	return -fuse.ENOSYS
-}
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-// Unlink removes a file.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Unlink(path string) int {
-	return -fuse.ENOSYS
-}
-
-// Rmdir removes a directory.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Rmdir(path string) int {
-	return -fuse.ENOSYS
-}
-
-// Link creates a hard link to a file.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Link(oldpath string, newpath string) int {
-	return -fuse.ENOSYS
-}
-
-// Symlink creates a symbolic link.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Symlink(target string, newpath string) int {
-	return -fuse.ENOSYS
-}
-
-// Readlink reads the target of a symbolic link.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Readlink(path string) (int, string) {
-	return -fuse.ENOSYS, ""
-}
-
-// Rename renames a file.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Rename(oldpath string, newpath string) int {
-	return -fuse.ENOSYS
-}
-
-// Chmod changes the permission bits of a file.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Chmod(path string, mode uint32) int {
-	return -fuse.ENOSYS
-}
-
-// Chown changes the owner and group of a file.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Chown(path string, uid uint32, gid uint32) int {
-	return -fuse.ENOSYS
-}
-
-// Utimens changes the access and modification times of a file.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Utimens(path string, tmsp []fuse.Timespec) int {
-	return -fuse.ENOSYS
-}
-
-// Access checks file access permissions.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Access(path string, mask uint32) int {
-	return -fuse.ENOSYS
-}
-
-// Create creates and opens a file.
-// The flags are a combination of the fuse.O_* constants.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Create(path string, flags int, mode uint32) (int, uint64) {
-	return -fuse.ENOSYS, ^uint64(0)
-}
-
-// Open opens a file.
-// The flags are a combination of the fuse.O_* constants.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Open(path string, flags int) (int, uint64) {
-	return -fuse.ENOSYS, ^uint64(0)
-}
-
-// Getattr gets file attributes.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
-	return -fuse.ENOSYS
-}
-
-// Truncate changes the size of a file.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Truncate(path string, size int64, fh uint64) int {
-	return -fuse.ENOSYS
-}
-
-// Read reads data from a file.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Read(path string, buff []byte, ofst int64, fh uint64) int {
-	return -fuse.ENOSYS
-}
-
-// Write writes data to a file.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Write(path string, buff []byte, ofst int64, fh uint64) int {
-	return -fuse.ENOSYS
-}
-
-// Flush flushes cached file data.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Flush(path string, fh uint64) int {
-	return -fuse.ENOSYS
-}
-
-// Release closes an open file.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Release(path string, fh uint64) int {
-	return -fuse.ENOSYS
-}
-
-// Fsync synchronizes file contents.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Fsync(path string, datasync bool, fh uint64) int {
-	return -fuse.ENOSYS
-}
-
-// Opendir opens a directory.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Opendir(path string) (int, uint64) {
-	return -fuse.ENOSYS, ^uint64(0)
-}
-
-// Readdir reads a directory.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Readdir(path string,
-	fill func(name string, stat *fuse.Stat_t, ofst int64) bool,
-	ofst int64,
-	fh uint64) int {
-	return -fuse.ENOSYS
-}
-
-// Releasedir closes an open directory.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Releasedir(path string, fh uint64) int {
-	return -fuse.ENOSYS
-}
-
-// Fsyncdir synchronizes directory contents.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Fsyncdir(path string, datasync bool, fh uint64) int {
-	return -fuse.ENOSYS
-}
-
-// Setxattr sets extended attributes.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Setxattr(path string, name string, value []byte, flags int) int {
-	return -fuse.ENOSYS
-}
-
-// Getxattr gets extended attributes.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Getxattr(path string, name string) (int, []byte) {
-	return -fuse.ENOSYS, nil
-}
-
-// Removexattr removes extended attributes.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Removexattr(path string, name string) int {
-	return -fuse.ENOSYS
-}
-
-// Listxattr lists extended attributes.
-// The FileSystemBase implementation returns -fuse.ENOSYS.
-func (fs *GoofysWin) Listxattr(path string, fill func(name string) bool) int {
-	return -fuse.ENOSYS
-}
-
-/*
-func (fs *GoofysFuse) GetInodeAttributes(
-	ctx context.Context,
-	op *fuseops.GetInodeAttributesOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.metadataReads, 1)
-
-	fs.mu.RLock()
-	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
-
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	attr, err := inode.GetAttributes()
-	err = mapAwsError(err)
-	if err == nil {
-		op.Attributes = *attr
-		op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	}
-
-	return
-}
-
-func (fs *GoofysFuse) GetXattr(ctx context.Context,
-	op *fuseops.GetXattrOp) (err error) {
-	fs.mu.RLock()
-	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
-
-	atomic.AddInt64(&fs.stats.metadataReads, 1)
-
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	value, err := inode.GetXattr(op.Name)
-	err = mapAwsError(err)
+	parent, child, err := fs.LookupParent(path)
 	if err != nil {
-		return err
+		return mapWinError(err)
 	}
 
-	op.BytesRead = len(value)
-
-	if len(op.Dst) != 0 {
-		if len(op.Dst) < op.BytesRead {
-			return syscall.ERANGE
-		}
-
-		copy(op.Dst, value)
-	}
-	return
-}
-
-func (fs *GoofysFuse) ListXattr(ctx context.Context,
-	op *fuseops.ListXattrOp) (err error) {
-	fs.mu.RLock()
-	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
-
-	atomic.AddInt64(&fs.stats.metadataReads, 1)
-
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	xattrs, err := inode.ListXattr()
-	err = mapAwsError(err)
-
-	ncopied := 0
-
-	for _, name := range xattrs {
-		buf := op.Dst[ncopied:]
-		nlen := len(name) + 1
-
-		if nlen <= len(buf) {
-			copy(buf, name)
-			ncopied += nlen
-			buf[nlen-1] = '\x00'
-		}
-
-		op.BytesRead += nlen
-	}
-
-	if len(op.Dst) != 0 && ncopied < op.BytesRead {
-		err = syscall.ERANGE
-	}
-
-	return
-}
-
-func (fs *GoofysFuse) RemoveXattr(ctx context.Context,
-	op *fuseops.RemoveXattrOp) (err error) {
-	fs.mu.RLock()
-	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
-
-	atomic.AddInt64(&fs.stats.metadataWrites, 1)
-
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	err = inode.RemoveXattr(op.Name)
-	err = mapAwsError(err)
-	if err == syscall.EPERM {
-		// Silently ignore forbidden xattr operations
-		err = nil
-	}
-
-	return
-}
-
-func (fs *GoofysFuse) SetXattr(ctx context.Context,
-	op *fuseops.SetXattrOp) (err error) {
-	fs.mu.RLock()
-	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
-
-	atomic.AddInt64(&fs.stats.metadataWrites, 1)
-
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	if op.Name == fs.flags.RefreshAttr {
-		// Setting xattr with special name (.invalidate) refreshes the inode's cache
-		return fs.RefreshInodeCache(inode)
-	}
-
-	err = inode.SetXattr(op.Name, op.Value, op.Flags)
-	err = mapAwsError(err)
-	if err == syscall.EPERM {
-		// Silently ignore forbidden xattr operations
-		err = nil
-	}
-	return
-}
-
-func (fs *GoofysFuse) CreateSymlink(ctx context.Context,
-	op *fuseops.CreateSymlinkOp) (err error) {
-	fs.mu.RLock()
-	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
-
-	atomic.AddInt64(&fs.stats.metadataWrites, 1)
-
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	inode := parent.CreateSymlink(op.Name, op.Target)
-	op.Entry.Child = inode.Id
-	op.Entry.Attributes = inode.InflateAttributes()
-	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	return
-}
-
-func (fs *GoofysFuse) ReadSymlink(ctx context.Context,
-	op *fuseops.ReadSymlinkOp) (err error) {
-	fs.mu.RLock()
-	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
-
-	atomic.AddInt64(&fs.stats.metadataReads, 1)
-
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	op.Target, err = inode.ReadSymlink()
-	err = mapAwsError(err)
-	return
-}
-
-func (fs *GoofysFuse) LookUpInode(
-	ctx context.Context,
-	op *fuseops.LookUpInodeOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.metadataReads, 1)
-
-	defer func() { fuseLog.Debugf("<-- LookUpInode %v %v %v", op.Parent, op.Name, err) }()
-
-	fs.mu.RLock()
-	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
-
-	inode, err := parent.LookUpCached(op.Name)
+	inode, err := parent.MkDir(child)
 	if err != nil {
-		return err
-	}
-
-	inode.Ref()
-	op.Entry.Child = inode.Id
-	op.Entry.Attributes = inode.InflateAttributes()
-	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-
-	return
-}
-
-func (fs *GoofysFuse) ForgetInode(
-	ctx context.Context,
-	op *fuseops.ForgetInodeOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.metadataReads, 1)
-
-	fs.mu.RLock()
-	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
-
-	inode.mu.Lock()
-	inode.DeRef(int64(op.N))
-	inode.mu.Unlock()
-
-	return
-}
-
-func (fs *GoofysFuse) OpenDir(
-	ctx context.Context,
-	op *fuseops.OpenDirOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.noops, 1)
-
-	fs.mu.Lock()
-	in := fs.getInodeOrDie(op.Inode)
-	if atomic.LoadInt32(&in.refreshed) == -1 {
-		// Stale inode
-		fs.mu.Unlock()
-		return syscall.ESTALE
-	}
-	handleID := fs.nextHandleID
-	fs.nextHandleID++
-	fs.mu.Unlock()
-
-	if atomic.LoadInt32(&in.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	dh := in.OpenDir()
-
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	fs.dirHandles[handleID] = dh
-	op.Handle = handleID
-
-	return
-}
-
-func makeDirEntry(en *DirHandleEntry) fuseutil.Dirent {
-	dt := fuseutil.DT_File
-	if en.IsDir {
-		dt = fuseutil.DT_Directory
-	}
-	return fuseutil.Dirent{
-		Name:   en.Name,
-		Type:   dt,
-		Inode:  en.Inode,
-		Offset: en.Offset,
-	}
-}
-
-func (fs *GoofysFuse) ReadDir(
-	ctx context.Context,
-	op *fuseops.ReadDirOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.metadataReads, 1)
-
-	// Find the handle.
-	fs.mu.RLock()
-	dh := fs.dirHandles[op.Handle]
-	fs.mu.RUnlock()
-
-	if dh == nil {
-		panic(fmt.Sprintf("can't find dh=%v", op.Handle))
-	}
-
-	inode := dh.inode
-	inode.logFuse("ReadDir", op.Offset)
-
-	dh.mu.Lock()
-
-	dh.Seek(op.Offset)
-
-	for {
-		e, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
-		if err != nil {
-			dh.mu.Unlock()
-			err = mapAwsError(err)
-			return err
-		}
-		if e == nil {
-			break
-		}
-
-		if e.Inode == 0 {
-			panic(fmt.Sprintf("unset inode %v", e.Name))
-		}
-
-		n := fuseutil.WriteDirent(op.Dst[op.BytesRead:], makeDirEntry(e))
-		if n == 0 {
-			break
-		}
-
-		dh.inode.logFuse("<-- ReadDir", e.Name, e.Offset)
-
-		op.BytesRead += n
-		// We have to modify it here because WriteDirent MAY not send the entry
-		if dh.lastInternalOffset >= 0 {
-			dh.lastInternalOffset++
-		}
-		dh.lastExternalOffset++
-		dh.lastName = e.Name
-	}
-
-	dh.mu.Unlock()
-	return
-}
-
-func (fs *GoofysFuse) ReleaseDirHandle(
-	ctx context.Context,
-	op *fuseops.ReleaseDirHandleOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.noops, 1)
-
-	fs.mu.RLock()
-	dh := fs.dirHandles[op.Handle]
-	fs.mu.RUnlock()
-
-	dh.CloseDir()
-
-	fuseLog.Debugln("ReleaseDirHandle", dh.inode.FullName())
-
-	fs.mu.Lock()
-	delete(fs.dirHandles, op.Handle)
-	fs.mu.Unlock()
-
-	return
-}
-
-func (fs *GoofysFuse) OpenFile(
-	ctx context.Context,
-	op *fuseops.OpenFileOp) (err error) {
-	fs.mu.RLock()
-	in := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
-
-	atomic.AddInt64(&fs.stats.noops, 1)
-
-	if atomic.LoadInt32(&in.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	fh, err := in.OpenFile()
-	if err != nil {
-		err = mapAwsError(err)
-		return
-	}
-
-	fs.mu.Lock()
-
-	handleID := fs.nextHandleID
-	fs.nextHandleID++
-
-	fs.fileHandles[handleID] = fh
-	fs.mu.Unlock()
-
-	op.Handle = handleID
-
-	in.mu.Lock()
-	defer in.mu.Unlock()
-
-	// this flag appears to tell the kernel if this open should
-	// use the page cache or not. "use" here means:
-	//
-	// read will read from cache
-	// write will populate cache
-
-	// We have our own in-memory cache, kernel page cache is redundant
-	op.KeepPageCache = false
-
-	return
-}
-
-func (fs *GoofysFuse) ReadFile(
-	ctx context.Context,
-	op *fuseops.ReadFileOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.reads, 1)
-
-	fs.mu.RLock()
-	fh := fs.fileHandles[op.Handle]
-	fs.mu.RUnlock()
-
-	op.Data, op.BytesRead, err = fh.ReadFile(op.Offset, op.Size)
-	err = mapAwsError(err)
-
-	return
-}
-
-func (fs *GoofysFuse) SyncFile(
-	ctx context.Context,
-	op *fuseops.SyncFileOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.metadataWrites, 1)
-
-	if !fs.flags.IgnoreFsync {
-		fs.mu.RLock()
-		in := fs.getInodeOrDie(op.Inode)
-		fs.mu.RUnlock()
-
-		if in.Id == fuseops.RootInodeID {
-			err = fs.SyncFS(nil)
-		} else if in.isDir() {
-			err = fs.SyncFS(in)
-		} else {
-			err = in.SyncFile()
-		}
-		err = mapAwsError(err)
-	}
-
-	return
-}
-
-func (fs *GoofysFuse) FlushFile(
-	ctx context.Context,
-	op *fuseops.FlushFileOp) (err error) {
-
-	// FlushFile is a no-op because we flush changes to the server asynchronously
-	// If the user really wants to persist a file to the server he should call fsync()
-
-	atomic.AddInt64(&fs.stats.noops, 1)
-
-	return
-}
-
-func (fs *GoofysFuse) ReleaseFileHandle(
-	ctx context.Context,
-	op *fuseops.ReleaseFileHandleOp) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	fh := fs.fileHandles[op.Handle]
-	fh.Release()
-
-	atomic.AddInt64(&fs.stats.noops, 1)
-
-	fuseLog.Debugln("ReleaseFileHandle", fh.inode.FullName(), op.Handle, fh.inode.Id)
-
-	delete(fs.fileHandles, op.Handle)
-
-	// try to compact heap
-	//fs.bufferPool.MaybeGC()
-	return
-}
-
-func (fs *GoofysFuse) CreateFile(
-	ctx context.Context,
-	op *fuseops.CreateFileOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.metadataWrites, 1)
-
-	fs.mu.RLock()
-	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
-
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	inode, fh := parent.Create(op.Name)
-
-	// Always take inode locks after fs lock if you need both...
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	inode.setFileMode(op.Mode)
-
-	op.Entry.Child = inode.Id
-	op.Entry.Attributes = inode.InflateAttributes()
-	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-
-	// Allocate a handle.
-	handleID := fs.nextHandleID
-	fs.nextHandleID++
-
-	fs.fileHandles[handleID] = fh
-
-	op.Handle = handleID
-
-	inode.logFuse("<-- CreateFile")
-
-	return
-}
-
-// MkNode is required for NFS even with regular files
-// because kernel nfsd uses vfs_create() -> fuse_create() -> fuse_mknod()
-// and then separate fuse_open() for file creation instead of fuse_create_open()
-func (fs *GoofysFuse) MkNode(
-	ctx context.Context,
-	op *fuseops.MkNodeOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.metadataWrites, 1)
-
-	if (op.Mode & os.ModeType) != os.ModeDir &&
-		(op.Mode & os.ModeType) != 0 &&
-		!fs.flags.EnableSpecials {
-		return syscall.ENOTSUP
-	}
-
-	fs.mu.RLock()
-	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
-
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	var inode *Inode
-	if (op.Mode & os.ModeDir) != 0 {
-		inode, err = parent.MkDir(op.Name)
-		if err != nil {
-			err = mapAwsError(err)
-			return err
-		}
-	} else {
-		var fh *FileHandle
-		inode, fh = parent.Create(op.Name)
-		fh.Release()
-	}
-	inode.Attributes.Rdev = op.Rdev
-	inode.setFileMode(op.Mode)
-
-	op.Entry.Child = inode.Id
-	op.Entry.Attributes = inode.InflateAttributes()
-	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-
-	return
-}
-
-func (fs *GoofysFuse) MkDir(
-	ctx context.Context,
-	op *fuseops.MkDirOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.metadataWrites, 1)
-
-	fs.mu.RLock()
-	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
-
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
-	}
-
-	// ignore op.Mode for now
-	inode, err := parent.MkDir(op.Name)
-	if err != nil {
-		err = mapAwsError(err)
-		return err
+		return mapWinError(err)
 	}
 	if fs.flags.EnablePerms {
-		inode.Attributes.Mode = os.ModeDir | (op.Mode & os.ModePerm)
+		inode.Attributes.Mode = os.ModeDir | fuseops.ConvertFileMode(mode) & os.ModePerm
 	} else {
 		inode.Attributes.Mode = os.ModeDir | fs.flags.DirMode
 	}
 
-	op.Entry.Child = inode.Id
-	op.Entry.Attributes = inode.InflateAttributes()
-	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-
-	return
+	return 0
 }
 
-func (fs *GoofysFuse) RmDir(
-	ctx context.Context,
-	op *fuseops.RmDirOp) (err error) {
-
+// Unlink removes a file.
+func (fs *GoofysWin) Unlink(path string) int {
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	fs.mu.RLock()
-	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
-
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
+	parent, child, err := fs.LookupParent(path)
+	if err != nil {
+		return mapWinError(err)
 	}
 
-	err = parent.RmDir(op.Name)
-	err = mapAwsError(err)
-	parent.logFuse("<-- RmDir", op.Name, err)
-	return
+	err = parent.Unlink(child)
+	return mapWinError(err)
 }
 
-func (fs *GoofysFuse) SetInodeAttributes(
-	ctx context.Context,
-	op *fuseops.SetInodeAttributesOp) (err error) {
-
+// Rmdir removes a directory.
+func (fs *GoofysWin) Rmdir(path string) int {
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	fs.mu.RLock()
-	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
-
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
+	parent, child, err := fs.LookupParent(path)
+	if err != nil {
+		return mapWinError(err)
 	}
 
-	if inode.Parent == nil {
-		// chmod/chown on the root directory of mountpoint is not supported
-		return syscall.ENOTSUP
-	}
-
-	if op.Size != nil || op.Mode != nil || op.Mtime != nil || op.Uid != nil || op.Gid != nil {
-		inode.mu.Lock()
-		if inode.CacheState == ST_DELETED || inode.CacheState == ST_DEAD {
-			// Oops, it's a deleted file. We don't support changing invisible files
-			inode.mu.Unlock()
-			return syscall.ENOENT
-		}
-	}
-
-	modified := false
-
-	if op.Size != nil && inode.Attributes.Size != *op.Size {
-		if *op.Size > fs.getMaxFileSize() {
-			// File size too large
-			log.Warnf(
-				"Maximum file size exceeded when trying to truncate %v to %v bytes",
-				inode.FullName(), *op.Size,
-			)
-			inode.mu.Unlock()
-			return syscall.EFBIG
-		}
-		inode.ResizeUnlocked(*op.Size, true, true)
-		modified = true
-	}
-
-	if op.Mode != nil {
-		m, err := inode.setFileMode(*op.Mode)
-		if err != nil {
-			inode.mu.Unlock()
-			return err
-		}
-		modified = modified || m
-	}
-
-	if op.Mtime != nil && fs.flags.EnableMtime && inode.Attributes.Mtime != *op.Mtime {
-		inode.Attributes.Mtime = *op.Mtime
-		inode.setUserMeta(fs.flags.MtimeAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Mtime.Unix())))
-		modified = true
-	}
-
-	if op.Uid != nil && fs.flags.EnablePerms && inode.Attributes.Uid != *op.Uid {
-		inode.Attributes.Uid = *op.Uid
-		if inode.Attributes.Uid != fs.flags.Uid {
-			inode.setUserMeta(fs.flags.UidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Uid)))
-		} else {
-			inode.setUserMeta(fs.flags.UidAttr, nil)
-		}
-		modified = true
-	}
-
-	if op.Gid != nil && fs.flags.EnablePerms && inode.Attributes.Gid != *op.Gid {
-		inode.Attributes.Gid = *op.Gid
-		if inode.Attributes.Gid != fs.flags.Gid {
-			inode.setUserMeta(fs.flags.GidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Gid)))
-		} else {
-			inode.setUserMeta(fs.flags.GidAttr, nil)
-		}
-		modified = true
-	}
-
-	if modified && inode.CacheState == ST_CACHED {
-		inode.SetCacheState(ST_MODIFIED)
-		inode.fs.WakeupFlusher()
-	}
-
-	if op.Size != nil || op.Mode != nil || op.Mtime != nil || op.Uid != nil || op.Gid != nil {
-		inode.mu.Unlock()
-	}
-
-	attr, err := inode.GetAttributes()
-	err = mapAwsError(err)
-	if err == nil {
-		op.Attributes = *attr
-		op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	}
-	return
+	err = parent.RmDir(child)
+	return mapWinError(err)
 }
 
-func (fs *GoofysFuse) WriteFile(
-	ctx context.Context,
-	op *fuseops.WriteFileOp) (err error) {
-
-	atomic.AddInt64(&fs.stats.writes, 1)
-
-	fs.mu.RLock()
-
-	fh, ok := fs.fileHandles[op.Handle]
-	if !ok {
-		panic(fmt.Sprintf("WriteFile: can't find handle %v", op.Handle))
-	}
-	fs.mu.RUnlock()
-
-	// fuse binding leaves extra room for header, so we
-	// account for it when we decide whether to do "zero-copy" write
-	copyData := len(op.Data) < cap(op.Data)-4096
-	err = fh.WriteFile(op.Offset, op.Data, copyData)
-	err = mapAwsError(err)
-	op.SuppressReuse = !copyData
-
-	return
-}
-
-func (fs *GoofysFuse) Unlink(
-	ctx context.Context,
-	op *fuseops.UnlinkOp) (err error) {
-
+// Symlink creates a symbolic link.
+func (fs *GoofysWin) Symlink(target string, newpath string) int {
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	fs.mu.RLock()
-	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
-
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
+	parent, child, err := fs.LookupParent(newpath)
+	if err != nil {
+		return mapWinError(err)
 	}
 
-	err = parent.Unlink(op.Name)
-	err = mapAwsError(err)
-	return
+	parent.CreateSymlink(child, target)
+	return 0
 }
 
-// rename("from", "to") causes the kernel to send lookup of "from" and
-// "to" prior to sending rename to us
-func (fs *GoofysFuse) Rename(
-	ctx context.Context,
-	op *fuseops.RenameOp) (err error) {
+// Readlink reads the target of a symbolic link.
+func (fs *GoofysWin) Readlink(path string) (int, string) {
+	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
-	atomic.AddInt64(&fs.stats.metadataWrites, 1)
-
-	fs.mu.RLock()
-	parent := fs.getInodeOrDie(op.OldParent)
-	newParent := fs.getInodeOrDie(op.NewParent)
-	fs.mu.RUnlock()
-
-	if atomic.LoadInt32(&parent.refreshed) == -1 ||
-		atomic.LoadInt32(&newParent.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err), ""
 	}
 
-	if op.OldParent == op.NewParent {
+	target, err := inode.ReadSymlink()
+	if err != nil {
+		return mapWinError(err), ""
+	}
+
+	return 0, target
+}
+
+// Rename renames a file.
+func (fs *GoofysWin) Rename(oldpath string, newpath string) int {
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
+
+	parent, oldName, err := fs.LookupParent(oldpath)
+	if err != nil {
+		return mapWinError(err)
+	}
+	newParent, newName, err := fs.LookupParent(newpath)
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	if parent == newParent {
 		parent.mu.Lock()
 		defer parent.mu.Unlock()
 	} else {
 		// lock ordering to prevent deadlock
-		if op.OldParent < op.NewParent {
+		if parent.Id < newParent.Id {
 			parent.mu.Lock()
 			newParent.mu.Lock()
 		} else {
@@ -1078,153 +254,519 @@ func (fs *GoofysFuse) Rename(
 		defer newParent.mu.Unlock()
 	}
 
-	err = parent.Rename(op.OldName, newParent, op.NewName)
-	err = mapAwsError(err)
+	err = parent.Rename(oldName, newParent, newName)
 
-	return
+	return mapWinError(err)
 }
 
-const (
-	FALLOC_FL_KEEP_SIZE      = uint32(0x01)
-	FALLOC_FL_PUNCH_HOLE     = uint32(0x02)
-	FALLOC_FL_COLLAPSE_RANGE = uint32(0x08)
-	FALLOC_FL_ZERO_RANGE     = uint32(0x10)
-	FALLOC_FL_INSERT_RANGE   = uint32(0x20)
-)
-
-func (fs *GoofysFuse) Fallocate(
-	ctx context.Context,
-	op *fuseops.FallocateOp) (err error) {
-
+// Chmod changes the permission bits of a file.
+func (fs *GoofysWin) Chmod(path string, mode uint32) int {
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	goMode := fuseops.ConvertFileMode(mode)
+
+	return mapWinError(mapAwsError(inode.SetAttributes(nil, &goMode, nil, nil, nil)))
+}
+
+// Chown changes the owner and group of a file.
+func (fs *GoofysWin) Chown(path string, uid uint32, gid uint32) int {
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
+
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	return mapWinError(mapAwsError(inode.SetAttributes(nil, nil, nil, &uid, &gid)))
+}
+
+// Utimens changes the access and modification times of a file.
+func (fs *GoofysWin) Utimens(path string, tmsp []fuse.Timespec) int {
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
+
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	// only mtime, atime is ignored
+	tm := time.Unix(tmsp[1].Sec, tmsp[1].Nsec)
+
+	return mapWinError(mapAwsError(inode.SetAttributes(nil, nil, &tm, nil, nil)))
+}
+
+// Access is only used by winfsp with FSP_FUSE_DELETE_OK. Ignore it
+func (fs *GoofysWin) Access(path string, mask uint32) int {
+	atomic.AddInt64(&fs.stats.noops, 1)
+	return 0
+}
+
+// Create creates and opens a file.
+// The flags are a combination of the fuse.O_* constants.
+func (fs *GoofysWin) Create(path string, flags int, mode uint32) (int, uint64) {
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
+
+	parent, child, err := fs.LookupParent(path)
+	if err != nil {
+		return mapWinError(err), 0
+	}
+
+	inode, fh := parent.Create(child)
+
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	inode.setFileMode(fuseops.ConvertFileMode(mode))
+
+	// Allocate a handle.
+	handleID := fs.nextHandleID
+	fs.nextHandleID++
+	fs.fileHandles[handleID] = fh
+
+	return 0, uint64(handleID)
+}
+
+// Open opens a file.
+// The flags are a combination of the fuse.O_* constants.
+func (fs *GoofysWin) Open(path string, flags int) (int, uint64) {
+	atomic.AddInt64(&fs.stats.noops, 1)
+
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err), 0
+	}
+
+	fh, err := inode.OpenFile()
+	if err != nil {
+		return mapWinError(err), 0
+	}
+
+	fs.mu.Lock()
+	handleID := fs.nextHandleID
+	fs.nextHandleID++
+	fs.fileHandles[handleID] = fh
+	fs.mu.Unlock()
+
+	return 0, uint64(handleID)
+}
+
+// Getattr gets file attributes.
+func (fs *GoofysWin) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
+	atomic.AddInt64(&fs.stats.metadataReads, 1)
+
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	makeFuseAttributes(inode.GetAttributes(), stat)
+
+	return 0
+}
+
+func makeFuseAttributes(attr *fuseops.InodeAttributes, stat *fuse.Stat_t) {
+	stat.Mode = fuseops.ConvertGolangMode(attr.Mode)
+	stat.Nlink = 1
+	stat.Uid = attr.Uid
+	stat.Gid = attr.Gid
+	stat.Rdev = uint64(attr.Rdev)
+	stat.Size = int64(attr.Size)
+	stat.Atim.Sec = attr.Atime.Unix()
+	stat.Atim.Nsec = int64(attr.Atime.Nanosecond())
+	stat.Mtim.Sec = attr.Mtime.Unix()
+	stat.Mtim.Nsec = int64(attr.Mtime.Nanosecond())
+	stat.Ctim.Sec = attr.Ctime.Unix()
+	stat.Ctim.Nsec = int64(attr.Ctime.Nanosecond())
+	stat.Blksize = 4096
+	stat.Blocks = int64(attr.Size) / stat.Blksize
+	stat.Birthtim.Sec = attr.Mtime.Unix()
+	stat.Birthtim.Nsec = int64(attr.Mtime.Nanosecond())
+}
+
+// Truncate changes the size of a file.
+func (fs *GoofysWin) Truncate(path string, size int64, fh uint64) int {
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
+
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	usize := uint64(size)
+
+	return mapWinError(mapAwsError(inode.SetAttributes(&usize, nil, nil, nil, nil)))
+}
+
+// Read reads data from a file.
+func (fs *GoofysWin) Read(path string, buff []byte, ofst int64, fhId uint64) int {
+	atomic.AddInt64(&fs.stats.reads, 1)
+
 	fs.mu.RLock()
-	inode := fs.getInodeOrDie(op.Inode)
+	fh := fs.fileHandles[fuseops.HandleID(fhId)]
+	fs.mu.RUnlock()
+	if fh == nil {
+		return -fuse.EINVAL
+	}
+
+	data, bytesRead, err := fh.ReadFile(ofst, int64(len(buff)))
+	if err != nil {
+		return mapWinError(err)
+	}
+	done := 0
+	for i := 0; i < len(data); i++ {
+		copy(buff[done:], data[i])
+		done += len(data[i])
+	}
+
+	return bytesRead
+}
+
+// Write writes data to a file.
+func (fs *GoofysWin) Write(path string, buff []byte, ofst int64, fhId uint64) int {
+	atomic.AddInt64(&fs.stats.writes, 1)
+
+	fs.mu.RLock()
+	fh := fs.fileHandles[fuseops.HandleID(fhId)]
+	fs.mu.RUnlock()
+	if fh == nil {
+		return -fuse.EINVAL
+	}
+
+	err := fh.WriteFile(ofst, buff, true)
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	return len(buff)
+}
+
+// Flush flushes cached file data. Ignore it.
+func (fs *GoofysWin) Flush(path string, fh uint64) int {
+	atomic.AddInt64(&fs.stats.noops, 1)
+	return 0
+}
+
+// Release closes an open file.
+func (fs *GoofysWin) Release(path string, fhId uint64) int {
+	atomic.AddInt64(&fs.stats.noops, 1)
+
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	fh := fs.fileHandles[fuseops.HandleID(fhId)]
+	if fh == nil {
+		return -fuse.EINVAL
+	}
+	fh.Release()
+
+	delete(fs.fileHandles, fuseops.HandleID(fhId))
+
+	return 0
+}
+
+// Fsync synchronizes file contents.
+func (fs *GoofysWin) Fsync(path string, datasync bool, fhId uint64) int {
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
+
+	if !fs.flags.IgnoreFsync {
+		var inode *Inode
+		var err error
+		if fhId != 0 {
+			fs.mu.RLock()
+			fh := fs.fileHandles[fuseops.HandleID(fhId)]
+			fs.mu.RUnlock()
+			if fh == nil {
+				return -fuse.EINVAL
+			}
+			inode = fh.inode
+		} else {
+			inode, err = fs.LookupPath(path)
+			if err != nil {
+				return mapWinError(err)
+			}
+		}
+		if inode.Id == fuseops.RootInodeID {
+			err = fs.SyncFS(nil)
+		} else if inode.isDir() {
+			err = fs.SyncFS(inode)
+		} else {
+			err = inode.SyncFile()
+		}
+		return mapWinError(err)
+	}
+
+	return 0
+}
+
+// Opendir opens a directory.
+func (fs *GoofysWin) Opendir(path string) (int, uint64) {
+	atomic.AddInt64(&fs.stats.noops, 1)
+
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err), 0
+	}
+
+	dh := inode.OpenDir()
+
+	fs.mu.Lock()
+	handleID := fs.nextHandleID
+	fs.nextHandleID++
+	fs.dirHandles[handleID] = dh
+	fs.mu.Unlock()
+
+	return 0, uint64(handleID)
+}
+
+// Readdir reads a directory.
+func (fs *GoofysWin) Readdir(path string,
+	fill func(name string, stat *fuse.Stat_t, ofst int64) bool,
+	ofst int64, dhId uint64) int {
+
+	atomic.AddInt64(&fs.stats.metadataReads, 1)
+
+	// Find the handle.
+	fs.mu.RLock()
+	dh := fs.dirHandles[fuseops.HandleID(dhId)]
 	fs.mu.RUnlock()
 
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
-		// Stale inode
-		return syscall.ESTALE
+	if dh == nil {
+		return -fuse.EINVAL
 	}
 
-	if op.Length == 0 {
-		return nil
-	}
+	dh.inode.logFuse("ReadDir", ofst)
 
-	inode.mu.Lock()
+	dh.mu.Lock()
+	defer dh.mu.Unlock()
 
-	modified := false
+	dh.Seek(fuseops.DirOffset(ofst))
 
-	if (op.Mode & (FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_INSERT_RANGE)) != 0 {
-		// Insert range/remove range operations are not supported
-		// It's possible to support them, but it will require buffer remapping support.
-		// I.e. if you open a file, insert/collapse a range and then read past the
-		// affected offset you should get data from the old offset! And it's probably
-		// wise to use UploadPartCopy with the corresponding ranges to optimize copying
-		// on the server side in this case. Some day we might even be able to preserve
-		// multipart part IDs if cutting a non-finalized upload across part boundaries,
-		// but now we can't - part offsets are always fixed.
-		inode.mu.Unlock()
-		return syscall.ENOTSUP
-	}
-
-	if op.Offset+op.Length > inode.Attributes.Size {
-		if (op.Mode & FALLOC_FL_KEEP_SIZE) == 0 {
-			// Resize
-			if op.Offset+op.Length > fs.getMaxFileSize() {
-				// File size too large
-				log.Warnf(
-					"Maximum file size exceeded when trying to extend %v to %v bytes using fallocate",
-					inode.FullName(), op.Offset+op.Length,
-				)
-				inode.mu.Unlock()
-				return syscall.EFBIG
+	for {
+		e, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
+		if err != nil {
+			return mapWinError(err)
+		}
+		if e == nil {
+			break
+		}
+		fs.mu.RLock()
+		inode := fs.inodes[e.Inode]
+		fs.mu.RUnlock()
+		if inode != nil {
+			st := &fuse.Stat_t{}
+			makeFuseAttributes(inode.GetAttributes(), st)
+			if !fill(e.Name, st, int64(e.Offset)) {
+				break
 			}
-			inode.ResizeUnlocked(op.Offset+op.Length, true, true)
-			modified = true
-		} else {
-			if op.Offset > inode.Attributes.Size {
-				op.Offset = inode.Attributes.Size
-			}
-			op.Length = inode.Attributes.Size-op.Offset
+			dh.inode.logFuse("<-- ReadDir", e.Name, e.Offset)
+		}
+		// We have to modify it here because fill() MAY not send the entry
+		if dh.lastInternalOffset >= 0 {
+			dh.lastInternalOffset++
+		}
+		dh.lastExternalOffset++
+		dh.lastName = e.Name
+	}
+
+	return 0
+}
+
+// Releasedir closes an open directory.
+func (fs *GoofysWin) Releasedir(path string, dhId uint64) int {
+	atomic.AddInt64(&fs.stats.noops, 1)
+
+	fs.mu.RLock()
+	dh := fs.dirHandles[fuseops.HandleID(dhId)]
+	fs.mu.RUnlock()
+
+	dh.CloseDir()
+
+	fs.mu.Lock()
+	delete(fs.dirHandles, fuseops.HandleID(dhId))
+	fs.mu.Unlock()
+
+	return 0
+}
+
+// Fsyncdir synchronizes directory contents.
+func (fs *GoofysWin) Fsyncdir(path string, datasync bool, fhId uint64) int {
+	return fs.Fsync(path, datasync, fhId)
+}
+
+// Setxattr sets extended attributes.
+func (fs *GoofysWin) Setxattr(path string, name string, value []byte, flags int) int {
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
+
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	if name == fs.flags.RefreshAttr {
+		// Setting xattr with special name (.invalidate) refreshes the inode's cache
+		return mapWinError(fs.RefreshInodeCache(inode))
+	}
+
+	err = inode.SetXattr(name, value, uint32(flags))
+	return mapWinError(err)
+}
+
+// Getxattr gets extended attributes.
+func (fs *GoofysWin) Getxattr(path string, name string) (int, []byte) {
+	atomic.AddInt64(&fs.stats.metadataReads, 1)
+
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err), nil
+	}
+
+	value, err := inode.GetXattr(name)
+	if err != nil {
+		return mapWinError(err), nil
+	}
+
+	return 0, value
+}
+
+// Removexattr removes extended attributes.
+func (fs *GoofysWin) Removexattr(path string, name string) int {
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
+
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	err = inode.RemoveXattr(name)
+	return mapWinError(err)
+}
+
+// Listxattr lists extended attributes.
+func (fs *GoofysWin) Listxattr(path string, fill func(name string) bool) int {
+	atomic.AddInt64(&fs.stats.metadataReads, 1)
+
+	inode, err := fs.LookupPath(path)
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	xattrs, err := inode.ListXattr()
+	if err != nil {
+		return mapWinError(err)
+	}
+
+	for _, name := range xattrs {
+		if !fill(name) {
+			return -fuse.ERANGE
 		}
 	}
 
-	if (op.Mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)) != 0 {
-		// Zero fill
-		mod, _ := inode.zeroRange(op.Offset, op.Length)
-		modified = modified || mod
-	}
-
-	if modified && inode.CacheState == ST_CACHED {
-		inode.SetCacheState(ST_MODIFIED)
-		inode.fs.WakeupFlusher()
-	}
-
-	inode.mu.Unlock()
-
-	return
+	return 0
 }
 
-func (fs *GoofysFuse) SetConnection(conn *fuse.Connection) {
-	fs.connection = conn
+// Notify sends file invalidation/deletion notifications to the kernel
+func (fs *GoofysWin) Notify(notifications []interface{}) {
+	if fs.host == nil {
+		return
+	}
+	var parent fuseops.InodeID
+	var child string
+	var op uint32
+	for _, n := range notifications {
+		switch v := n.(type) {
+		case *fuseops.NotifyDelete:
+			parent = v.Parent
+			child = v.Name
+			op = fuse.NOTIFY_UNLINK
+		case *fuseops.NotifyInvalEntry:
+			parent = v.Parent
+			child = v.Name
+			op = fuse.NOTIFY_CHMOD | fuse.NOTIFY_CHOWN | fuse.NOTIFY_UTIME | fuse.NOTIFY_CHFLAGS | fuse.NOTIFY_TRUNCATE
+		default:
+			panic("Unexpected notification")
+		}
+		fs.mu.RLock()
+		in := fs.inodes[parent]
+		fs.mu.RUnlock()
+		if in != nil {
+			in.mu.Lock()
+			p := in.FullName()
+			in.mu.Unlock()
+			fs.host.Notify(p+"/"+child, op)
+		}
+	}
 }
 
 // Mount the file system based on the supplied arguments, returning a
-// fuse.MountedFileSystem that can be joined to wait for unmounting.
-func MountFuse(
+// MountedFS that can be joined to wait for unmounting.
+func MountWin(
 	ctx context.Context,
 	bucketName string,
-	flags *FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
-
-	// Mount the file system.
-	mountCfg := &fuse.MountConfig{
-		FSName:                  bucketName,
-		Subtype:                 "geesefs",
-		Options:                 flags.MountOptions,
-		ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
-		DisableWritebackCaching: true,
-		UseVectoredRead:         true,
-	}
-
-	if flags.DebugFuse {
-		fuseLog := GetLogger("fuse")
-		fuseLog.Level = logrus.DebugLevel
-		mountCfg.DebugLogger = GetStdLogger(fuseLog, logrus.DebugLevel)
-	}
+	flags *common.FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
 
 	if flags.DebugFuse || flags.DebugMain {
 		log.Level = logrus.DebugLevel
 	}
 
+	if flags.DebugFuse {
+		fuseLog.Level = logrus.DebugLevel
+	}
+
 	fs, err = NewGoofys(ctx, bucketName, flags)
 	if fs == nil {
 		if err == nil {
-			err = fmt.Errorf("Mount: initialization failed")
+			err = fmt.Errorf("GeeseFS initialization failed")
 		}
 		return
 	}
-	fsint := NewGoofysFuse(fs)
-	server := fuseutil.NewFileSystemServer(fsint)
 
-	mfs, err = fuse.Mount(flags.MountPoint, server, mountCfg)
-	if err != nil {
-		err = fmt.Errorf("Mount: %v", err)
-		return
-	}
-
-	return
-}
-
-func TryUnmount(mountPoint string) (err error) {
-	for i := 0; i < 20; i++ {
-		err = fuse.Unmount(mountPoint)
-		if err != nil {
-			time.Sleep(time.Second)
+	var mountOpt []string
+	for k, v := range flags.MountOptions {
+		if v != "" {
+			mountOpt = append(mountOpt, "--"+k+"="+v)
 		} else {
-			break
+			mountOpt = append(mountOpt, k)
 		}
 	}
-	return
+	fuseLog.Debugf("Starting WinFSP with options: %v", strings.Join(mountOpt, " "))
+
+	fsint := NewGoofysWin(fs)
+	host := fuse.NewFileSystemHost(fsint)
+	fsint.host = host
+	host.SetCapReaddirPlus(true)
+	go func() {
+		ok := host.Mount(flags.MountPoint, mountOpt)
+		if !ok {
+			fsint.initCh <- 0
+		}
+	}()
+	v := <-fsint.initCh
+	if v == 0 {
+		return nil, nil, fmt.Errorf("WinFSP initialization failed")
+	}
+
+	return fs, fsint, nil
 }
-*/
+
+// Join is a part of MountedFS interface
+func (fs *GoofysWin) Join(ctx context.Context) error {
+	<-fs.initCh
+	return nil
+}
+
+// Unmount is also a part of MountedFS interface
+func (fs *GoofysWin) Unmount() error {
+	if !fs.initialized {
+		return fmt.Errorf("not mounted")
+	}
+	r := fs.host.Unmount()
+	if !r {
+		return fmt.Errorf("unmounting failed")
+	}
+	return nil
+}

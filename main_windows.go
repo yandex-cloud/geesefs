@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"syscall"
 
@@ -53,8 +52,7 @@ func mount(
 	ctx context.Context,
 	bucketName string,
 	flags *common.FlagStorage) (fs *internal.Goofys, mfs internal.MountedFS, err error) {
-	//return internal.MountFuse(ctx, bucketName, flags)
-	return nil, nil, fmt.Errorf("not implemented")
+	return internal.MountWin(ctx, bucketName, flags)
 }
 
 func messagePath() {

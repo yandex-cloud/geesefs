@@ -872,7 +872,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		flags.Setgid = int(flags.Gid)
 	}
 
-	if flags.Setuid != 0 {
+	if flags.Setuid > 0 {
 		if _, ok := flags.MountOptions["user_id"]; !ok {
 			flags.MountOptions["user_id"] = fmt.Sprintf("%v", flags.Setuid)
 		}
