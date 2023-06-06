@@ -757,11 +757,6 @@ func (s *GoofysTest) TestGetRootInode(t *C) {
 	t.Assert(root.Id, Equals, fuseops.InodeID(fuseops.RootInodeID))
 }
 
-func (s *GoofysTest) TestGetRootAttributes(t *C) {
-	_, err := s.getRoot(t).GetAttributes()
-	t.Assert(err, IsNil)
-}
-
 func (s *GoofysTest) ForgetInode(t *C, inode fuseops.InodeID) {
 	err := s.fs.ForgetInode(s.ctx, &fuseops.ForgetInodeOp{Inode: inode})
 	t.Assert(err, IsNil)
@@ -831,8 +826,7 @@ func (s *GoofysTest) TestGetInodeAttributes(t *C) {
 	inode, err := s.getRoot(t).LookUp("file1", false)
 	t.Assert(err, IsNil)
 
-	attr, err := inode.GetAttributes()
-	t.Assert(err, IsNil)
+	attr := inode.GetAttributes()
 	t.Assert(attr.Size, Equals, uint64(len("file1")))
 }
 
@@ -3246,12 +3240,12 @@ func (s *GoofysTest) TestWriteSeekWriteFuse(t *C) {
 func (s *GoofysTest) TestDirMtimeCreate(t *C) {
 	root := s.getRoot(t)
 
-	attr, _ := root.GetAttributes()
+	attr := root.GetAttributes()
 	m1 := attr.Mtime
 	time.Sleep(time.Second)
 
 	_, _ = root.Create("foo")
-	attr2, _ := root.GetAttributes()
+	attr2 := root.GetAttributes()
 	m2 := attr2.Mtime
 
 	t.Assert(m1.Before(m2), Equals, true)
@@ -3260,7 +3254,7 @@ func (s *GoofysTest) TestDirMtimeCreate(t *C) {
 func (s *GoofysTest) TestDirMtimeLs(t *C) {
 	root := s.getRoot(t)
 
-	attr, _ := root.GetAttributes()
+	attr := root.GetAttributes()
 	m1 := attr.Mtime
 	time.Sleep(3 * time.Second)
 
@@ -3274,7 +3268,7 @@ func (s *GoofysTest) TestDirMtimeLs(t *C) {
 
 	s.readDirIntoCache(t, fuseops.RootInodeID)
 
-	attr2, _ := root.GetAttributes()
+	attr2 := root.GetAttributes()
 	m2 := attr2.Mtime
 
 	t.Assert(m1.Before(m2), Equals, true)
@@ -3419,7 +3413,7 @@ func (s *GoofysTest) TestDirMTime(t *C) {
 	dir1, err := s.LookUpInode(t, "dir1")
 	t.Assert(err, IsNil)
 
-	attr1, _ := dir1.GetAttributes()
+	attr1 := dir1.GetAttributes()
 	m1 := attr1.Mtime
 
 	time.Sleep(2 * time.Second)
@@ -3427,13 +3421,13 @@ func (s *GoofysTest) TestDirMTime(t *C) {
 	dir2, err := dir1.MkDir("dir2")
 	t.Assert(err, IsNil)
 
-	attr2, _ := dir2.GetAttributes()
+	attr2 := dir2.GetAttributes()
 	m2 := attr2.Mtime
 	t.Assert(m1.Add(2*time.Second).Before(m2), Equals, true)
 
 	// dir1 didn't have an explicit mtime, so it should update now
 	// that we did a mkdir inside it
-	attr1, _ = dir1.GetAttributes()
+	attr1 = dir1.GetAttributes()
 	m1 = attr1.Mtime
 	t.Assert(m1, Equals, m2)
 
@@ -3443,7 +3437,7 @@ func (s *GoofysTest) TestDirMTime(t *C) {
 	dir2, err = s.LookUpInode(t, "dir2")
 	t.Assert(err, IsNil)
 
-	attr2, _ = dir2.GetAttributes()
+	attr2 = dir2.GetAttributes()
 	m2 = attr2.Mtime
 
 	// this fails because we are listing dir/, which means we
@@ -3455,7 +3449,7 @@ func (s *GoofysTest) TestDirMTime(t *C) {
 		dir3, err := s.LookUpInode(t, "dir2/dir3")
 		t.Assert(err, IsNil)
 
-		attr3, _ := dir3.GetAttributes()
+		attr3 := dir3.GetAttributes()
 		// setupDefaultEnv is before mounting
 		t.Assert(attr3.Mtime.Before(m2), Equals, true)
 	}
@@ -3479,7 +3473,7 @@ func (s *GoofysTest) TestDirMTime(t *C) {
 	newfile, err := dir2.LookUp("newfile", false)
 	t.Assert(err, IsNil)
 
-	attr2New, _ := dir2.GetAttributes()
+	attr2New := dir2.GetAttributes()
 	// mtime should reflect that of the latest object
 	// GCS can return nano second resolution so truncate to second for compare
 	t.Assert(attr2New.Mtime.Unix(), Equals, newfile.Attributes.Mtime.Unix())
@@ -3502,7 +3496,7 @@ func (s *GoofysTest) TestDirMTimeNoTTL(t *C) {
 	dir2, err := s.LookUpInode(t, "dir2")
 	t.Assert(err, IsNil)
 
-	attr2, _ := dir2.GetAttributes()
+	attr2 := dir2.GetAttributes()
 	m2 := attr2.Mtime
 
 	// dir2/dir3/ exists and has mtime
@@ -3510,7 +3504,7 @@ func (s *GoofysTest) TestDirMTimeNoTTL(t *C) {
 	dir3, err := s.LookUpInode(t, "dir2/dir10")
 	t.Assert(err, IsNil)
 
-	attr3, _ := dir3.GetAttributes()
+	attr3 := dir3.GetAttributes()
 	// dir2/dir10 is preloaded when looking up dir2 so its mtime is the same
 	t.Assert(attr3.Mtime, Equals, m2)
 }

@@ -544,7 +544,7 @@ func (fs *ClusterFs) lookUpInode2(inode *Inode) (pbAttr *pb.Attributes, err erro
 // REQUIRED_LOCK(inode.KeepOwnerLock)
 func (fs *ClusterFs) getInodeAttributes(inode *Inode, size *uint64, mtime *time.Time, ctime *time.Time, mode *os.FileMode) {
 	inode.mu.Lock()
-	attr, _ := inode.GetAttributes()
+	attr := inode.GetAttributes()
 	inode.mu.Unlock()
 
 	*size = attr.Size
@@ -584,11 +584,7 @@ func (fs *ClusterFs) setInodeAttributes(inode *Inode, size *uint64, mtime *time.
 		inode.fs.WakeupFlusher()
 	}
 
-	attr, err := inode.GetAttributes()
-	err = mapAwsError(err)
-	if err != nil {
-		return err
-	}
+	attr := inode.GetAttributes()
 
 	*size = attr.Size
 	*mtime = attr.Mtime

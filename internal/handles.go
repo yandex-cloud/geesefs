@@ -407,10 +407,13 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 	return res == 0
 }
 
-func (inode *Inode) GetAttributes() (*fuseops.InodeAttributes, error) {
+// LOCKS_EXCLUDED(inode.mu)
+func (inode *Inode) GetAttributes() *fuseops.InodeAttributes {
 	inode.logFuse("GetAttributes")
+	inode.mu.Lock()
 	attr := inode.InflateAttributes()
-	return &attr, nil
+	inode.mu.Unlock()
+	return &attr
 }
 
 func (inode *Inode) isDir() bool {

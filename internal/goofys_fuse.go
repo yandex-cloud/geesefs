@@ -94,12 +94,9 @@ func (fs *GoofysFuse) GetInodeAttributes(
 		return syscall.ESTALE
 	}
 
-	attr, err := inode.GetAttributes()
-	err = mapAwsError(err)
-	if err == nil {
-		op.Attributes = *attr
-		op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	}
+	attr := inode.GetAttributes()
+	op.Attributes = *attr
+	op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 
 	return
 }
@@ -709,12 +706,10 @@ func (fs *GoofysFuse) SetInodeAttributes(
 		return
 	}
 
-	attr, err := inode.GetAttributes()
-	err = mapAwsError(err)
-	if err == nil {
-		op.Attributes = *attr
-		op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	}
+	attr := inode.GetAttributes()
+	op.Attributes = *attr
+	op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+
 	return
 }
 
