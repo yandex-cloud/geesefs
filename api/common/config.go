@@ -38,7 +38,7 @@ type NodeConfig struct {
 
 type FlagStorage struct {
 	// File system
-	MountOptions      map[string]string
+	MountOptions      []string
 	MountPoint        string
 	MountPointArg     string
 	MountPointCreated string

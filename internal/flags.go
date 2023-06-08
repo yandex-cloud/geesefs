@@ -19,7 +19,6 @@ package internal
 import (
 	. "github.com/yandex-cloud/geesefs/api/common"
 
-	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -641,29 +640,6 @@ func NewApp() (app *cli.App) {
 	return
 }
 
-func parseOptions(m map[string]string, s string) {
-	// NOTE(jacobsa): The man pages don't define how escaping works, and as far
-	// as I can tell there is no way to properly escape or quote a comma in the
-	// options list for an fstab entry. So put our fingers in our ears and hope
-	// that nobody needs a comma.
-	for _, p := range strings.Split(s, ",") {
-		var name string
-		var value string
-
-		// Split on the first equals sign.
-		if equalsIndex := strings.IndexByte(p, '='); equalsIndex != -1 {
-			name = p[:equalsIndex]
-			value = p[equalsIndex+1:]
-		} else {
-			name = p
-		}
-
-		m[name] = value
-	}
-
-	return
-}
-
 func parsePartSizes(s string) (result []PartSizeConfig) {
 	partSizes := strings.Split(s, ",")
 	totalCount := uint64(0)
@@ -729,7 +705,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 	flags := &FlagStorage{
 		// File system
-		MountOptions:           make(map[string]string),
+		MountOptions:           c.StringSlice("o"),
 		DirMode:                os.FileMode(c.Int("dir-mode")),
 		FileMode:               os.FileMode(c.Int("file-mode")),
 		Uid:                    uint32(c.Int("uid")),
@@ -860,22 +836,11 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		flags.EnableSpecials = false
 	}
 
-	// Handle the repeated "-o" flag.
-	for _, o := range c.StringSlice("o") {
-		parseOptions(flags.MountOptions, o)
-	}
-
 	if syscall.Getuid() == 0 && !c.IsSet("setuid") && flags.Uid != 0 {
 		flags.Setuid = int(flags.Uid)
 	}
 	if syscall.Getgid() == 0 && !c.IsSet("setgid") && flags.Gid != 0 {
 		flags.Setgid = int(flags.Gid)
-	}
-
-	if flags.Setuid > 0 {
-		if _, ok := flags.MountOptions["user_id"]; !ok {
-			flags.MountOptions["user_id"] = fmt.Sprintf("%v", flags.Setuid)
-		}
 	}
 
 	flags.MountPointArg = c.Args()[1]

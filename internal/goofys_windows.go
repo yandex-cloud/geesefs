@@ -20,7 +20,6 @@ import (
 	"os"
 	"runtime"
 	"sync/atomic"
-	"strings"
 	"syscall"
 	"time"
 
@@ -909,14 +908,15 @@ func MountWin(
 	}
 
 	var mountOpt []string
-	for k, v := range flags.MountOptions {
-		if v != "" {
-			mountOpt = append(mountOpt, "--"+k+"="+v)
-		} else {
-			mountOpt = append(mountOpt, k)
-		}
+	if flags.DebugFuse {
+		mountOpt = append(mountOpt, "-o", "debug")
 	}
-	fuseLog.Debugf("Starting WinFSP with options: %v", strings.Join(mountOpt, " "))
+	mountOpt = append(mountOpt, "-o", fmt.Sprintf("uid=%v", int32(flags.Uid)))
+	mountOpt = append(mountOpt, "-o", fmt.Sprintf("gid=%v", int32(flags.Gid)))
+	for _, s := range flags.MountOptions {
+		mountOpt = append(mountOpt, "-o", s)
+	}
+	fuseLog.Debugf("Starting WinFSP with options: %v", mountOpt)
 
 	fsint := NewGoofysWin(fs)
 	host := fuse.NewFileSystemHost(fsint)

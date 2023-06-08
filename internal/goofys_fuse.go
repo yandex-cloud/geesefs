@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -882,6 +883,30 @@ func (m *FuseMfsWrapper) Unmount() error {
 	return TryUnmount(m.mountPoint)
 }
 
+func convertFuseOptions(flags *FlagStorage) map[string]string {
+	optMap := make(map[string]string)
+	for _, o := range flags.MountOptions {
+		// NOTE(jacobsa): The man pages don't define how escaping works, and as far
+		// as I can tell there is no way to properly escape or quote a comma in the
+		// options list for an fstab entry. So put our fingers in our ears and hope
+		// that nobody needs a comma.
+		for _, p := range strings.Split(o, ",") {
+			// Split on the first equals sign.
+			if equalsIndex := strings.IndexByte(p, '='); equalsIndex != -1 {
+				optMap[p[:equalsIndex]] = p[equalsIndex+1:]
+			} else {
+				optMap[p] = ""
+			}
+		}
+	}
+	if flags.Setuid > 0 {
+		if _, ok := optMap["user_id"]; !ok {
+			optMap["user_id"] = fmt.Sprintf("%v", flags.Setuid)
+		}
+	}
+	return optMap
+}
+
 // Mount the file system based on the supplied arguments, returning a
 // fuse.MountedFileSystem that can be joined to wait for unmounting.
 func MountFuse(
@@ -893,7 +918,7 @@ func MountFuse(
 	mountCfg := &fuse.MountConfig{
 		FSName:                  bucketName,
 		Subtype:                 "geesefs",
-		Options:                 flags.MountOptions,
+		Options:                 convertFuseOptions(flags),
 		ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
 		DisableWritebackCaching: true,
 		UseVectoredRead:         true,

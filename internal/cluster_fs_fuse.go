@@ -905,7 +905,7 @@ func MountCluster(
 	mountConfig := &fuse.MountConfig{
 		FSName:                  bucketName,
 		Subtype:                 "geesefs",
-		Options:                 flags.MountOptions,
+		Options:                 convertFuseOptions(flags),
 		ErrorLogger:             common.GetStdLogger(common.NewLogger("fuse"), logrus.ErrorLevel),
 		DisableWritebackCaching: true,
 		UseVectoredRead:         true,
