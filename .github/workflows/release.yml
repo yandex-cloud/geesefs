@@ -29,6 +29,9 @@ jobs:
     - name: Build Mac arm64
       run: env CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o geesefs-mac-arm64 -v
 
+    - name: Build Windows x64
+      run: env CGO_ENABLED=0 GOOS=windows go build -o geesefs-win-x64.exe -v
+
     - name: Build tests
       run: go test -c github.com/yandex-cloud/geesefs/internal -o geesefs-tests-linux-amd64
 
@@ -39,11 +42,13 @@ jobs:
         s3cmd ${{secrets.S3CMD}} put geesefs-linux-arm64 s3://${{secrets.S3BUCKET}}/geesefs-linux-arm64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-amd64 s3://${{secrets.S3BUCKET}}/geesefs-mac-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-arm64 s3://${{secrets.S3BUCKET}}/geesefs-mac-arm64
+        s3cmd ${{secrets.S3CMD}} put geesefs-win-x64.exe s3://${{secrets.S3BUCKET}}/geesefs-win-x64.exe
         s3cmd ${{secrets.S3CMD}} put geesefs-tests-linux-amd64 s3://${{secrets.S3BUCKET}}/geesefs-tests-linux-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-linux-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-linux-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-linux-arm64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-linux-arm64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-mac-amd64
         s3cmd ${{secrets.S3CMD}} put geesefs-mac-arm64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-mac-arm64
+        s3cmd ${{secrets.S3CMD}} put geesefs-win-x64.exe s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-win-x64.exe
         s3cmd ${{secrets.S3CMD}} put geesefs-tests-linux-amd64 s3://${{secrets.S3BUCKET}}/${GITHUB_REF/refs\/tags\/v/}/geesefs-tests-linux-amd64
 
     - name: Test
@@ -58,6 +63,7 @@ jobs:
           geesefs-linux-arm64
           geesefs-mac-amd64
           geesefs-mac-arm64
+          geesefs-win-x64.exe
 
     - name: Run xfstests
       # Often crashes in CI due to memory limits
