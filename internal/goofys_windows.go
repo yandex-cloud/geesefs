@@ -67,6 +67,7 @@ func (fs *GoofysWin) Destroy() {
 // Statfs gets file system statistics.
 func (fs *GoofysWin) Statfs(path string, stat *fuse.Statfs_t) int {
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
+	fuseLog.Debugf("<--> Statfs %v", path)
 	const BLOCK_SIZE = 4096
 	const TOTAL_SPACE = 1 * 1024 * 1024 * 1024 * 1024 * 1024 // 1PB
 	const TOTAL_BLOCKS = TOTAL_SPACE / BLOCK_SIZE
@@ -116,7 +117,14 @@ func mapWinError(err error) int {
 }
 
 // Mknod creates a file node.
-func (fs *GoofysWin) Mknod(path string, mode uint32, dev uint64) int {
+func (fs *GoofysWin) Mknod(path string, mode uint32, dev uint64) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Mknod %v %v %v", path, mode, dev)
+		defer func() {
+			fuseLog.Debugf("<- Mknod %v %v %v = %v", path, mode, dev, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	if (mode & fuse.S_IFMT) != fuse.S_IFDIR &&
@@ -148,7 +156,14 @@ func (fs *GoofysWin) Mknod(path string, mode uint32, dev uint64) int {
 }
 
 // Mkdir creates a directory.
-func (fs *GoofysWin) Mkdir(path string, mode uint32) int {
+func (fs *GoofysWin) Mkdir(path string, mode uint32) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Mkdir %v %v", path, mode)
+		defer func() {
+			fuseLog.Debugf("<- Mkdir %v %v = %v", path, mode, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	parent, child, err := fs.LookupParent(path)
@@ -170,7 +185,14 @@ func (fs *GoofysWin) Mkdir(path string, mode uint32) int {
 }
 
 // Unlink removes a file.
-func (fs *GoofysWin) Unlink(path string) int {
+func (fs *GoofysWin) Unlink(path string) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Unlink %v", path)
+		defer func() {
+			fuseLog.Debugf("<- Unlink %v = %v", path, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	parent, child, err := fs.LookupParent(path)
@@ -183,7 +205,14 @@ func (fs *GoofysWin) Unlink(path string) int {
 }
 
 // Rmdir removes a directory.
-func (fs *GoofysWin) Rmdir(path string) int {
+func (fs *GoofysWin) Rmdir(path string) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Rmdir %v", path)
+		defer func() {
+			fuseLog.Debugf("<- Rmdir %v = %v", path, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	parent, child, err := fs.LookupParent(path)
@@ -196,7 +225,14 @@ func (fs *GoofysWin) Rmdir(path string) int {
 }
 
 // Symlink creates a symbolic link.
-func (fs *GoofysWin) Symlink(target string, newpath string) int {
+func (fs *GoofysWin) Symlink(target string, newpath string) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Symlink %v %v", target, newpath)
+		defer func() {
+			fuseLog.Debugf("<- Symlink %v %v = %v", target, newpath, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	parent, child, err := fs.LookupParent(newpath)
@@ -209,7 +245,14 @@ func (fs *GoofysWin) Symlink(target string, newpath string) int {
 }
 
 // Readlink reads the target of a symbolic link.
-func (fs *GoofysWin) Readlink(path string) (int, string) {
+func (fs *GoofysWin) Readlink(path string) (ret int, target string) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Readlink %v", path)
+		defer func() {
+			fuseLog.Debugf("<- Readlink %v = %v %v", path, ret, target)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -217,7 +260,7 @@ func (fs *GoofysWin) Readlink(path string) (int, string) {
 		return mapWinError(err), ""
 	}
 
-	target, err := inode.ReadSymlink()
+	target, err = inode.ReadSymlink()
 	if err != nil {
 		return mapWinError(err), ""
 	}
@@ -226,7 +269,14 @@ func (fs *GoofysWin) Readlink(path string) (int, string) {
 }
 
 // Rename renames a file.
-func (fs *GoofysWin) Rename(oldpath string, newpath string) int {
+func (fs *GoofysWin) Rename(oldpath string, newpath string) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Rename %v %v", oldpath, newpath)
+		defer func() {
+			fuseLog.Debugf("<- Rename %v %v = %v", oldpath, newpath, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	parent, oldName, err := fs.LookupParent(oldpath)
@@ -260,7 +310,14 @@ func (fs *GoofysWin) Rename(oldpath string, newpath string) int {
 }
 
 // Chmod changes the permission bits of a file.
-func (fs *GoofysWin) Chmod(path string, mode uint32) int {
+func (fs *GoofysWin) Chmod(path string, mode uint32) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Chmod %v %v", path, mode)
+		defer func() {
+			fuseLog.Debugf("<- Chmod %v %v = %v", path, mode, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -274,7 +331,14 @@ func (fs *GoofysWin) Chmod(path string, mode uint32) int {
 }
 
 // Chown changes the owner and group of a file.
-func (fs *GoofysWin) Chown(path string, uid uint32, gid uint32) int {
+func (fs *GoofysWin) Chown(path string, uid uint32, gid uint32) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Chown %v %v %v", path, uid, gid)
+		defer func() {
+			fuseLog.Debugf("<- Chown %v %v %v = %v", path, uid, gid, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -286,7 +350,14 @@ func (fs *GoofysWin) Chown(path string, uid uint32, gid uint32) int {
 }
 
 // Utimens changes the access and modification times of a file.
-func (fs *GoofysWin) Utimens(path string, tmsp []fuse.Timespec) int {
+func (fs *GoofysWin) Utimens(path string, tmsp []fuse.Timespec) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Utimens %v %v", path, tmsp)
+		defer func() {
+			fuseLog.Debugf("<- Utimens %v %v = %v", path, tmsp, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -302,13 +373,23 @@ func (fs *GoofysWin) Utimens(path string, tmsp []fuse.Timespec) int {
 
 // Access is only used by winfsp with FSP_FUSE_DELETE_OK. Ignore it
 func (fs *GoofysWin) Access(path string, mask uint32) int {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("<--> Access %v %v = 0", path, mask)
+	}
 	atomic.AddInt64(&fs.stats.noops, 1)
 	return 0
 }
 
 // Create creates and opens a file.
 // The flags are a combination of the fuse.O_* constants.
-func (fs *GoofysWin) Create(path string, flags int, mode uint32) (int, uint64) {
+func (fs *GoofysWin) Create(path string, flags int, mode uint32) (ret int, fhId uint64) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Create %v %v %v", path, flags, mode)
+		defer func() {
+			fuseLog.Debugf("<- Create %v %v %v = %v %v", path, flags, mode, ret, fhId)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	parent, child, err := fs.LookupParent(path)
@@ -333,7 +414,14 @@ func (fs *GoofysWin) Create(path string, flags int, mode uint32) (int, uint64) {
 
 // Open opens a file.
 // The flags are a combination of the fuse.O_* constants.
-func (fs *GoofysWin) Open(path string, flags int) (int, uint64) {
+func (fs *GoofysWin) Open(path string, flags int) (ret int, fhId uint64) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Open %v %v", path, flags)
+		defer func() {
+			fuseLog.Debugf("<- Open %v %v = %v %v", path, flags, ret, fhId)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.noops, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -356,7 +444,14 @@ func (fs *GoofysWin) Open(path string, flags int) (int, uint64) {
 }
 
 // Getattr gets file attributes.
-func (fs *GoofysWin) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
+func (fs *GoofysWin) Getattr(path string, stat *fuse.Stat_t, fh uint64) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Getattr %v %v", path, fh)
+		defer func() {
+			fuseLog.Debugf("<- Getattr %v %v = %v %v", path, fh, ret, *stat)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -389,7 +484,14 @@ func makeFuseAttributes(attr *fuseops.InodeAttributes, stat *fuse.Stat_t) {
 }
 
 // Truncate changes the size of a file.
-func (fs *GoofysWin) Truncate(path string, size int64, fh uint64) int {
+func (fs *GoofysWin) Truncate(path string, size int64, fh uint64) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Truncate %v %v %v", path, size, fh)
+		defer func() {
+			fuseLog.Debugf("<- Truncate %v %v %v = %v", path, size, fh, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -403,7 +505,14 @@ func (fs *GoofysWin) Truncate(path string, size int64, fh uint64) int {
 }
 
 // Read reads data from a file.
-func (fs *GoofysWin) Read(path string, buff []byte, ofst int64, fhId uint64) int {
+func (fs *GoofysWin) Read(path string, buff []byte, ofst int64, fhId uint64) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Read %v %v %v %v", path, buff, ofst, fhId)
+		defer func() {
+			fuseLog.Debugf("<- Read %v %v %v %v = %v", path, buff, ofst, fhId, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.reads, 1)
 
 	fs.mu.RLock()
@@ -427,7 +536,14 @@ func (fs *GoofysWin) Read(path string, buff []byte, ofst int64, fhId uint64) int
 }
 
 // Write writes data to a file.
-func (fs *GoofysWin) Write(path string, buff []byte, ofst int64, fhId uint64) int {
+func (fs *GoofysWin) Write(path string, buff []byte, ofst int64, fhId uint64) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Write %v %v %v %v", path, buff, ofst, fhId)
+		defer func() {
+			fuseLog.Debugf("<- Write %v %v %v %v = %v", path, buff, ofst, fhId, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.writes, 1)
 
 	fs.mu.RLock()
@@ -446,13 +562,23 @@ func (fs *GoofysWin) Write(path string, buff []byte, ofst int64, fhId uint64) in
 }
 
 // Flush flushes cached file data. Ignore it.
-func (fs *GoofysWin) Flush(path string, fh uint64) int {
+func (fs *GoofysWin) Flush(path string, fhId uint64) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("<--> Flush %v %v = 0", path, fhId)
+	}
 	atomic.AddInt64(&fs.stats.noops, 1)
 	return 0
 }
 
 // Release closes an open file.
-func (fs *GoofysWin) Release(path string, fhId uint64) int {
+func (fs *GoofysWin) Release(path string, fhId uint64) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Release %v %v", path, fhId)
+		defer func() {
+			fuseLog.Debugf("<- Release %v %v = %v", path, fhId, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.noops, 1)
 
 	fs.mu.Lock()
@@ -470,7 +596,14 @@ func (fs *GoofysWin) Release(path string, fhId uint64) int {
 }
 
 // Fsync synchronizes file contents.
-func (fs *GoofysWin) Fsync(path string, datasync bool, fhId uint64) int {
+func (fs *GoofysWin) Fsync(path string, datasync bool, fhId uint64) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Fsync %v %v %v", path, datasync, fhId)
+		defer func() {
+			fuseLog.Debugf("<- Fsync %v %v %v = %v", path, datasync, fhId, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	if !fs.flags.IgnoreFsync {
@@ -504,7 +637,14 @@ func (fs *GoofysWin) Fsync(path string, datasync bool, fhId uint64) int {
 }
 
 // Opendir opens a directory.
-func (fs *GoofysWin) Opendir(path string) (int, uint64) {
+func (fs *GoofysWin) Opendir(path string) (ret int, dhId uint64) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Opendir %v", path)
+		defer func() {
+			fuseLog.Debugf("<- Opendir %v = %v %v", path, ret, dhId)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.noops, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -526,7 +666,14 @@ func (fs *GoofysWin) Opendir(path string) (int, uint64) {
 // Readdir reads a directory.
 func (fs *GoofysWin) Readdir(path string,
 	fill func(name string, stat *fuse.Stat_t, ofst int64) bool,
-	ofst int64, dhId uint64) int {
+	ofst int64, dhId uint64) (ret int) {
+
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Readdir %v %v %v", path, ofst, dhId)
+		defer func() {
+			fuseLog.Debugf("<- Readdir %v %v %v = %v", path, ofst, dhId, ret)
+		}()
+	}
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
@@ -563,7 +710,7 @@ func (fs *GoofysWin) Readdir(path string,
 			if !fill(e.Name, st, int64(e.Offset)) {
 				break
 			}
-			dh.inode.logFuse("<-- ReadDir", e.Name, e.Offset)
+			fuseLog.Debugf("<- Readdir %v %v %v = %v %v", path, ofst, dhId, e.Name, e.Offset)
 		}
 		// We have to modify it here because fill() MAY not send the entry
 		if dh.lastInternalOffset >= 0 {
@@ -577,7 +724,14 @@ func (fs *GoofysWin) Readdir(path string,
 }
 
 // Releasedir closes an open directory.
-func (fs *GoofysWin) Releasedir(path string, dhId uint64) int {
+func (fs *GoofysWin) Releasedir(path string, dhId uint64) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Releasedir %v %v", path, dhId)
+		defer func() {
+			fuseLog.Debugf("<- Releasedir %v %v = %v", path, dhId, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.noops, 1)
 
 	fs.mu.RLock()
@@ -594,12 +748,19 @@ func (fs *GoofysWin) Releasedir(path string, dhId uint64) int {
 }
 
 // Fsyncdir synchronizes directory contents.
-func (fs *GoofysWin) Fsyncdir(path string, datasync bool, fhId uint64) int {
+func (fs *GoofysWin) Fsyncdir(path string, datasync bool, fhId uint64) (ret int) {
 	return fs.Fsync(path, datasync, fhId)
 }
 
 // Setxattr sets extended attributes.
-func (fs *GoofysWin) Setxattr(path string, name string, value []byte, flags int) int {
+func (fs *GoofysWin) Setxattr(path string, name string, value []byte, flags int) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Setxattr %v %v %v %v", path, name, value, flags)
+		defer func() {
+			fuseLog.Debugf("<- Setxattr %v %v %v %v = %v", path, name, value, flags, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -617,7 +778,14 @@ func (fs *GoofysWin) Setxattr(path string, name string, value []byte, flags int)
 }
 
 // Getxattr gets extended attributes.
-func (fs *GoofysWin) Getxattr(path string, name string) (int, []byte) {
+func (fs *GoofysWin) Getxattr(path string, name string) (ret int, data []byte) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Getxattr %v %v", path, name)
+		defer func() {
+			fuseLog.Debugf("<- Getxattr %v %v = %v %v", path, name, ret, data)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -634,7 +802,14 @@ func (fs *GoofysWin) Getxattr(path string, name string) (int, []byte) {
 }
 
 // Removexattr removes extended attributes.
-func (fs *GoofysWin) Removexattr(path string, name string) int {
+func (fs *GoofysWin) Removexattr(path string, name string) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Removexattr %v %v", path, name)
+		defer func() {
+			fuseLog.Debugf("<- Removexattr %v %v = %v", path, name, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -647,7 +822,14 @@ func (fs *GoofysWin) Removexattr(path string, name string) int {
 }
 
 // Listxattr lists extended attributes.
-func (fs *GoofysWin) Listxattr(path string, fill func(name string) bool) int {
+func (fs *GoofysWin) Listxattr(path string, fill func(name string) bool) (ret int) {
+	if fuseLog.Level == logrus.DebugLevel {
+		fuseLog.Debugf("-> Listxattr %v", path)
+		defer func() {
+			fuseLog.Debugf("<- Listxattr %v = %v", path, ret)
+		}()
+	}
+
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
 	inode, err := fs.LookupPath(path)
@@ -664,6 +846,7 @@ func (fs *GoofysWin) Listxattr(path string, fill func(name string) bool) int {
 		if !fill(name) {
 			return -fuse.ERANGE
 		}
+		fuseLog.Debugf("<- Listxattr %v = %v", path, name)
 	}
 
 	return 0
