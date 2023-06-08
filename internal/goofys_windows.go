@@ -32,6 +32,32 @@ import (
 
 // winfsp/cgofuse interface to the file system
 
+const fuseOptions = `WinFSP options:
+   -o umask=MASK              set file permissions (octal)
+   -o FileSecurity=SDDL       set file DACL (SDDL format)
+   -o create_umask=MASK       set newly created file permissions (octal)
+      -o create_file_umask=MASK      for files only
+      -o create_dir_umask=MASK       for directories only
+   -o uid=N                   set file owner (default is mounting user id)
+   -o gid=N                   set file group (default is mounting user group)
+   -o rellinks                interpret absolute symlinks as volume relative
+   -o dothidden               dot files have the Windows hidden file attrib
+   -o volname=NAME            set volume label
+   -o VolumePrefix=UNC        set UNC prefix (/Server/Share)
+   -o FileSystemName=NAME     set file system name (use NTFS to run executables)
+   -o debug                   enable debug output
+   -o DebugLog=FILE           debug log file (requires -o debug)
+WinFSP advanced options:
+   -o FileInfoTimeout=N       metadata timeout (millis, -1 for data caching)
+   -o DirInfoTimeout=N        directory info timeout (millis)
+   -o EaTimeout=N             extended attribute timeout (millis)
+   -o VolumeInfoTimeout=N     volume info timeout (millis)
+   -o KeepFileCache           do not discard cache when files are closed
+   -o LegacyUnlinkRename      do not support new POSIX unlink/rename
+   -o ThreadCount             number of file system dispatcher threads
+   -o uidmap=UID:SID[;...]    explicit UID <-> SID map (max 8 entries)
+`;
+
 type GoofysWin struct {
 	fuse.FileSystemBase
 	*Goofys

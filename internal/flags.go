@@ -72,8 +72,8 @@ S3 OPTIONS:
    {{end}}
 MISC OPTIONS:
    {{range category .Flags "misc"}}{{.}}
-   {{end}}{{end}}{{if .Copyright }}
-COPYRIGHT:
+   {{end}}{{end}}
+`+fuseOptions+`{{if .Copyright }}COPYRIGHT:
    {{.Copyright}}
    {{end}}
 `
