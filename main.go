@@ -23,14 +23,11 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"context"
 
 	"github.com/urfave/cli"
-
-	daemon "github.com/sevlyar/go-daemon"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -99,47 +96,25 @@ func main() {
 			flags.Cleanup()
 		}()
 
-		var notifier *ParentNotifier
-		if !flags.Foreground {
-			notifier = NewParentNotifier()
-
-			messageArg0()
-
-			ctx := new(daemon.Context)
-			if flags.LogFile == "stderr" || flags.LogFile == "/dev/stderr" {
-				ctx.LogFileName = "/dev/stderr"
-			}
-			child, err = ctx.Reborn()
-
-			if err != nil {
-				panic(fmt.Sprintf("unable to daemonize: %v", err))
-			}
-
-			if flags.LogFile == "" {
-				if flags.Foreground || child != nil {
-					flags.LogFile = "stderr"
-				} else {
-					flags.LogFile = "syslog"
-				}
-			}
-
-			InitLoggers(flags.LogFile)
-
-			if child != nil {
-				// attempt to wait for child to notify parent
-				if notifier.Wait() {
-					return
-				} else {
-					return syscall.EINVAL
-				}
-			} else {
-				notifier.Cancel()
-				defer ctx.Release()
-			}
-
-		} else {
-			InitLoggers(flags.LogFile)
+		var daemonizer *Daemonizer
+		if !canDaemonize {
+			flags.Foreground = true
 		}
+		if flags.LogFile == "" {
+			if flags.Foreground {
+				flags.LogFile = "stderr"
+			} else {
+				flags.LogFile = "syslog"
+			}
+		}
+		if !flags.Foreground {
+			daemonizer = NewDaemonizer()
+			err := daemonizer.Daemonize(flags.LogFile)
+			if err != nil {
+				return err
+			}
+		}
+		InitLoggers(flags.LogFile)
 
 		pprof := flags.PProf
 		if pprof == "" && os.Getenv("PPROF") != "" {
@@ -163,13 +138,13 @@ func main() {
 
 		if err != nil {
 			if !flags.Foreground {
-				notifier.Notify(false)
+				daemonizer.NotifySuccess(false)
 			}
 			log.Fatalf("Mounting file system: %v", err)
 			// fatal also terminates itself
 		} else {
 			if !flags.Foreground {
-				notifier.Notify(true)
+				daemonizer.NotifySuccess(true)
 			}
 			log.Println("File system has been successfully mounted.")
 			// Let the user unmount with Ctrl-C (SIGINT)

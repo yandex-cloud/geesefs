@@ -25,7 +25,9 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
 	"github.com/kardianos/osext"
+	daemon "github.com/sevlyar/go-daemon"
 
 	"github.com/yandex-cloud/geesefs/api/common"
 	"github.com/yandex-cloud/geesefs/internal"
@@ -52,13 +54,15 @@ func kill(pid int, s os.Signal) (err error) {
 	return
 }
 
-type ParentNotifier struct {
+const canDaemonize = true
+
+type Daemonizer struct {
 	result os.Signal
 	wg sync.WaitGroup
 }
 
-func NewParentNotifier() *ParentNotifier {
-	p := &ParentNotifier{}
+func NewDaemonizer() *Daemonizer {
+	p := &Daemonizer{}
 
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGUSR1, syscall.SIGUSR2)
@@ -72,18 +76,46 @@ func NewParentNotifier() *ParentNotifier {
 	return p
 }
 
-func (p *ParentNotifier) Cancel() {
+func (p *Daemonizer) Daemonize(logFile string) error {
+	messageArg0()
+
+	ctx := new(daemon.Context)
+	if logFile == "stderr" || logFile == "/dev/stderr" {
+		ctx.LogFileName = "/dev/stderr"
+	}
+	child, err := ctx.Reborn()
+
+	if err != nil {
+		panic(fmt.Sprintf("unable to daemonize: %v", err))
+	}
+
+	if child != nil {
+		// attempt to wait for child to notify parent
+		if p.Wait() {
+			os.Exit(0)
+		} else {
+			return syscall.EINVAL
+		}
+	} else {
+		p.Cancel()
+		defer ctx.Release()
+	}
+
+	return nil
+}
+
+func (p *Daemonizer) Cancel() {
 	// kill our own waiting goroutine
 	kill(os.Getpid(), syscall.SIGUSR1)
 	p.wg.Wait()
 }
 
-func (p *ParentNotifier) Wait() bool {
+func (p *Daemonizer) Wait() bool {
 	p.wg.Wait()
 	return p.result == syscall.SIGUSR1
 }
 
-func (p *ParentNotifier) Notify(success bool) {
+func (p *Daemonizer) NotifySuccess(success bool) {
 	sig := syscall.SIGUSR1
 	if !success {
 		sig = syscall.SIGUSR2

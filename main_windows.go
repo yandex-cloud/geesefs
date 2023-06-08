@@ -29,21 +29,27 @@ func isSigUsr1(s os.Signal) bool {
 	return false
 }
 
-type ParentNotifier struct {
+const canDaemonize = false
+
+type Daemonizer struct {
 }
 
-func NewParentNotifier() *ParentNotifier {
-	return &ParentNotifier{}
+func NewDaemonizer() *Daemonizer {
+	return &Daemonizer{}
 }
 
-func (p *ParentNotifier) Cancel() {
+func (p *Daemonizer) Daemonize(logFile string) error {
+	return nil
 }
 
-func (p *ParentNotifier) Wait() bool {
+func (p *Daemonizer) Cancel() {
+}
+
+func (p *Daemonizer) Wait() bool {
 	return true
 }
 
-func (p *ParentNotifier) Notify(success bool) {
+func (p *Daemonizer) NotifySuccess(success bool) {
 }
 
 // Mount the file system based on the supplied arguments, returning a
