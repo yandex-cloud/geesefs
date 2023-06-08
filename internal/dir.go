@@ -123,7 +123,6 @@ func NewDirHandle(inode *Inode) (dh *DirHandle) {
 }
 
 func (inode *Inode) OpenDir() (dh *DirHandle) {
-	inode.logFuse("OpenDir")
 	var isS3 bool
 
 	parent := inode.Parent
@@ -1269,8 +1268,6 @@ func (parent *Inode) CreateSymlink(
 }
 
 func (inode *Inode) ReadSymlink() (target string, err error) {
-	inode.logFuse("ReadSymlink")
-
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 

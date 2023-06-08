@@ -409,7 +409,6 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 
 // LOCKS_EXCLUDED(inode.mu)
 func (inode *Inode) GetAttributes() *fuseops.InodeAttributes {
-	inode.logFuse("GetAttributes")
 	inode.mu.Lock()
 	attr := inode.InflateAttributes()
 	inode.mu.Unlock()
@@ -724,8 +723,6 @@ func (inode *Inode) GetXattr(name string) ([]byte, error) {
 }
 
 func (inode *Inode) ListXattr() ([]string, error) {
-	inode.logFuse("ListXattr")
-
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 
@@ -753,8 +750,6 @@ func (inode *Inode) ListXattr() ([]string, error) {
 }
 
 func (inode *Inode) OpenFile() (fh *FileHandle, err error) {
-	inode.logFuse("OpenFile")
-
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 
