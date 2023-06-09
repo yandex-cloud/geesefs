@@ -163,7 +163,13 @@ func (fs *GoofysWin) Mknod(path string, mode uint32, dev uint64) (ret int) {
 		return mapWinError(err)
 	}
 
-	var inode *Inode
+	inode, err := parent.LookUpCached(child)
+	if err != syscall.ENOENT {
+		return mapWinError(err)
+	}
+	if inode != nil {
+		return -fuse.EEXIST
+	}
 	if (mode & fuse.S_IFDIR) != 0 {
 		inode, err = parent.MkDir(child)
 		if err != nil {
@@ -196,7 +202,15 @@ func (fs *GoofysWin) Mkdir(path string, mode uint32) (ret int) {
 		return mapWinError(err)
 	}
 
-	inode, err := parent.MkDir(child)
+	inode, err := parent.LookUpCached(child)
+	if err != syscall.ENOENT {
+		return mapWinError(err)
+	}
+	if inode != nil {
+		return -fuse.EEXIST
+	}
+
+	inode, err = parent.MkDir(child)
 	if err != nil {
 		return mapWinError(err)
 	}
@@ -422,17 +436,24 @@ func (fs *GoofysWin) Create(path string, flags int, mode uint32) (ret int, fhId 
 		return mapWinError(err), 0
 	}
 
-	inode, fh := parent.Create(child)
+	inode, err := parent.LookUpCached(child)
+	if err != syscall.ENOENT {
+		return mapWinError(err), 0
+	}
+	if inode != nil {
+		return -fuse.EEXIST, 0
+	}
 
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+	inode, fh := parent.Create(child)
 
 	inode.setFileMode(fuseops.ConvertFileMode(mode))
 
 	// Allocate a handle.
+	fs.mu.Lock()
 	handleID := fs.nextHandleID
 	fs.nextHandleID++
 	fs.fileHandles[handleID] = fh
+	fs.mu.Unlock()
 
 	return 0, uint64(handleID)
 }
@@ -532,9 +553,9 @@ func (fs *GoofysWin) Truncate(path string, size int64, fh uint64) (ret int) {
 // Read reads data from a file.
 func (fs *GoofysWin) Read(path string, buff []byte, ofst int64, fhId uint64) (ret int) {
 	if fuseLog.Level == logrus.DebugLevel {
-		fuseLog.Debugf("-> Read %v %v %v %v", path, buff, ofst, fhId)
+		fuseLog.Debugf("-> Read %v %v %v %v", path, len(buff), ofst, fhId)
 		defer func() {
-			fuseLog.Debugf("<- Read %v %v %v %v = %v", path, buff, ofst, fhId, ret)
+			fuseLog.Debugf("<- Read %v %v %v %v = %v", path, len(buff), ofst, fhId, ret)
 		}()
 	}
 
@@ -563,9 +584,9 @@ func (fs *GoofysWin) Read(path string, buff []byte, ofst int64, fhId uint64) (re
 // Write writes data to a file.
 func (fs *GoofysWin) Write(path string, buff []byte, ofst int64, fhId uint64) (ret int) {
 	if fuseLog.Level == logrus.DebugLevel {
-		fuseLog.Debugf("-> Write %v %v %v %v", path, buff, ofst, fhId)
+		fuseLog.Debugf("-> Write %v %v %v %v", path, len(buff), ofst, fhId)
 		defer func() {
-			fuseLog.Debugf("<- Write %v %v %v %v = %v", path, buff, ofst, fhId, ret)
+			fuseLog.Debugf("<- Write %v %v %v %v = %v", path, len(buff), ofst, fhId, ret)
 		}()
 	}
 
@@ -606,16 +627,17 @@ func (fs *GoofysWin) Release(path string, fhId uint64) (ret int) {
 
 	atomic.AddInt64(&fs.stats.noops, 1)
 
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
+	fs.mu.RLock()
 	fh := fs.fileHandles[fuseops.HandleID(fhId)]
+	fs.mu.RUnlock()
 	if fh == nil {
 		return -fuse.EINVAL
 	}
 	fh.Release()
 
+	fs.mu.Lock()
 	delete(fs.fileHandles, fuseops.HandleID(fhId))
+	fs.mu.Unlock()
 
 	return 0
 }
