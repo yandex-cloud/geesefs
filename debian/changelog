@@ -1,3 +1,10 @@
+geesefs (0.36.0) unstable; urgency=medium
+
+  * Experimental Windows support using WinFSP
+  * Experimental "cluster mode" with synchronized caches on different hosts
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Fri, 09 Jun 2023 10:39:26 +0300
+
 geesefs (0.35.4) unstable; urgency=medium
 
   * Fix a crash on parallel lookup of the same removed file
