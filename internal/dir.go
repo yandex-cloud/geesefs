@@ -1098,7 +1098,7 @@ func (inode *Inode) SendDelete() {
 	}()
 }
 
-func (parent *Inode) Create(name string) (inode *Inode, fh *FileHandle) {
+func (parent *Inode) Create(name string) (inode *Inode, fh *FileHandle, err error) {
 
 	parent.logFuse("Create", name)
 
@@ -1106,6 +1106,11 @@ func (parent *Inode) Create(name string) (inode *Inode, fh *FileHandle) {
 
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
+
+	inode = parent.findChildUnlocked(name)
+	if inode != nil {
+		return nil, nil, syscall.EEXIST
+	}
 
 	now := time.Now()
 	inode = NewInode(fs, parent, name)
@@ -1142,6 +1147,11 @@ func (parent *Inode) MkDir(
 
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
+
+	inode = parent.findChildUnlocked(name)
+	if inode != nil {
+		return nil, syscall.EEXIST
+	}
 
 	inode = parent.doMkDir(name)
 	inode.mu.Unlock()
@@ -1231,7 +1241,7 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 }
 
 func (parent *Inode) CreateSymlink(
-	name string, target string) (inode *Inode) {
+	name string, target string) (inode *Inode, err error) {
 
 	parent.logFuse("CreateSymlink", name)
 
@@ -1239,6 +1249,11 @@ func (parent *Inode) CreateSymlink(
 
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
+
+	inode = parent.findChildUnlocked(name)
+	if inode != nil {
+		return nil, syscall.EEXIST
+	}
 
 	now := time.Now()
 	inode = NewInode(fs, parent, name)
@@ -1264,7 +1279,7 @@ func (parent *Inode) CreateSymlink(
 
 	parent.touch()
 
-	return inode
+	return inode, nil
 }
 
 func (inode *Inode) ReadSymlink() (target string, err error) {

@@ -163,13 +163,7 @@ func (fs *GoofysWin) Mknod(path string, mode uint32, dev uint64) (ret int) {
 		return mapWinError(err)
 	}
 
-	inode, err := parent.LookUpCached(child)
-	if err != syscall.ENOENT {
-		return mapWinError(err)
-	}
-	if inode != nil {
-		return -fuse.EEXIST
-	}
+	var inode *Inode
 	if (mode & fuse.S_IFDIR) != 0 {
 		inode, err = parent.MkDir(child)
 		if err != nil {
@@ -177,7 +171,10 @@ func (fs *GoofysWin) Mknod(path string, mode uint32, dev uint64) (ret int) {
 		}
 	} else {
 		var fh *FileHandle
-		inode, fh = parent.Create(child)
+		inode, fh, err = parent.Create(child)
+		if err != nil {
+			return mapWinError(err)
+		}
 		fh.Release()
 	}
 	inode.Attributes.Rdev = uint32(dev)
@@ -202,15 +199,7 @@ func (fs *GoofysWin) Mkdir(path string, mode uint32) (ret int) {
 		return mapWinError(err)
 	}
 
-	inode, err := parent.LookUpCached(child)
-	if err != syscall.ENOENT {
-		return mapWinError(err)
-	}
-	if inode != nil {
-		return -fuse.EEXIST
-	}
-
-	inode, err = parent.MkDir(child)
+	inode, err := parent.MkDir(child)
 	if err != nil {
 		return mapWinError(err)
 	}
@@ -436,15 +425,10 @@ func (fs *GoofysWin) Create(path string, flags int, mode uint32) (ret int, fhId 
 		return mapWinError(err), 0
 	}
 
-	inode, err := parent.LookUpCached(child)
-	if err != syscall.ENOENT {
+	inode, fh, err := parent.Create(child)
+	if err != nil {
 		return mapWinError(err), 0
 	}
-	if inode != nil {
-		return -fuse.EEXIST, 0
-	}
-
-	inode, fh := parent.Create(child)
 
 	inode.setFileMode(fuseops.ConvertFileMode(mode))
 

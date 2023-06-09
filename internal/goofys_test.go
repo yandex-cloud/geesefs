@@ -1056,9 +1056,10 @@ func (s *GoofysTest) TestReadOffset(t *C) {
 func (s *GoofysTest) TestCreateFiles(t *C) {
 	fileName := "testCreateFile"
 
-	_, fh := s.getRoot(t).Create(fileName)
+	_, fh, err := s.getRoot(t).Create(fileName)
+	t.Assert(err, IsNil)
 
-	err := fh.inode.SyncFile()
+	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
 	resp, err := s.cloud.GetBlob(&GetBlobInput{Key: fileName})
@@ -1375,7 +1376,8 @@ func (s *GoofysTest) TestMkDir(t *C) {
 	_, err = s.LookUpInode(t, dirName)
 	t.Assert(err, IsNil)
 
-	_, fh := inode.Create(fileName)
+	_, fh, err := inode.Create(fileName)
+	t.Assert(err, IsNil)
 
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
@@ -3247,7 +3249,8 @@ func (s *GoofysTest) TestDirMtimeCreate(t *C) {
 	m1 := attr.Mtime
 	time.Sleep(time.Second)
 
-	_, _ = root.Create("foo")
+	_, _, err := root.Create("foo")
+	t.Assert(err, IsNil)
 	attr2 := root.GetAttributes()
 	m2 := attr2.Mtime
 
@@ -3759,7 +3762,8 @@ func (s *GoofysTest) TestVFS(t *C) {
 	_, err = in.LookUp("file5", false)
 	t.Assert(err, Equals, syscall.ENOENT)
 
-	_, fh := in.Create("testfile")
+	_, fh, err := in.Create("testfile")
+	t.Assert(err, IsNil)
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
@@ -3796,7 +3800,8 @@ func (s *GoofysTest) TestVFS(t *C) {
 
 	// create another file inside subdir to make sure that our
 	// mount check is correct for dir inside the root
-	_, fh = subdir.Create("testfile2")
+	_, fh, err = subdir.Create("testfile2")
+	t.Assert(err, IsNil)
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
@@ -4083,7 +4088,8 @@ func (s *GoofysTest) testMountsNested(t *C, cloud StorageBackend,
 
 	_, err = s.LookUpInode(t, "dir5/in/testfile")
 	t.Assert(err, Equals, syscall.ENOENT)
-	_, fh := dir_in.Create("testfile")
+	_, fh, err := dir_in.Create("testfile")
+	t.Assert(err, IsNil)
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
@@ -4093,7 +4099,8 @@ func (s *GoofysTest) testMountsNested(t *C, cloud StorageBackend,
 
 	//_, err = s.LookUpInode(t, "dir5/in/a/dir/testfile")
 	//t.Assert(err, IsNil)
-	_, fh = dir_dir.Create("testfile")
+	_, fh, err = dir_dir.Create("testfile")
+	t.Assert(err, IsNil)
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
@@ -4357,7 +4364,8 @@ func (s *GoofysTest) TestWriteListFlush(t *C) {
 	dir, err := root.MkDir("dir")
 	t.Assert(err, IsNil)
 
-	in, fh := dir.Create("file1")
+	in, fh, err := dir.Create("file1")
+	t.Assert(err, IsNil)
 	t.Assert(in, NotNil)
 	t.Assert(fh, NotNil)
 
@@ -4405,7 +4413,8 @@ func (s *GoofysTest) TestWriteUnlinkFlush(t *C) {
 	dir, err := root.MkDir("dir")
 	t.Assert(err, IsNil)
 
-	in, fh := dir.Create("deleted")
+	in, fh, err := dir.Create("deleted")
+	t.Assert(err, IsNil)
 	t.Assert(in, NotNil)
 	t.Assert(fh, NotNil)
 

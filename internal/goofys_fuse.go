@@ -229,7 +229,10 @@ func (fs *GoofysFuse) CreateSymlink(ctx context.Context,
 		return syscall.ESTALE
 	}
 
-	inode := parent.CreateSymlink(op.Name, op.Target)
+	inode, err := parent.CreateSymlink(op.Name, op.Target)
+	if err != nil {
+		return err
+	}
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
@@ -553,7 +556,10 @@ func (fs *GoofysFuse) CreateFile(
 		return syscall.ESTALE
 	}
 
-	inode, fh := parent.Create(op.Name)
+	inode, fh, err := parent.Create(op.Name)
+	if err != nil {
+		return err
+	}
 
 	// Always take inode locks after fs lock if you need both...
 	fs.mu.Lock()
@@ -612,7 +618,10 @@ func (fs *GoofysFuse) MkNode(
 		}
 	} else {
 		var fh *FileHandle
-		inode, fh = parent.Create(op.Name)
+		inode, fh, err = parent.Create(op.Name)
+		if err != nil {
+			return err
+		}
 		fh.Release()
 	}
 	inode.Attributes.Rdev = op.Rdev
