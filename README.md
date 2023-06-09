@@ -99,6 +99,8 @@ See also [Common Issues](#common-issues).
     You may also need to install FUSE utils (fuse3 or fuse RPM/Debian package) first.
   * [Mac amd64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-mac-amd64),
     [arm64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-mac-arm64). You also need osxfuse/macfuse for GeeseFS to work.
+  * [Windows x64](https://github.com/yandex-cloud/geesefs/releases/latest/download/geesefs-win-x64.exe).
+    You also need to install [WinFSP](https://winfsp.dev) first.
 * Or build from source with Go 1.13 or later:
 
 ```ShellSession
@@ -130,6 +132,26 @@ bucket    /mnt/mountpoint    fuse.geesefs    _netdev,allow_other,--file-mode=066
 You can also use a different path to the credentials file by adding `,--shared-config=/path/to/credentials`.
 
 See also: [Instruction for Azure Blob Storage](https://github.com/yandex-cloud/geesefs/blob/master/README-azure.md).
+
+## Windows
+
+Everything is the same after installing [WinFSP](https://winfsp.dev) and GeeseFS, except that GeeseFS
+can't daemonize so you have to create a system service manually if you want to hide the console window.
+
+You can put credentials to `C:\Users\<USERNAME>\.aws\credentials`, or you can put credentials in any
+file and specify it with `--shared-config file.txt`, or you can use environment variables:
+
+```
+set AWS_ACCESS_KEY_ID=...
+set AWS_SECRET_ACCESS_KEY=...
+```
+
+And then start GeeseFS with `geesefs <bucket> <mountpoint>`, where `<mountpoint>` is either a drive
+(like K:) or a non-existing directory. Example:
+
+```
+geesefs-win-x64.exe testbucket K:
+```
 
 # Benchmarks
 
