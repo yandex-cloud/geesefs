@@ -967,6 +967,7 @@ func MountWin(
 	fuseLog.Debugf("Starting WinFSP with options: %v", mountOpt)
 
 	fsint := NewGoofysWin(fs)
+	fuse.RecoverFromPanic = false
 	host := fuse.NewFileSystemHost(fsint)
 	fsint.host = host
 	host.SetCapReaddirPlus(true)
