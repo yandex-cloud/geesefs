@@ -928,27 +928,6 @@ func MountFuse(
 	ctx context.Context,
 	bucketName string,
 	flags *FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
-
-	// Mount the file system.
-	mountCfg := &fuse.MountConfig{
-		FSName:                  bucketName,
-		Subtype:                 "geesefs",
-		Options:                 convertFuseOptions(flags),
-		ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
-		DisableWritebackCaching: true,
-		UseVectoredRead:         true,
-	}
-
-	if flags.DebugFuse {
-		fuseLog := GetLogger("fuse")
-		fuseLog.Level = logrus.DebugLevel
-		mountCfg.DebugLogger = GetStdLogger(fuseLog, logrus.DebugLevel)
-	}
-
-	if flags.DebugFuse || flags.DebugMain {
-		log.Level = logrus.DebugLevel
-	}
-
 	fs, err = NewGoofys(ctx, bucketName, flags)
 	if fs == nil {
 		if err == nil {
@@ -956,10 +935,35 @@ func MountFuse(
 		}
 		return
 	}
+	mfs, err = mountFuseFS(fs)
+	return
+}
+
+func mountFuseFS(fs *Goofys) (mfs MountedFS, err error) {
+	// Mount the file system.
+	mountCfg := &fuse.MountConfig{
+		FSName:                  fs.bucket,
+		Subtype:                 "geesefs",
+		Options:                 convertFuseOptions(fs.flags),
+		ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
+		DisableWritebackCaching: true,
+		UseVectoredRead:         true,
+	}
+
+	if fs.flags.DebugFuse {
+		fuseLog := GetLogger("fuse")
+		fuseLog.Level = logrus.DebugLevel
+		mountCfg.DebugLogger = GetStdLogger(fuseLog, logrus.DebugLevel)
+	}
+
+	if fs.flags.DebugFuse || fs.flags.DebugMain {
+		log.Level = logrus.DebugLevel
+	}
+
 	fsint := NewGoofysFuse(fs)
 	server := fuseutil.NewFileSystemServer(fsint)
 
-	fuseMfs, err := fuse.Mount(flags.MountPoint, server, mountCfg)
+	fuseMfs, err := fuse.Mount(fs.flags.MountPoint, server, mountCfg)
 	if err != nil {
 		err = fmt.Errorf("Mount: %v", err)
 		return
@@ -967,7 +971,7 @@ func MountFuse(
 
 	mfs = &FuseMfsWrapper{
 		MountedFileSystem: fuseMfs,
-		mountPoint: flags.MountPoint,
+		mountPoint: fs.flags.MountPoint,
 	}
 
 	return

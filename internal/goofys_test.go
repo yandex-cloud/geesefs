@@ -74,9 +74,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/jacobsa/fuse"
 	"github.com/jacobsa/fuse/fuseops"
-	"github.com/jacobsa/fuse/fuseutil"
 
 	"github.com/pkg/xattr"
 
@@ -124,6 +122,7 @@ func currentGid() uint32 {
 
 type GoofysTest struct {
 	fs        *GoofysFuse
+	mfs       MountedFS
 	ctx       context.Context
 	awsConfig *aws.Config
 	cloud     StorageBackend
@@ -1964,20 +1963,7 @@ func (s *GoofysTest) mountSame(t *C, mountPoint string, sameProc bool) {
 		t.Assert(err, IsNil)
 
 	} else {
-		server := fuseutil.NewFileSystemServer(s.fs)
-
-		// Mount the file system.
-		mountCfg := &fuse.MountConfig{
-			FSName:                  s.fs.bucket,
-			Subtype:                 "geesefs",
-			Options:                 convertFuseOptions(s.fs.flags),
-			ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
-			DisableWritebackCaching: true,
-			UseVectoredRead:         true,
-		}
-		mountCfg.DebugLogger = GetStdLogger(fuseLog, logrus.DebugLevel)
-
-		_, err = fuse.Mount(mountPoint, server, mountCfg)
+		s.mfs, err = mountFuseFS(s.fs.Goofys)
 		t.Assert(err, IsNil)
 	}
 }
@@ -1985,7 +1971,7 @@ func (s *GoofysTest) mountSame(t *C, mountPoint string, sameProc bool) {
 func (s *GoofysTest) umount(t *C, mountPoint string) {
 	var err error
 	for i := 0; i < 10; i++ {
-		err = fuse.Unmount(mountPoint)
+		err = TryUnmount(mountPoint)
 		if err != nil {
 			time.Sleep(100 * time.Millisecond)
 		} else {
