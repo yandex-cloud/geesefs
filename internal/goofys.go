@@ -402,9 +402,11 @@ func (fs *Goofys) SigUsr1() {
 
 // Find the given inode. Panic if it doesn't exist.
 //
-// RLOCKS_REQUIRED(fs.mu)
+// LOCKS_EXCLUDED(fs.mu)
 func (fs *Goofys) getInodeOrDie(id fuseops.InodeID) (inode *Inode) {
+	fs.mu.RLock()
 	inode = fs.inodes[id]
+	fs.mu.RUnlock()
 	if inode == nil {
 		panic(fmt.Sprintf("Unknown inode: %v", id))
 	}
@@ -784,9 +786,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 }
 
 func (fs *Goofys) MountAll(mounts []*Mount) {
-	fs.mu.RLock()
 	root := fs.getInodeOrDie(fuseops.RootInodeID)
-	fs.mu.RUnlock()
 
 	for _, m := range mounts {
 		fs.mount(root, m)
@@ -794,16 +794,12 @@ func (fs *Goofys) MountAll(mounts []*Mount) {
 }
 
 func (fs *Goofys) Mount(mount *Mount) {
-	fs.mu.RLock()
 	root := fs.getInodeOrDie(fuseops.RootInodeID)
-	fs.mu.RUnlock()
 	fs.mount(root, mount)
 }
 
 func (fs *Goofys) Unmount(mountPoint string) {
-	fs.mu.RLock()
 	mp := fs.getInodeOrDie(fuseops.RootInodeID)
-	fs.mu.RUnlock()
 
 	fuseLog.Infof("Attempting to unmount %v", mountPoint)
 	path := strings.Split(strings.Trim(mountPoint, "/"), "/")

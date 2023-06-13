@@ -597,8 +597,6 @@ func (fs *ClusterFs) setInodeAttributes(inode *Inode, size *uint64, mtime *time.
 // getting of inode
 
 func (fs *ClusterFs) inodeById(inodeId fuseops.InodeID) *Inode {
-	fs.Goofys.mu.RLock()
-	defer fs.Goofys.mu.RUnlock()
 	return fs.Goofys.getInodeOrDie(inodeId)
 }
 

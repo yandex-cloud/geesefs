@@ -92,9 +92,7 @@ func (fs *GoofysFuse) GetInodeAttributes(
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
-	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
 
 	if atomic.LoadInt32(&inode.refreshed) == -1 {
 		// Stale inode
@@ -110,9 +108,7 @@ func (fs *GoofysFuse) GetInodeAttributes(
 
 func (fs *GoofysFuse) GetXattr(ctx context.Context,
 	op *fuseops.GetXattrOp) (err error) {
-	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
@@ -141,9 +137,7 @@ func (fs *GoofysFuse) GetXattr(ctx context.Context,
 
 func (fs *GoofysFuse) ListXattr(ctx context.Context,
 	op *fuseops.ListXattrOp) (err error) {
-	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
@@ -179,9 +173,7 @@ func (fs *GoofysFuse) ListXattr(ctx context.Context,
 
 func (fs *GoofysFuse) RemoveXattr(ctx context.Context,
 	op *fuseops.RemoveXattrOp) (err error) {
-	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
@@ -196,9 +188,7 @@ func (fs *GoofysFuse) RemoveXattr(ctx context.Context,
 
 func (fs *GoofysFuse) SetXattr(ctx context.Context,
 	op *fuseops.SetXattrOp) (err error) {
-	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
@@ -218,9 +208,7 @@ func (fs *GoofysFuse) SetXattr(ctx context.Context,
 
 func (fs *GoofysFuse) CreateSymlink(ctx context.Context,
 	op *fuseops.CreateSymlinkOp) (err error) {
-	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
@@ -242,9 +230,7 @@ func (fs *GoofysFuse) CreateSymlink(ctx context.Context,
 
 func (fs *GoofysFuse) ReadSymlink(ctx context.Context,
 	op *fuseops.ReadSymlinkOp) (err error) {
-	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
@@ -266,9 +252,7 @@ func (fs *GoofysFuse) LookUpInode(
 
 	defer func() { fuseLog.Debugf("<-- LookUpInode %v %v %v", op.Parent, op.Name, err) }()
 
-	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
 
 	inode, err := parent.LookUpCached(op.Name)
 	if err != nil {
@@ -290,9 +274,7 @@ func (fs *GoofysFuse) ForgetInode(
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
-	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
 
 	inode.mu.Lock()
 	inode.DeRef(int64(op.N))
@@ -307,13 +289,14 @@ func (fs *GoofysFuse) OpenDir(
 
 	atomic.AddInt64(&fs.stats.noops, 1)
 
-	fs.mu.Lock()
 	in := fs.getInodeOrDie(op.Inode)
 	if atomic.LoadInt32(&in.refreshed) == -1 {
 		// Stale inode
 		fs.mu.Unlock()
 		return syscall.ESTALE
 	}
+
+	fs.mu.Lock()
 	handleID := fs.nextHandleID
 	fs.nextHandleID++
 	fs.mu.Unlock()
@@ -428,9 +411,7 @@ func (fs *GoofysFuse) ReleaseDirHandle(
 func (fs *GoofysFuse) OpenFile(
 	ctx context.Context,
 	op *fuseops.OpenFileOp) (err error) {
-	fs.mu.RLock()
 	in := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
 
 	atomic.AddInt64(&fs.stats.noops, 1)
 
@@ -493,9 +474,7 @@ func (fs *GoofysFuse) SyncFile(
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
 	if !fs.flags.IgnoreFsync {
-		fs.mu.RLock()
 		in := fs.getInodeOrDie(op.Inode)
-		fs.mu.RUnlock()
 
 		if in.Id == fuseops.RootInodeID {
 			err = fs.SyncFS(nil)
@@ -547,9 +526,7 @@ func (fs *GoofysFuse) CreateFile(
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
 
 	if atomic.LoadInt32(&parent.refreshed) == -1 {
 		// Stale inode
@@ -600,9 +577,7 @@ func (fs *GoofysFuse) MkNode(
 		return syscall.ENOTSUP
 	}
 
-	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
 
 	if atomic.LoadInt32(&parent.refreshed) == -1 {
 		// Stale inode
@@ -641,9 +616,7 @@ func (fs *GoofysFuse) MkDir(
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
 
 	if atomic.LoadInt32(&parent.refreshed) == -1 {
 		// Stale inode
@@ -676,9 +649,7 @@ func (fs *GoofysFuse) RmDir(
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
 
 	if atomic.LoadInt32(&parent.refreshed) == -1 {
 		// Stale inode
@@ -697,9 +668,7 @@ func (fs *GoofysFuse) SetInodeAttributes(
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
 
 	if atomic.LoadInt32(&inode.refreshed) == -1 {
 		// Stale inode
@@ -748,9 +717,7 @@ func (fs *GoofysFuse) Unlink(
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.Parent)
-	fs.mu.RUnlock()
 
 	if atomic.LoadInt32(&parent.refreshed) == -1 {
 		// Stale inode
@@ -770,10 +737,8 @@ func (fs *GoofysFuse) Rename(
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	fs.mu.RLock()
 	parent := fs.getInodeOrDie(op.OldParent)
 	newParent := fs.getInodeOrDie(op.NewParent)
-	fs.mu.RUnlock()
 
 	if atomic.LoadInt32(&parent.refreshed) == -1 ||
 		atomic.LoadInt32(&newParent.refreshed) == -1 {
@@ -817,9 +782,7 @@ func (fs *GoofysFuse) Fallocate(
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	fs.mu.RLock()
 	inode := fs.getInodeOrDie(op.Inode)
-	fs.mu.RUnlock()
 
 	if atomic.LoadInt32(&inode.refreshed) == -1 {
 		// Stale inode
