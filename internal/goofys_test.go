@@ -62,8 +62,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	aws_s3 "github.com/aws/aws-sdk-go/service/s3"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/jacobsa/fuse/fuseops"
 
 	. "gopkg.in/check.v1"
@@ -1526,7 +1524,7 @@ func (s *GoofysTest) TestXAttrGet(t *C) {
 	t.Assert(names, DeepEquals, expectedXattrs)
 
 	_, err = file1.GetXattr("user.foobar")
-	t.Assert(err, Equals, unix.ENODATA)
+	t.Assert(err, Equals, syscall.ENODATA)
 
 	if checkETag {
 		value, err := file1.GetXattr("s3.etag")
@@ -1699,13 +1697,13 @@ func (s *GoofysTest) TestXAttrSet(t *C) {
 	in, err := s.fs.LookupPath("file1")
 	t.Assert(err, IsNil)
 
-	err = in.SetXattr("user.bar", []byte("hello"), unix.XATTR_REPLACE)
+	err = in.SetXattr("user.bar", []byte("hello"), XATTR_REPLACE)
 	t.Assert(err, Equals, syscall.ENODATA)
 
-	err = in.SetXattr("user.bar", []byte("hello"), unix.XATTR_CREATE)
+	err = in.SetXattr("user.bar", []byte("hello"), XATTR_CREATE)
 	t.Assert(err, IsNil)
 
-	err = in.SetXattr("user.bar", []byte("hello"), unix.XATTR_CREATE)
+	err = in.SetXattr("user.bar", []byte("hello"), XATTR_CREATE)
 	t.Assert(err, Equals, syscall.EEXIST)
 
 	in, err = s.fs.LookupPath("file1")
@@ -1717,7 +1715,7 @@ func (s *GoofysTest) TestXAttrSet(t *C) {
 
 	value = []byte("file1+%/#\x00")
 
-	err = in.SetXattr("user.bar", value, unix.XATTR_REPLACE)
+	err = in.SetXattr("user.bar", value, XATTR_REPLACE)
 	t.Assert(err, IsNil)
 
 	in, err = s.fs.LookupPath("file1")
@@ -1743,7 +1741,7 @@ func (s *GoofysTest) TestXAttrSet(t *C) {
 	t.Assert(value2, DeepEquals, value)
 	t.Assert(string(value2), DeepEquals, "world")
 
-	err = in.SetXattr("s3.bar", []byte("hello"), unix.XATTR_CREATE)
+	err = in.SetXattr("s3.bar", []byte("hello"), XATTR_CREATE)
 	t.Assert(err, IsNil)
 	// But check that the change is silently ignored
 	value, err = in.GetXattr("s3.bar")
