@@ -316,22 +316,6 @@ func (fs *GoofysWin) Rename(oldpath string, newpath string) (ret int) {
 		return mapWinError(err)
 	}
 
-	if parent == newParent {
-		parent.mu.Lock()
-		defer parent.mu.Unlock()
-	} else {
-		// lock ordering to prevent deadlock
-		if parent.Id < newParent.Id {
-			parent.mu.Lock()
-			newParent.mu.Lock()
-		} else {
-			newParent.mu.Lock()
-			parent.mu.Lock()
-		}
-		defer parent.mu.Unlock()
-		defer newParent.mu.Unlock()
-	}
-
 	err = parent.Rename(oldName, newParent, newName)
 
 	return mapWinError(err)

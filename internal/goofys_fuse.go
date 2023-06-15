@@ -746,22 +746,6 @@ func (fs *GoofysFuse) Rename(
 		return syscall.ESTALE
 	}
 
-	if op.OldParent == op.NewParent {
-		parent.mu.Lock()
-		defer parent.mu.Unlock()
-	} else {
-		// lock ordering to prevent deadlock
-		if op.OldParent < op.NewParent {
-			parent.mu.Lock()
-			newParent.mu.Lock()
-		} else {
-			newParent.mu.Lock()
-			parent.mu.Lock()
-		}
-		defer parent.mu.Unlock()
-		defer newParent.mu.Unlock()
-	}
-
 	err = parent.Rename(op.OldName, newParent, op.NewName)
 	err = mapAwsError(err)
 

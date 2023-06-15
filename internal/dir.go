@@ -1444,9 +1444,25 @@ func (parent *Inode) addModified(inc int64) {
 // rename("nonempty_dir1", "nonempty_dir2") = ENOTEMPTY
 // rename("file", "dir") = EISDIR
 // rename("dir", "file") = ENOTDIR
-// LOCKS_REQUIRED(parent.mu)
-// LOCKS_REQUIRED(newParent.mu)
+// LOCKS_EXCLUDED(parent.mu)
+// LOCKS_EXCLUDED(newParent.mu)
 func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error) {
+	if parent == newParent {
+		parent.mu.Lock()
+		defer parent.mu.Unlock()
+	} else {
+		// lock ordering to prevent deadlock
+		if parent.Id < newParent.Id {
+			parent.mu.Lock()
+			newParent.mu.Lock()
+		} else {
+			newParent.mu.Lock()
+			parent.mu.Lock()
+		}
+		defer parent.mu.Unlock()
+		defer newParent.mu.Unlock()
+	}
+
 	fromCloud, fromPath := parent.cloud()
 	toCloud, toPath := newParent.cloud()
 	if fromCloud != toCloud {
