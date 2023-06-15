@@ -771,12 +771,7 @@ func (s *GoofysTest) TestRenameToExisting(t *C) {
 	_, err = s.fs.LookupPath("file2")
 	t.Assert(err, IsNil)
 
-	err = s.fs.Rename(nil, &fuseops.RenameOp{
-		OldParent: root.Id,
-		NewParent: root.Id,
-		OldName:   "file1",
-		NewName:   "file2",
-	})
+	err = root.Rename("file1", root, "file2")
 	t.Assert(err, IsNil)
 
 	file1 := root.findChild("file1")
@@ -817,12 +812,7 @@ func (s *GoofysTest) TestRenameOpenedUnmodified(t *C) {
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
-	err = s.fs.Rename(nil, &fuseops.RenameOp{
-		OldParent: root.Id,
-		NewParent: root.Id,
-		OldName:   "file10",
-		NewName:   "file20",
-	})
+	err = root.Rename("file10", root, "file20")
 	t.Assert(err, IsNil)
 
 	fh.Release()
@@ -1032,12 +1022,7 @@ func (s *GoofysTest) TestRenameDir(t *C) {
 	_, err = s.fs.LookupPath("new_dir2")
 	t.Assert(err, Equals, syscall.ENOENT)
 
-	err = s.fs.Rename(nil, &fuseops.RenameOp{
-		OldParent: root.Id,
-		NewParent: root.Id,
-		OldName:   "dir2",
-		NewName:   "new_dir2",
-	})
+	err = root.Rename("dir2", root, "new_dir2")
 	t.Assert(err, IsNil)
 
 	_, err = s.fs.LookupPath("dir2/dir3")
@@ -1061,12 +1046,7 @@ func (s *GoofysTest) TestRenameDir(t *C) {
 	_, err = s.fs.LookupPath("new_dir3")
 	t.Assert(err, Equals, syscall.ENOENT)
 
-	err = s.fs.Rename(nil, &fuseops.RenameOp{
-		OldParent: root.Id,
-		NewParent: root.Id,
-		OldName:   "new_dir2",
-		NewName:   "new_dir3",
-	})
+	err = root.Rename("new_dir2", root, "new_dir3")
 	t.Assert(err, IsNil)
 
 	new, err := s.fs.LookupPath("new_dir3/dir3/file4")
@@ -1361,14 +1341,7 @@ func (s *GoofysTest) TestRenameCache(t *C) {
 	err = s.fs.LookUpInode(nil, &lookupOp2)
 	t.Assert(err, Equals, syscall.ENOENT)
 
-	renameOp := fuseops.RenameOp{
-		OldParent: root.Id,
-		NewParent: root.Id,
-		OldName:   "file1",
-		NewName:   "newfile",
-	}
-
-	err = s.fs.Rename(nil, &renameOp)
+	err = root.Rename("file1", root, "newfile")
 	t.Assert(err, IsNil)
 
 	lookupOp1.Entry = fuseops.ChildInodeEntry{}
