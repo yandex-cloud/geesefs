@@ -84,7 +84,7 @@ func currentGid() uint32 {
 }
 
 type GoofysTest struct {
-	fs        *GoofysFuse
+	fs        *Goofys
 	mfs       MountedFS
 	ctx       context.Context
 	awsConfig *aws.Config
@@ -677,7 +677,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 	s.setupDefaultEnv(t, "")
 
 	if hasEnv("EVENTUAL_CONSISTENCY") {
-		fs, _ := newGoofys(context.Background(), bucket, flags,
+		s.fs, _ = newGoofys(context.Background(), bucket, flags,
 			func(bucket string, flags *FlagStorage) (StorageBackend, error) {
 				cloud, err := NewBackend(bucket, flags)
 				if err != nil {
@@ -685,10 +685,8 @@ func (s *GoofysTest) SetUpTest(t *C) {
 				}
 				return NewS3BucketEventualConsistency(cloud.(*S3Backend)), nil
 			})
-		s.fs = NewGoofysFuse(fs)
 	} else {
-		fs, _ := NewGoofys(context.Background(), bucket, flags)
-		s.fs = NewGoofysFuse(fs)
+		s.fs, _ = NewGoofys(context.Background(), bucket, flags)
 	}
 	t.Assert(s.fs, NotNil)
 

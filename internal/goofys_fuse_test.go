@@ -15,28 +15,30 @@
 
 // Tests which are ran over Linux FUSE FS
 
+// +build !windows
+
 package internal
 
 import (
 	. "github.com/yandex-cloud/geesefs/api/common"
 
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
-	"context"
-
 	"golang.org/x/sys/unix"
-
 	"github.com/pkg/xattr"
-
 	"github.com/sirupsen/logrus"
-
 	. "gopkg.in/check.v1"
+
+	"github.com/jacobsa/fuse/fuseops"
 
 	bench_embed "github.com/yandex-cloud/geesefs/bench"
 	test_embed "github.com/yandex-cloud/geesefs/test"
@@ -83,7 +85,7 @@ func (s *GoofysTest) mountSame(t *C, mountPoint string, sameProc bool) {
 		t.Assert(err, IsNil)
 
 	} else {
-		s.mfs, err = mountFuseFS(s.fs.Goofys)
+		s.mfs, err = mountFuseFS(s.fs)
 		t.Assert(err, IsNil)
 	}
 }
@@ -231,8 +233,7 @@ func (s *GoofysTest) TestIssue69Fuse(t *C) {
 func (s *GoofysTest) TestFuseWithPrefix(t *C) {
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
-	fs, _ := NewGoofys(context.Background(), s.fs.bucket+":testprefix", s.fs.flags)
-	s.fs = NewGoofysFuse(fs)
+	s.fs, _ = NewGoofys(context.Background(), s.fs.bucket+":testprefix", s.fs.flags)
 
 	s.runFuseTest(t, mountPoint, true, s.tmp+"/fuse-test.sh", mountPoint)
 }
@@ -1079,4 +1080,143 @@ func (s *GoofysTest) testNotifyRefresh(t *C, testInSubdir bool, testRefreshDir b
 	t.Assert(os.IsNotExist(err), Equals, true)
 
 	t.Assert(containsFile(testdir, "testnotify"), Equals, false)
+}
+
+func (s *GoofysTest) TestNestedMountUnmountSimple(t *C) {
+	t.Skip("Test for the strange 'child mount' feature, unusable from cmdline")
+	childBucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
+	childCloud := s.newBackend(t, childBucket, true)
+
+	parFileContent := "parent"
+	childFileContent := "child"
+	parEnv := map[string]*string{
+		"childmnt/x/in_child_and_par": &parFileContent,
+		"childmnt/x/in_par_only":      &parFileContent,
+		"nonchildmnt/something":       &parFileContent,
+	}
+	childEnv := map[string]*string{
+		"x/in_child_only":    &childFileContent,
+		"x/in_child_and_par": &childFileContent,
+	}
+	s.setupBlobs(s.cloud, t, parEnv)
+	s.setupBlobs(childCloud, t, childEnv)
+
+	rootMountPath := s.tmp + "/fusetesting/" + RandStringBytesMaskImprSrc(16)
+	s.mountSame(t, rootMountPath, true)
+	defer s.umount(t, rootMountPath)
+	// Files under /tmp/fusetesting/ should all be from goofys root.
+	verifyFileData(t, rootMountPath, "childmnt/x/in_par_only", &parFileContent)
+	verifyFileData(t, rootMountPath, "childmnt/x/in_child_and_par", &parFileContent)
+	verifyFileData(t, rootMountPath, "nonchildmnt/something", &parFileContent)
+	verifyFileData(t, rootMountPath, "childmnt/x/in_child_only", nil)
+
+	childMount := &Mount{"childmnt", childCloud, "", false}
+	s.fs.Mount(childMount)
+	// Now files under /tmp/fusetesting/childmnt should be from childBucket
+	verifyFileData(t, rootMountPath, "childmnt/x/in_par_only", nil)
+	verifyFileData(t, rootMountPath, "childmnt/x/in_child_and_par", &childFileContent)
+	verifyFileData(t, rootMountPath, "childmnt/x/in_child_only", &childFileContent)
+	// /tmp/fusetesting/nonchildmnt should be from parent bucket.
+	verifyFileData(t, rootMountPath, "nonchildmnt/something", &parFileContent)
+
+	s.fs.Unmount(childMount.name)
+	// Child is unmounted. So files under /tmp/fusetesting/ should all be from goofys root.
+	verifyFileData(t, rootMountPath, "childmnt/x/in_par_only", &parFileContent)
+	verifyFileData(t, rootMountPath, "childmnt/x/in_child_and_par", &parFileContent)
+	verifyFileData(t, rootMountPath, "nonchildmnt/something", &parFileContent)
+	verifyFileData(t, rootMountPath, "childmnt/x/in_child_only", nil)
+}
+
+func (s *GoofysTest) TestUnmountBucketWithChild(t *C) {
+	t.Skip("Test for the strange 'child mount' feature, unusable from cmdline")
+
+	// This bucket will be mounted at ${goofysroot}/c
+	cBucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
+	cCloud := s.newBackend(t, cBucket, true)
+
+	// This bucket will be mounted at ${goofysroot}/c/c
+	ccBucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
+	ccCloud := s.newBackend(t, ccBucket, true)
+
+	pFileContent := "parent"
+	cFileContent := "child"
+	ccFileContent := "childchild"
+	pEnv := map[string]*string{
+		"c/c/x/foo": &pFileContent,
+	}
+	cEnv := map[string]*string{
+		"c/x/foo": &cFileContent,
+	}
+	ccEnv := map[string]*string{
+		"x/foo": &ccFileContent,
+	}
+
+	s.setupBlobs(s.cloud, t, pEnv)
+	s.setupBlobs(cCloud, t, cEnv)
+	s.setupBlobs(ccCloud, t, ccEnv)
+
+	rootMountPath := s.tmp + "/fusetesting/" + RandStringBytesMaskImprSrc(16)
+	s.mountSame(t, rootMountPath, true)
+	defer s.umount(t, rootMountPath)
+	// c/c/foo should come from root mount.
+	verifyFileData(t, rootMountPath, "c/c/x/foo", &pFileContent)
+
+	cMount := &Mount{"c", cCloud, "", false}
+	s.fs.Mount(cMount)
+	// c/c/foo should come from "c" mount.
+	verifyFileData(t, rootMountPath, "c/c/x/foo", &cFileContent)
+
+	ccMount := &Mount{"c/c", ccCloud, "", false}
+	s.fs.Mount(ccMount)
+	// c/c/foo should come from "c/c" mount.
+	verifyFileData(t, rootMountPath, "c/c/x/foo", &ccFileContent)
+
+	s.fs.Unmount(cMount.name)
+	// c/c/foo should still come from "c/c" mount.
+	verifyFileData(t, rootMountPath, "c/c/x/foo", &ccFileContent)
+}
+
+// Specific to "lowlevel" fuse, so also checked here
+func (s *GoofysTest) TestConcurrentRefDeref(t *C) {
+	fsint := NewGoofysFuse(s.fs)
+	root := s.getRoot(t)
+
+	lookupOp := fuseops.LookUpInodeOp{
+		Parent: root.Id,
+		Name:   "file1",
+	}
+
+	for i := 0; i < 20; i++ {
+		err := fsint.LookUpInode(nil, &lookupOp)
+		t.Assert(err, IsNil)
+		t.Assert(lookupOp.Entry.Child, Not(Equals), 0)
+
+		var wg sync.WaitGroup
+
+		// The idea of this test is just that lookup->forget->lookup shouldn't crash with "Unknown inode: xxx"
+		wg.Add(2)
+		go func() {
+			// we want to yield to the forget goroutine so that it's run first
+			// to trigger this bug
+			if i%2 == 0 {
+				runtime.Gosched()
+			}
+			fsint.LookUpInode(nil, &lookupOp)
+			wg.Done()
+		}()
+		go func() {
+			fsint.ForgetInode(nil, &fuseops.ForgetInodeOp{
+				Inode: lookupOp.Entry.Child,
+				N:     1,
+			})
+			wg.Done()
+		}()
+
+		wg.Wait()
+
+		fsint.ForgetInode(nil, &fuseops.ForgetInodeOp{
+			Inode: lookupOp.Entry.Child,
+			N:     1,
+		})
+	}
 }

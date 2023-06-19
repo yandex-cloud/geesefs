@@ -47,7 +47,6 @@ import (
 	"math/rand"
 	"os"
 	"reflect"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,11 +75,6 @@ func (s *GoofysTest) getRoot(t *C) (inode *Inode) {
 func (s *GoofysTest) TestGetRootInode(t *C) {
 	root := s.getRoot(t)
 	t.Assert(root.Id, Equals, fuseops.InodeID(fuseops.RootInodeID))
-}
-
-func (s *GoofysTest) ForgetInode(t *C, inode fuseops.InodeID) {
-	err := s.fs.ForgetInode(s.ctx, &fuseops.ForgetInodeOp{Inode: inode})
-	t.Assert(err, IsNil)
 }
 
 func (s *GoofysTest) TestSetup(t *C) {
@@ -183,18 +177,18 @@ func (s *GoofysTest) assertHasEntries(t *C, in *Inode, names []string) {
 }
 
 func (s *GoofysTest) readDirIntoCache(t *C, inode fuseops.InodeID) {
-	openDirOp := fuseops.OpenDirOp{Inode: inode}
-	err := s.fs.OpenDir(nil, &openDirOp)
-	t.Assert(err, IsNil)
-
-	readDirOp := fuseops.ReadDirOp{
-		Inode:  inode,
-		Handle: openDirOp.Handle,
-		Dst:    make([]byte, 8*1024),
+	in := s.fs.getInodeOrDie(inode)
+	dh := in.OpenDir()
+	dh.mu.Lock()
+	for i := 0; ; i++ {
+		en, err := dh.ReadDir(i, fuseops.DirOffset(i))
+		t.Assert(err, IsNil)
+		if en == nil {
+			break
+		}
 	}
-
-	err = s.fs.ReadDir(nil, &readDirOp)
-	t.Assert(err, IsNil)
+	dh.CloseDir()
+	dh.mu.Unlock()
 }
 
 func (s *GoofysTest) TestReadDirCacheLookup(t *C) {
@@ -390,7 +384,7 @@ func (s *GoofysTest) TestUnlink(t *C) {
 }
 
 type FileHandleReader struct {
-	fs     *GoofysFuse
+	fs     *Goofys
 	fh     *FileHandle
 	offset int64
 }
@@ -431,22 +425,14 @@ func (s *GoofysTest) testCreateAndWrite(t *C, fileName string, size int64, write
 	in, err := s.fs.LookupPath(fileName)
 	if err != nil {
 		if err == syscall.ENOENT {
-			create := fuseops.CreateFileOp{
-				Parent: root.Id,
-				Name:   fileName,
-			}
-			err = s.fs.CreateFile(nil, &create)
+			_, fh, err = root.Create(fileName)
 			t.Assert(err, IsNil)
-
-			s.fs.mu.RLock()
-			fh = s.fs.fileHandles[create.Handle]
-			s.fs.mu.RUnlock()
 		} else {
 			t.Assert(err, IsNil)
 		}
 	} else {
 		if truncate {
-			err = s.fs.SetInodeAttributes(s.ctx, &fuseops.SetInodeAttributesOp{Inode: in.Id, Size: PUInt64(0)})
+			err = in.SetAttributes(PUInt64(0), nil, nil, nil, nil)
 			t.Assert(err, IsNil)
 		}
 		fh, err = in.OpenFile()
@@ -564,7 +550,7 @@ func (s *GoofysTest) TestMultipartWriteAndTruncate(t *C) {
 		s.fs.flusherMu.Unlock()
 	}
 	// Truncate the file so now it only consists of 1 part
-	err := s.fs.SetInodeAttributes(s.ctx, &fuseops.SetInodeAttributesOp{Inode: fh.inode.Id, Size: PUInt64(1*1024*1024)})
+	err := fh.inode.SetAttributes(PUInt64(1*1024*1024), nil, nil, nil, nil)
 	t.Assert(err, IsNil)
 	// And now try to flush the file. It would fail if GeeseFS wasn't flushing it before truncation
 	err = fh.inode.SyncFile()
@@ -795,15 +781,8 @@ func (s *GoofysTest) TestRenameOpenedUnmodified(t *C) {
 	in, err = s.fs.LookupPath("file10")
 	t.Assert(err == nil || err == syscall.ENOENT, Equals, true)
 	if err == syscall.ENOENT {
-		op := &fuseops.CreateFileOp{
-			Parent: root.Id,
-			Name:   "file10",
-		}
-		err = s.fs.CreateFile(nil, op)
+		_, fh, err = root.Create("file10")
 		t.Assert(err, IsNil)
-		s.fs.mu.RLock()
-		fh = s.fs.fileHandles[op.Handle]
-		s.fs.mu.RUnlock()
 	} else {
 		fh, err = in.OpenFile()
 		t.Assert(err, IsNil)
@@ -1135,49 +1114,6 @@ func (s *GoofysTest) TestRename(t *C) {
 	}
 }
 
-func (s *GoofysTest) TestConcurrentRefDeref(t *C) {
-	root := s.getRoot(t)
-
-	lookupOp := fuseops.LookUpInodeOp{
-		Parent: root.Id,
-		Name:   "file1",
-	}
-
-	for i := 0; i < 20; i++ {
-		err := s.fs.LookUpInode(nil, &lookupOp)
-		t.Assert(err, IsNil)
-		t.Assert(lookupOp.Entry.Child, Not(Equals), 0)
-
-		var wg sync.WaitGroup
-
-		// The idea of this test is just that lookup->forget->lookup shouldn't crash with "Unknown inode: xxx"
-		wg.Add(2)
-		go func() {
-			// we want to yield to the forget goroutine so that it's run first
-			// to trigger this bug
-			if i%2 == 0 {
-				runtime.Gosched()
-			}
-			s.fs.LookUpInode(nil, &lookupOp)
-			wg.Done()
-		}()
-		go func() {
-			s.fs.ForgetInode(nil, &fuseops.ForgetInodeOp{
-				Inode: lookupOp.Entry.Child,
-				N:     1,
-			})
-			wg.Done()
-		}()
-
-		wg.Wait()
-
-		s.fs.ForgetInode(nil, &fuseops.ForgetInodeOp{
-			Inode: lookupOp.Entry.Child,
-			N:     1,
-		})
-	}
-}
-
 func hasEnv(env string) bool {
 	v := os.Getenv(env)
 
@@ -1224,22 +1160,13 @@ func (s *GoofysTest) testExplicitDir(t *C) {
 }
 
 func (s *GoofysTest) TestChmod(t *C) {
-	root := s.getRoot(t)
-
-	lookupOp := fuseops.LookUpInodeOp{
-		Parent: root.Id,
-		Name:   "file1",
-	}
-
-	err := s.fs.LookUpInode(nil, &lookupOp)
+	in, err := s.fs.LookupPath("file1")
 	t.Assert(err, IsNil)
 
 	targetMode := os.FileMode(0777)
-	setOp := fuseops.SetInodeAttributesOp{Inode: lookupOp.Entry.Child, Mode: &targetMode}
 
-	err = s.fs.SetInodeAttributes(s.ctx, &setOp)
+	err = in.SetAttributes(nil, &targetMode, nil, nil, nil)
 	t.Assert(err, IsNil)
-	t.Assert(setOp.Attributes, NotNil)
 }
 
 func (s *GoofysTest) TestGetMimeType(t *C) {
@@ -1314,12 +1241,10 @@ func (s *GoofysTest) TestPutMimeType(t *C) {
 }
 
 func (s *GoofysTest) TestBucketPrefixSlash(t *C) {
-	fs, _ := NewGoofys(context.Background(), s.fs.bucket+":dir2", s.fs.flags)
-	s.fs = NewGoofysFuse(fs)
+	s.fs, _ = NewGoofys(context.Background(), s.fs.bucket+":dir2", s.fs.flags)
 	t.Assert(s.getRoot(t).dir.mountPrefix, Equals, "dir2/")
 
-	fs, _ = NewGoofys(context.Background(), s.fs.bucket+":dir2///", s.fs.flags)
-	s.fs = NewGoofysFuse(fs)
+	s.fs, _ = NewGoofys(context.Background(), s.fs.bucket+":dir2///", s.fs.flags)
 	t.Assert(s.getRoot(t).dir.mountPrefix, Equals, "dir2/")
 }
 
@@ -1327,30 +1252,19 @@ func (s *GoofysTest) TestRenameCache(t *C) {
 	root := s.getRoot(t)
 	s.fs.flags.StatCacheTTL = 60 * 1000 * 1000 * 1000
 
-	lookupOp1 := fuseops.LookUpInodeOp{
-		Parent: root.Id,
-		Name:   "file1",
-	}
-
-	lookupOp2 := lookupOp1
-	lookupOp2.Name = "newfile"
-
-	err := s.fs.LookUpInode(nil, &lookupOp1)
+	_, err := s.fs.LookupPath("file1")
 	t.Assert(err, IsNil)
 
-	err = s.fs.LookUpInode(nil, &lookupOp2)
+	_, err = s.fs.LookupPath("newfile")
 	t.Assert(err, Equals, syscall.ENOENT)
 
 	err = root.Rename("file1", root, "newfile")
 	t.Assert(err, IsNil)
 
-	lookupOp1.Entry = fuseops.ChildInodeEntry{}
-	lookupOp2.Entry = fuseops.ChildInodeEntry{}
-
-	err = s.fs.LookUpInode(nil, &lookupOp1)
+	_, err = s.fs.LookupPath("file1")
 	t.Assert(err, Equals, syscall.ENOENT)
 
-	err = s.fs.LookUpInode(nil, &lookupOp2)
+	_, err = s.fs.LookupPath("newfile")
 	t.Assert(err, IsNil)
 }
 
@@ -1380,8 +1294,7 @@ func (s *GoofysTest) anonymous(t *C) {
 		t.Skip("cloud does not support canned ACL")
 	}
 
-	fs, _ := NewGoofys(context.Background(), bucket, s.fs.flags)
-	s.fs = NewGoofysFuse(fs)
+	s.fs, _ = NewGoofys(context.Background(), bucket, s.fs.flags)
 	t.Assert(s.fs, NotNil)
 
 	// should have auto-detected by S3 backend
@@ -1409,22 +1322,13 @@ func (s *GoofysTest) TestWriteAnonymous(t *C) {
 
 	fileName := "test"
 
-	createOp := fuseops.CreateFileOp{
-		Parent: s.getRoot(t).Id,
-		Name:   fileName,
-	}
-
-	err := s.fs.CreateFile(s.ctx, &createOp)
+	in, fh, err := s.getRoot(t).Create(fileName)
 	t.Assert(err, IsNil)
 
-	err = s.fs.SyncFile(s.ctx, &fuseops.SyncFileOp{
-		Handle: createOp.Handle,
-		Inode:  createOp.Entry.Child,
-	})
+	err = in.SyncFile()
 	t.Assert(err, Equals, syscall.EACCES)
 
-	err = s.fs.ReleaseFileHandle(s.ctx, &fuseops.ReleaseFileHandleOp{Handle: createOp.Handle})
-	t.Assert(err, IsNil)
+	fh.Release()
 }
 
 func (s *GoofysTest) TestIssue156(t *C) {
@@ -1724,18 +1628,18 @@ func (s *GoofysTest) TestXAttrSet(t *C) {
 func (s *GoofysTest) TestInodeInsert(t *C) {
 	root := s.getRoot(t)
 
-	in := NewInode(s.fs.Goofys, root, "2")
+	in := NewInode(s.fs, root, "2")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
 	t.Assert(root.dir.Children[2].Name, Equals, "2")
 
-	in = NewInode(s.fs.Goofys, root, "1")
+	in = NewInode(s.fs, root, "1")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
 	t.Assert(root.dir.Children[2].Name, Equals, "1")
 	t.Assert(root.dir.Children[3].Name, Equals, "2")
 
-	in = NewInode(s.fs.Goofys, root, "4")
+	in = NewInode(s.fs, root, "4")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
 	t.Assert(root.dir.Children[2].Name, Equals, "1")
@@ -2628,100 +2532,6 @@ func verifyFileData(t *C, mountPoint string, path string, content *string) {
 		t.Assert(err, Not(IsNil), comment)
 		t.Assert(strings.Contains(err.Error(), "no such file or directory"), Equals, true, comment)
 	}
-}
-
-func (s *GoofysTest) TestNestedMountUnmountSimple(t *C) {
-	t.Skip("Test for the strange 'child mount' feature, unusable from cmdline")
-	childBucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
-	childCloud := s.newBackend(t, childBucket, true)
-
-	parFileContent := "parent"
-	childFileContent := "child"
-	parEnv := map[string]*string{
-		"childmnt/x/in_child_and_par": &parFileContent,
-		"childmnt/x/in_par_only":      &parFileContent,
-		"nonchildmnt/something":       &parFileContent,
-	}
-	childEnv := map[string]*string{
-		"x/in_child_only":    &childFileContent,
-		"x/in_child_and_par": &childFileContent,
-	}
-	s.setupBlobs(s.cloud, t, parEnv)
-	s.setupBlobs(childCloud, t, childEnv)
-
-	rootMountPath := s.tmp + "/fusetesting/" + RandStringBytesMaskImprSrc(16)
-	s.mountSame(t, rootMountPath, true)
-	defer s.umount(t, rootMountPath)
-	// Files under /tmp/fusetesting/ should all be from goofys root.
-	verifyFileData(t, rootMountPath, "childmnt/x/in_par_only", &parFileContent)
-	verifyFileData(t, rootMountPath, "childmnt/x/in_child_and_par", &parFileContent)
-	verifyFileData(t, rootMountPath, "nonchildmnt/something", &parFileContent)
-	verifyFileData(t, rootMountPath, "childmnt/x/in_child_only", nil)
-
-	childMount := &Mount{"childmnt", childCloud, "", false}
-	s.fs.Mount(childMount)
-	// Now files under /tmp/fusetesting/childmnt should be from childBucket
-	verifyFileData(t, rootMountPath, "childmnt/x/in_par_only", nil)
-	verifyFileData(t, rootMountPath, "childmnt/x/in_child_and_par", &childFileContent)
-	verifyFileData(t, rootMountPath, "childmnt/x/in_child_only", &childFileContent)
-	// /tmp/fusetesting/nonchildmnt should be from parent bucket.
-	verifyFileData(t, rootMountPath, "nonchildmnt/something", &parFileContent)
-
-	s.fs.Unmount(childMount.name)
-	// Child is unmounted. So files under /tmp/fusetesting/ should all be from goofys root.
-	verifyFileData(t, rootMountPath, "childmnt/x/in_par_only", &parFileContent)
-	verifyFileData(t, rootMountPath, "childmnt/x/in_child_and_par", &parFileContent)
-	verifyFileData(t, rootMountPath, "nonchildmnt/something", &parFileContent)
-	verifyFileData(t, rootMountPath, "childmnt/x/in_child_only", nil)
-}
-
-func (s *GoofysTest) TestUnmountBucketWithChild(t *C) {
-	t.Skip("Test for the strange 'child mount' feature, unusable from cmdline")
-
-	// This bucket will be mounted at ${goofysroot}/c
-	cBucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
-	cCloud := s.newBackend(t, cBucket, true)
-
-	// This bucket will be mounted at ${goofysroot}/c/c
-	ccBucket := "goofys-test-" + RandStringBytesMaskImprSrc(16)
-	ccCloud := s.newBackend(t, ccBucket, true)
-
-	pFileContent := "parent"
-	cFileContent := "child"
-	ccFileContent := "childchild"
-	pEnv := map[string]*string{
-		"c/c/x/foo": &pFileContent,
-	}
-	cEnv := map[string]*string{
-		"c/x/foo": &cFileContent,
-	}
-	ccEnv := map[string]*string{
-		"x/foo": &ccFileContent,
-	}
-
-	s.setupBlobs(s.cloud, t, pEnv)
-	s.setupBlobs(cCloud, t, cEnv)
-	s.setupBlobs(ccCloud, t, ccEnv)
-
-	rootMountPath := s.tmp + "/fusetesting/" + RandStringBytesMaskImprSrc(16)
-	s.mountSame(t, rootMountPath, true)
-	defer s.umount(t, rootMountPath)
-	// c/c/foo should come from root mount.
-	verifyFileData(t, rootMountPath, "c/c/x/foo", &pFileContent)
-
-	cMount := &Mount{"c", cCloud, "", false}
-	s.fs.Mount(cMount)
-	// c/c/foo should come from "c" mount.
-	verifyFileData(t, rootMountPath, "c/c/x/foo", &cFileContent)
-
-	ccMount := &Mount{"c/c", ccCloud, "", false}
-	s.fs.Mount(ccMount)
-	// c/c/foo should come from "c/c" mount.
-	verifyFileData(t, rootMountPath, "c/c/x/foo", &ccFileContent)
-
-	s.fs.Unmount(cMount.name)
-	// c/c/foo should still come from "c/c" mount.
-	verifyFileData(t, rootMountPath, "c/c/x/foo", &ccFileContent)
 }
 
 // Checks if 2 sorted lists are equal. Returns a helpful error if they differ.
