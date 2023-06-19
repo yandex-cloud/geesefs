@@ -16,7 +16,7 @@
 package main
 
 import (
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 	. "github.com/yandex-cloud/geesefs/internal"
 
 	"fmt"
@@ -67,7 +67,7 @@ func registerSIGINTHandler(fs *Goofys, mfs MountedFS, flags *cfg.FlagStorage) {
 func main() {
 	messagePath()
 
-	app := NewApp()
+	app := cfg.NewApp()
 
 	var flags *cfg.FlagStorage
 	var child *os.Process
@@ -85,7 +85,7 @@ func main() {
 
 		// Populate and parse flags.
 		bucketName := c.Args()[0]
-		flags = PopulateFlags(c)
+		flags = cfg.PopulateFlags(c)
 		if flags == nil {
 			cli.ShowAppHelp(c)
 			err = fmt.Errorf("invalid arguments")
@@ -171,7 +171,7 @@ func main() {
 		return
 	}
 
-	err := app.Run(MessageMountFlags(os.Args))
+	err := app.Run(cfg.MessageMountFlags(os.Args))
 	if err != nil {
 		if flags != nil && !flags.Foreground && child != nil {
 			log.Fatalln("Unable to mount file system, see syslog for details")

@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"sync/atomic"
 
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 	"github.com/jacobsa/fuse"
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/jacobsa/fuse/fuseutil"

@@ -13,7 +13,7 @@ import (
 
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/jacobsa/fuse/fuseutil"
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 	"github.com/yandex-cloud/geesefs/internal/pb"
 	"google.golang.org/grpc"
 )

@@ -38,7 +38,7 @@ NOTES:
 package internal
 
 import (
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 
 	"bytes"
 	"fmt"

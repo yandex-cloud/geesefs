@@ -18,7 +18,7 @@
 package internal
 
 import (
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 
 	"context"
 	"fmt"
@@ -37,11 +37,13 @@ import (
 
 // jacobsa/fuse interface to the file system
 
-const fuseOptions = `FUSE OPTIONS:
+func init() {
+	cfg.FuseOptions = `FUSE OPTIONS:
    -o allow_other  allow all users (including root) to access files
    -o allow_root   allow root and filesystem owner to access files
    -o rootmode=M   set file mode of the filesystem's root (octal)
 `;
+}
 
 type GoofysFuse struct {
 	fuseutil.NotImplementedFileSystem

@@ -29,7 +29,7 @@ import (
 	"github.com/kardianos/osext"
 	daemon "github.com/sevlyar/go-daemon"
 
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 	"github.com/yandex-cloud/geesefs/internal"
 )
 

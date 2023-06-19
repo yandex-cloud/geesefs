@@ -18,7 +18,7 @@
 package internal
 
 import (
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 
 	"bufio"
 	"bytes"
@@ -486,7 +486,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		createBucket = true
 	}
 
-	uid, gid := MyUserAndGroup()
+	uid, gid := cfg.MyUserAndGroup()
 	flags := &cfg.FlagStorage{
 		DirMode:     0700,
 		FileMode:    0700,

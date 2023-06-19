@@ -16,7 +16,7 @@
 package internal
 
 import (
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 
 	"encoding/json"
 	"errors"
@@ -251,7 +251,7 @@ func (s *S3Backend) newS3() {
 	s.S3.Handlers.Build.RemoveByName("core.SDKVersionUserAgentHandler")
 	s.S3.Handlers.Build.PushBackNamed(request.NamedHandler{
 		Name: "core.SDKVersionUserAgentHandler",
-		Fn: request.MakeAddToUserAgentHandler("GeeseFS", GEESEFS_VERSION,
+		Fn: request.MakeAddToUserAgentHandler("GeeseFS", cfg.GEESEFS_VERSION,
 			runtime.Version(), runtime.GOOS, runtime.GOARCH),
 	})
 }

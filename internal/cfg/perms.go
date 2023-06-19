@@ -14,7 +14,7 @@
 // limitations under the License.
 
 // System permissions-related code.
-package internal
+package cfg
 
 import (
 	"os"

@@ -15,7 +15,7 @@
 package internal
 
 import (
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 	. "gopkg.in/check.v1"
 
 	"fmt"

@@ -5,7 +5,7 @@ package internal
 import (
 	"context"
 
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 	"github.com/yandex-cloud/geesefs/internal/pb"
 )
 

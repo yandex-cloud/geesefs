@@ -12,23 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package common
+package cfg
 
 import (
 	"os"
-
-	"github.com/sirupsen/logrus"
+	"syscall"
 )
 
-func InitLoggers(logFile string) {
-	initFileLoggers(logFile)
-}
-
-func NewLogger(name string) *LogHandle {
-	l := &LogHandle{name: name}
-	l.Out = os.Stderr
-	l.Formatter = l
-	l.Level = logrus.InfoLevel
-	l.Hooks = make(logrus.LevelHooks)
-	return l
+func redirectStderr(target *os.File) error {
+	return syscall.Dup3(int(target.Fd()), int(os.Stderr.Fd()), 0)
 }

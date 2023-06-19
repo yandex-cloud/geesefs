@@ -17,7 +17,7 @@
 package internal
 
 import (
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 
 	"context"
 	"encoding/base64"

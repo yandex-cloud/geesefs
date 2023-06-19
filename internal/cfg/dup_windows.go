@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package common
+package cfg
 
 import (
+	"golang.org/x/sys/windows"
 	"os"
-	"syscall"
 )
 
 func redirectStderr(target *os.File) error {
-	return syscall.Dup3(int(target.Fd()), int(os.Stderr.Fd()), 0)
+	err := windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(target.Fd()))
+	if err == nil {
+		os.Stderr = target
+	}
+	return err
 }

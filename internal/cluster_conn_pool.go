@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"

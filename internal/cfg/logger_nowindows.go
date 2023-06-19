@@ -15,7 +15,7 @@
 
 // +build !windows
 
-package common
+package cfg
 
 import (
 	"log/syslog"

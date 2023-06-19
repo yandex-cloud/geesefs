@@ -12,17 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package common
+package cfg
 
 import (
-	"golang.org/x/sys/windows"
 	"os"
+
+	"github.com/sirupsen/logrus"
 )
 
-func redirectStderr(target *os.File) error {
-	err := windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(target.Fd()))
-	if err == nil {
-		os.Stderr = target
-	}
-	return err
+func InitLoggers(logFile string) {
+	initFileLoggers(logFile)
+}
+
+func NewLogger(name string) *LogHandle {
+	l := &LogHandle{name: name}
+	l.Out = os.Stderr
+	l.Formatter = l
+	l.Level = logrus.InfoLevel
+	l.Hooks = make(logrus.LevelHooks)
+	return l
 }

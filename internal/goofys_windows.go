@@ -27,12 +27,13 @@ import (
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/sirupsen/logrus"
 
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 )
 
 // winfsp/cgofuse interface to the file system
 
-const fuseOptions = `WinFSP options:
+func init() {
+	cfg.FuseOptions = `WinFSP options:
    -o umask=MASK              set file permissions (octal)
    -o FileSecurity=SDDL       set file DACL (SDDL format)
    -o create_umask=MASK       set newly created file permissions (octal)
@@ -57,6 +58,7 @@ WinFSP advanced options:
    -o ThreadCount             number of file system dispatcher threads
    -o uidmap=UID:SID[;...]    explicit UID <-> SID map (max 8 entries)
 `;
+}
 
 type GoofysWin struct {
 	fuse.FileSystemBase

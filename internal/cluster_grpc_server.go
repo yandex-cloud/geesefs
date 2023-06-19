@@ -6,7 +6,7 @@ import (
 	"context"
 	"net"
 
-	cfg "github.com/yandex-cloud/geesefs/api/common"
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 	"github.com/yandex-cloud/geesefs/internal/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
