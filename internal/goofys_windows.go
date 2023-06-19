@@ -908,15 +908,6 @@ func MountWin(
 	ctx context.Context,
 	bucketName string,
 	flags *cfg.FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
-
-	if flags.DebugFuse || flags.DebugMain {
-		log.Level = logrus.DebugLevel
-	}
-
-	if flags.DebugFuse {
-		fuseLog.Level = logrus.DebugLevel
-	}
-
 	fs, err = NewGoofys(ctx, bucketName, flags)
 	if fs == nil {
 		if err == nil {
@@ -924,14 +915,18 @@ func MountWin(
 		}
 		return
 	}
+	mfs, err = mountFuseFS(fs)
+	return
+}
 
+func mountFuseFS(fs *Goofys) (mfs MountedFS, err error) {
 	var mountOpt []string
-	if flags.DebugFuse {
+	if fs.flags.DebugFuse {
 		mountOpt = append(mountOpt, "-o", "debug")
 	}
-	mountOpt = append(mountOpt, "-o", fmt.Sprintf("uid=%v", int32(flags.Uid)))
-	mountOpt = append(mountOpt, "-o", fmt.Sprintf("gid=%v", int32(flags.Gid)))
-	for _, s := range flags.MountOptions {
+	mountOpt = append(mountOpt, "-o", fmt.Sprintf("uid=%v", int32(fs.flags.Uid)))
+	mountOpt = append(mountOpt, "-o", fmt.Sprintf("gid=%v", int32(fs.flags.Gid)))
+	for _, s := range fs.flags.MountOptions {
 		mountOpt = append(mountOpt, "-o", s)
 	}
 	fuseLog.Debugf("Starting WinFSP with options: %v", mountOpt)
@@ -942,17 +937,17 @@ func MountWin(
 	fsint.host = host
 	host.SetCapReaddirPlus(true)
 	go func() {
-		ok := host.Mount(flags.MountPoint, mountOpt)
+		ok := host.Mount(fs.flags.MountPoint, mountOpt)
 		if !ok {
 			fsint.initCh <- 0
 		}
 	}()
 	v := <-fsint.initCh
 	if v == 0 {
-		return nil, nil, fmt.Errorf("WinFSP initialization failed")
+		return nil, fmt.Errorf("WinFSP initialization failed")
 	}
 
-	return fs, fsint, nil
+	return fsint, nil
 }
 
 // Join is a part of MountedFS interface

@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -41,6 +42,54 @@ import (
 	bench_embed "github.com/yandex-cloud/geesefs/bench"
 	test_embed "github.com/yandex-cloud/geesefs/test"
 )
+
+func (s *GoofysTest) mountCommon(t *C, mountPoint string, sameProc bool) {
+	err := os.MkdirAll(mountPoint, 0700)
+	if err == syscall.EEXIST {
+		err = nil
+	}
+	t.Assert(err, IsNil)
+
+	if !hasEnv("SAME_PROCESS_MOUNT") && !sameProc {
+
+		region := ""
+		if os.Getenv("REGION") != "" {
+			region = " --region \""+os.Getenv("REGION")+"\""
+		}
+		exe := os.Getenv("GEESEFS_BINARY")
+		if exe == "" {
+			exe = "../geesefs"
+		}
+		c := exec.Command("/bin/bash", "-c",
+			exe+" --debug_fuse --debug_s3"+
+			" --stat-cache-ttl "+s.fs.flags.StatCacheTTL.String()+
+			" --log-file \"mount_"+t.TestName()+".log\""+
+			" --endpoint \""+s.fs.flags.Endpoint+"\""+
+			region+
+			" "+s.fs.bucket+" "+mountPoint)
+		err = c.Run()
+		t.Assert(err, IsNil)
+
+	} else {
+		s.mfs, err = mountFuseFS(s.fs)
+		t.Assert(err, IsNil)
+	}
+}
+
+func (s *GoofysTest) umount(t *C, mountPoint string) {
+	var err error
+	for i := 0; i < 10; i++ {
+		err = TryUnmount(mountPoint)
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+		} else {
+			break
+		}
+	}
+	t.Assert(err, IsNil)
+
+	os.Remove(mountPoint)
+}
 
 func (s *GoofysTest) SetUpSuite(t *C) {
 	s.tmp = os.Getenv("TMPDIR")
@@ -446,7 +495,7 @@ func (s *GoofysTest) TestNestedMountUnmountSimple(t *C) {
 	s.setupBlobs(childCloud, t, childEnv)
 
 	rootMountPath := s.tmp + "/fusetesting/" + RandStringBytesMaskImprSrc(16)
-	s.mountSame(t, rootMountPath, true)
+	s.mountInside(t, rootMountPath)
 	defer s.umount(t, rootMountPath)
 	// Files under /tmp/fusetesting/ should all be from goofys root.
 	verifyFileData(t, rootMountPath, "childmnt/x/in_par_only", &parFileContent)
@@ -500,7 +549,7 @@ func (s *GoofysTest) TestUnmountBucketWithChild(t *C) {
 	s.setupBlobs(ccCloud, t, ccEnv)
 
 	rootMountPath := s.tmp + "/fusetesting/" + RandStringBytesMaskImprSrc(16)
-	s.mountSame(t, rootMountPath, true)
+	s.mountInside(t, rootMountPath)
 	defer s.umount(t, rootMountPath)
 	// c/c/foo should come from root mount.
 	verifyFileData(t, rootMountPath, "c/c/x/foo", &pFileContent)

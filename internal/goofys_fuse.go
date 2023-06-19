@@ -901,12 +901,7 @@ func mountFuseFS(fs *Goofys) (mfs MountedFS, err error) {
 
 	if fs.flags.DebugFuse {
 		fuseLog := cfg.GetLogger("fuse")
-		fuseLog.Level = logrus.DebugLevel
 		mountCfg.DebugLogger = cfg.GetStdLogger(fuseLog, logrus.DebugLevel)
-	}
-
-	if fs.flags.DebugFuse || fs.flags.DebugMain {
-		log.Level = logrus.DebugLevel
 	}
 
 	fsint := NewGoofysFuse(fs)

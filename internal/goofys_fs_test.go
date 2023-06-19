@@ -30,55 +30,11 @@ import (
 )
 
 func (s *GoofysTest) mount(t *C, mountPoint string) {
-	s.mountSame(t, mountPoint, false)
+	s.mountCommon(t, mountPoint, false)
 }
 
-func (s *GoofysTest) mountSame(t *C, mountPoint string, sameProc bool) {
-	err := os.MkdirAll(mountPoint, 0700)
-	if err == syscall.EEXIST {
-		err = nil
-	}
-	t.Assert(err, IsNil)
-
-	if !hasEnv("SAME_PROCESS_MOUNT") && !sameProc {
-
-		region := ""
-		if os.Getenv("REGION") != "" {
-			region = " --region \""+os.Getenv("REGION")+"\""
-		}
-		exe := os.Getenv("GEESEFS_BINARY")
-		if exe == "" {
-			exe = "../geesefs"
-		}
-		c := exec.Command("/bin/bash", "-c",
-			exe+" --debug_fuse --debug_s3"+
-			" --stat-cache-ttl "+s.fs.flags.StatCacheTTL.String()+
-			" --log-file \"mount_"+t.TestName()+".log\""+
-			" --endpoint \""+s.fs.flags.Endpoint+"\""+
-			region+
-			" "+s.fs.bucket+" "+mountPoint)
-		err = c.Run()
-		t.Assert(err, IsNil)
-
-	} else {
-		s.mfs, err = mountFuseFS(s.fs)
-		t.Assert(err, IsNil)
-	}
-}
-
-func (s *GoofysTest) umount(t *C, mountPoint string) {
-	var err error
-	for i := 0; i < 10; i++ {
-		err = TryUnmount(mountPoint)
-		if err != nil {
-			time.Sleep(100 * time.Millisecond)
-		} else {
-			break
-		}
-	}
-	t.Assert(err, IsNil)
-
-	os.Remove(mountPoint)
+func (s *GoofysTest) mountInside(t *C, mountPoint string) {
+	s.mountCommon(t, mountPoint, true)
 }
 
 func (s *GoofysTest) TestIssue69Fuse(t *C) {

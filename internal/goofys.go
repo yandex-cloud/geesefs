@@ -194,6 +194,12 @@ func ParseBucketSpec(bucket string) (spec BucketSpec, err error) {
 }
 
 func NewGoofys(ctx context.Context, bucketName string, flags *cfg.FlagStorage) (*Goofys, error) {
+	if flags.DebugFuse || flags.DebugMain {
+		log.Level = logrus.DebugLevel
+	}
+	if flags.DebugFuse {
+		fuseLog.Level = logrus.DebugLevel
+	}
 	if flags.DebugS3 {
 		cfg.SetCloudLogLevel(logrus.DebugLevel)
 	}
