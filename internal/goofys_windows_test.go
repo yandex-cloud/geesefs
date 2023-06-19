@@ -21,6 +21,7 @@ package internal
 
 import (
 	"os"
+	"time"
 	. "gopkg.in/check.v1"
 )
 
@@ -33,7 +34,18 @@ func (s *GoofysTest) SetUpSuite(t *C) {
 
 func (s *GoofysTest) mountCommon(t *C, mountPoint string, sameProc bool) {
 	os.Remove(mountPoint)
+	s.fs.flags.MountPoint = mountPoint
 	mfs, err := mountFuseFS(s.fs)
+	t.Assert(err, IsNil)
+	// WinFSP doesn't wait for mounting correctly... Try to wait ourselves
+	for i := 0; i < 20; i++ {
+		_, err = os.Stat(mountPoint)
+		if err != nil {
+			time.Sleep(time.Second)
+		} else {
+			break
+		}
+	}
 	t.Assert(err, IsNil)
 	s.mfs = mfs
 }
