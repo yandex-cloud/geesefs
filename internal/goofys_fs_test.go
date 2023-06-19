@@ -20,9 +20,11 @@ package internal
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -163,22 +165,23 @@ func (s *GoofysTest) TestReadDirSlurpContinuation(t *C) {
 		t.Assert(err, IsNil)
 	}
 	// Sync the whole filesystem
-	fh, err := os.Open(mountPoint)
-	t.Assert(err, IsNil)
-	err = fh.Sync()
-	t.Assert(err, IsNil)
-	err = fh.Close()
+	err := FsyncDir(mountPoint)
 	t.Assert(err, IsNil)
 	// Unmount
 	s.umount(t, mountPoint)
 
 	// Mount again
 	s.mount(t, mountPoint)
-	// Check that `find` returns all files to check that slurp works correctly with the continuation
-	c := exec.Command("/bin/bash", "-c", "find "+mountPoint+"/slurpc -type f | wc -l")
-	out, err := c.CombinedOutput()
-	t.Assert(err, IsNil)
-	t.Assert(string(out), Equals, "2003\n")
+	// Check that all files are present to check that slurp works correctly with the continuation
+	count := 0
+	filepath.Walk(mountPoint+"/slurpc", func(path string, info fs.FileInfo, err error) error {
+		t.Assert(err, IsNil)
+		if !info.IsDir() {
+			count++
+		}
+		return nil
+	})
+	t.Assert(count, Equals, 2003)
 }
 
 func (s *GoofysTest) writeSeekWriteFuse(t *C, file string, fh *os.File, first string, second string, third string) {

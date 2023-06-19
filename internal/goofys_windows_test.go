@@ -20,7 +20,9 @@
 package internal
 
 import (
+	"errors"
 	"os"
+	"syscall"
 	"time"
 	. "gopkg.in/check.v1"
 )
@@ -53,4 +55,15 @@ func (s *GoofysTest) mountCommon(t *C, mountPoint string, sameProc bool) {
 func (s *GoofysTest) umount(t *C, mountPoint string) {
 	s.mfs.Unmount()
 	s.mfs = nil
+}
+
+func FsyncDir(dir string) error {
+	fh, err := os.Create(dir+"/.fsyncdir")
+	if errors.Is(err, syscall.ENOENT) {
+		return nil
+	}
+	if err == nil {
+		fh.Close()
+	}
+	return err
 }

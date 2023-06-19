@@ -91,6 +91,19 @@ func (s *GoofysTest) umount(t *C, mountPoint string) {
 	os.Remove(mountPoint)
 }
 
+func FsyncDir(dir string) error {
+	fh, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = fh.Sync()
+	if err != nil {
+		fh.Close()
+		return err
+	}
+	return fh.Close()
+}
+
 func (s *GoofysTest) SetUpSuite(t *C) {
 	s.tmp = os.Getenv("TMPDIR")
 	if s.tmp == "" {

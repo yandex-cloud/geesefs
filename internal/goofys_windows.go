@@ -411,6 +411,22 @@ func (fs *GoofysWin) Create(path string, flags int, mode uint32) (ret int, fhId 
 		return mapWinError(err), 0
 	}
 
+	if fs.flags.FlushFilename != "" && child == fs.flags.FlushFilename {
+		err = fs.SyncFS(parent)
+		if err == nil {
+			err = syscall.ENOENT
+		}
+		return mapWinError(err), 0
+	}
+
+	if fs.flags.RefreshFilename != "" && child == fs.flags.RefreshFilename {
+		err = fs.RefreshInodeCache(parent)
+		if err == nil {
+			err = syscall.ENOENT
+		}
+		return mapWinError(err), 0
+	}
+
 	inode, fh, err := parent.Create(child)
 	if err != nil {
 		return mapWinError(err), 0
@@ -428,6 +444,11 @@ func (fs *GoofysWin) Create(path string, flags int, mode uint32) (ret int, fhId 
 	return 0, uint64(handleID)
 }
 
+func endsWith(path, part string) bool {
+	ld := len(path)-len(part)
+	return len(part) > 0 && ld >= 0 && (ld == 0 || path[ld-1] == '/') && path[ld:] == part
+}
+
 // Open opens a file.
 // The flags are a combination of the fuse.O_* constants.
 func (fs *GoofysWin) Open(path string, flags int) (ret int, fhId uint64) {
@@ -442,6 +463,30 @@ func (fs *GoofysWin) Open(path string, flags int) (ret int, fhId uint64) {
 
 	inode, err := fs.LookupPath(path)
 	if err != nil {
+		if endsWith(path, fs.flags.FlushFilename) {
+			parent, _, err := fs.LookupParent(path)
+			if err != nil {
+				return mapWinError(err), 0
+			}
+			if err == nil {
+				err = fs.SyncFS(parent)
+			}
+			if err == nil {
+				err = syscall.ENOENT
+			}
+		}
+		if endsWith(path, fs.flags.RefreshFilename) {
+			parent, _, err := fs.LookupParent(path)
+			if err != nil {
+				return mapWinError(err), 0
+			}
+			if err == nil {
+				err = fs.RefreshInodeCache(parent)
+			}
+			if err == nil {
+				err = syscall.ENOENT
+			}
+		}
 		return mapWinError(err), 0
 	}
 
