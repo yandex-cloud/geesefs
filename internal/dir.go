@@ -725,7 +725,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		}
 	}
 
-	if len(notifications) > 0 {
+	if len(notifications) > 0 && fs.NotifyCallback != nil {
 		fs.NotifyCallback(notifications)
 	}
 

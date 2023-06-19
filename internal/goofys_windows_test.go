@@ -67,3 +67,7 @@ func FsyncDir(dir string) error {
 	}
 	return err
 }
+
+func IsAccessDenied(err error) bool {
+	return err == syscall.EACCES || err == syscall.ERROR_ACCESS_DENIED
+}

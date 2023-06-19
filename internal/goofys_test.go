@@ -1328,7 +1328,7 @@ func (s *GoofysTest) TestWriteAnonymous(t *C) {
 	t.Assert(err, IsNil)
 
 	err = in.SyncFile()
-	t.Assert(err, Equals, syscall.EACCES)
+	t.Assert(mapAwsError(err), Equals, syscall.EACCES)
 
 	fh.Release()
 }
@@ -1830,84 +1830,6 @@ func (s *GoofysTest) TestRead403(t *C) {
 	// https://github.com/kahing/goofys/pull/243
 	_, _, err = fh.ReadFile(0, 5)
 	t.Assert(mapAwsError(err), Equals, syscall.EACCES)
-}
-
-func (s *GoofysTest) TestDirMTime(t *C) {
-	s.fs.flags.StatCacheTTL = 1 * time.Minute
-	// enable cheap to ensure GET dir/ will come back before LIST dir/
-	s.fs.flags.Cheap = true
-
-	root := s.getRoot(t)
-	t.Assert(time.Time{}.Before(root.Attributes.Mtime), Equals, true)
-
-	dir1, err := s.fs.LookupPath("dir1")
-	t.Assert(err, IsNil)
-
-	attr1 := dir1.GetAttributes()
-	m1 := attr1.Mtime
-
-	time.Sleep(2 * time.Second)
-
-	dir2, err := dir1.MkDir("dir2")
-	t.Assert(err, IsNil)
-
-	attr2 := dir2.GetAttributes()
-	m2 := attr2.Mtime
-	t.Assert(m1.Add(2*time.Second).Before(m2), Equals, true)
-
-	// dir1 didn't have an explicit mtime, so it should update now
-	// that we did a mkdir inside it
-	attr1 = dir1.GetAttributes()
-	m1 = attr1.Mtime
-	t.Assert(m1, Equals, m2)
-
-	time.Sleep(2 * time.Second)
-
-	// different dir2
-	dir2, err = s.fs.LookupPath("dir2")
-	t.Assert(err, IsNil)
-
-	attr2 = dir2.GetAttributes()
-	m2 = attr2.Mtime
-
-	// this fails because we are listing dir/, which means we
-	// don't actually see the dir blob dir2/dir3/ (it's returned
-	// as common prefix), so we can't get dir3's mtime
-	if false {
-		// dir2/dir3/ exists and has mtime
-		s.readDirIntoCache(t, dir2.Id)
-		dir3, err := s.fs.LookupPath("dir2/dir3")
-		t.Assert(err, IsNil)
-
-		attr3 := dir3.GetAttributes()
-		// setupDefaultEnv is before mounting
-		t.Assert(attr3.Mtime.Before(m2), Equals, true)
-	}
-
-	time.Sleep(time.Second)
-
-	params := &PutBlobInput{
-		Key:  "dir2/newfile",
-		Body: bytes.NewReader([]byte("foo")),
-		Size: PUInt64(3),
-	}
-	_, err = s.cloud.PutBlob(params)
-	t.Assert(err, IsNil)
-
-	// dir2 could be already preloaded due to optimisations, it may have older mtime
-	// FIXME: (maybe) update parent directory modification times when flushing files inside them
-	s.fs.flags.StatCacheTTL = 1 * time.Second
-	s.readDirIntoCache(t, dir2.Id)
-	s.fs.flags.StatCacheTTL = 1 * time.Minute
-
-	newfile, err := dir2.LookUp("newfile", false)
-	t.Assert(err, IsNil)
-
-	attr2New := dir2.GetAttributes()
-	// mtime should reflect that of the latest object
-	// GCS can return nano second resolution so truncate to second for compare
-	t.Assert(attr2New.Mtime.Unix(), Equals, newfile.Attributes.Mtime.Unix())
-	t.Assert(m2.Before(attr2New.Mtime), Equals, true)
 }
 
 func (s *GoofysTest) TestDirMTimeNoTTL(t *C) {

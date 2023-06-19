@@ -23,8 +23,8 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -90,7 +90,7 @@ func (s *GoofysTest) TestWriteAnonymousFuse(t *C) {
 	t.Assert(err, NotNil)
 	pathErr, ok := err.(*os.PathError)
 	t.Assert(ok, Equals, true)
-	t.Assert(pathErr.Err, Equals, syscall.EACCES)
+	t.Assert(IsAccessDenied(pathErr.Err), Equals, true)
 
 	err = file.Close()
 	t.Assert(err, IsNil)
@@ -281,61 +281,53 @@ func (s *GoofysTest) TestRmdirWithDiropen(t *C) {
 	err = os.MkdirAll(mountPoint+"/dir2/dir5", 0700)
 	t.Assert(err, IsNil)
 
-	//1, open dir5
+	// 1, open dir5
 	dir := mountPoint + "/dir2/dir5"
 	fh, err := os.Open(dir)
 	t.Assert(err, IsNil)
 	defer fh.Close()
 
-	cmd1 := exec.Command("ls", mountPoint+"/dir2")
-	//out, err := cmd.Output()
-	out1, err1 := cmd1.Output()
-	if err1 != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			panic(ee.Stderr)
-		}
-	}
-	t.Assert(string(out1), DeepEquals, ""+"dir3\n"+"dir4\n"+"dir5\n")
+	fh2, err := os.Open(mountPoint + "/dir2")
+	t.Assert(err, IsNil)
+	defer fh2.Close()
+	names, err := fh2.Readdirnames(0)
+	t.Assert(err, IsNil)
+	t.Assert(names, DeepEquals, []string{"dir3", "dir4", "dir5"})
+	fh2.Close()
 
-	//2, rm -rf dir5
-	cmd := exec.Command("rm", "-rf", dir)
-	_, err = cmd.Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			panic(ee.Stderr)
-		}
+	// 2, remove dir5
+	if runtime.GOOS == "windows" {
+		// Can't remove opened files under Windows
+		err = fh.Close()
+		t.Assert(err, IsNil)
 	}
+	err = os.RemoveAll(dir)
+	t.Assert(err, IsNil)
 
-	//3,  readdir dir2
+	// 3, readdir dir2
 	fh1, err := os.Open(mountPoint + "/dir2")
 	t.Assert(err, IsNil)
-	defer func() {
-		// close the file if the test failed so we can unmount
-		if fh1 != nil {
-			fh1.Close()
-		}
-	}()
-
-	names, err := fh1.Readdirnames(0)
+	defer fh1.Close()
+	names, err = fh1.Readdirnames(0)
 	t.Assert(err, IsNil)
 	t.Assert(names, DeepEquals, []string{"dir3", "dir4"})
 
-	cmd = exec.Command("ls", mountPoint+"/dir2")
-	out, err := cmd.Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			panic(ee.Stderr)
-		}
-	}
-
-	t.Assert(string(out), DeepEquals, ""+"dir3\n"+"dir4\n")
+	fh2, err = os.Open(mountPoint + "/dir2")
+	t.Assert(err, IsNil)
+	names, err = fh2.Readdirnames(0)
+	t.Assert(err, IsNil)
+	t.Assert(names, DeepEquals, []string{"dir3", "dir4"})
+	err = fh2.Close()
+	t.Assert(err, IsNil)
 
 	err = fh1.Close()
 	t.Assert(err, IsNil)
 
-	// 4,reset env
-	err = fh.Close()
-	t.Assert(err, IsNil)
+	// 4, reset env
+	if runtime.GOOS != "windows" {
+		err = fh.Close()
+		t.Assert(err, IsNil)
+	}
 
 	err = os.RemoveAll(mountPoint + "/dir2/dir4")
 	t.Assert(err, IsNil)
@@ -353,12 +345,14 @@ func (s *GoofysTest) TestRmImplicitDir(t *C) {
 	t.Assert(err, IsNil)
 	defer os.Chdir(oldCwd)
 
-	dir, err := os.Open(mountPoint + "/test_rm_implicit_dir/dir2")
-	t.Assert(err, IsNil)
-	defer dir.Close()
+	if runtime.GOOS != "windows" {
+		dir, err := os.Open(mountPoint + "/test_rm_implicit_dir/dir2")
+		t.Assert(err, IsNil)
+		defer dir.Close()
 
-	err = dir.Chdir()
-	t.Assert(err, IsNil)
+		err = os.Chdir(mountPoint + "/test_rm_implicit_dir/dir2")
+		t.Assert(err, IsNil)
+	}
 
 	err = os.RemoveAll(mountPoint + "/test_rm_implicit_dir/dir2")
 	t.Assert(err, IsNil)

@@ -867,7 +867,9 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 		}
 		dh.CloseDir()
 		dh.mu.Unlock()
-		fs.NotifyCallback(notifications)
+		if fs.NotifyCallback != nil {
+			fs.NotifyCallback(notifications)
+		}
 		return mappedErr
 	}
 	inode, err := parent.recheckInode(inode, name)
@@ -884,7 +886,9 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 			Name: name,
 		})
 	}
-	fs.NotifyCallback(notifications)
+	if fs.NotifyCallback != nil {
+		fs.NotifyCallback(notifications)
+	}
 	if mappedErr == syscall.ENOENT {
 		// We don't mind if the file disappeared
 		return nil

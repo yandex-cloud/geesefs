@@ -72,7 +72,7 @@ func NewGoofysWin(fs *Goofys) *GoofysWin {
 	fsint := &GoofysWin{
 		Goofys: fs,
 	}
-	fsint.initCh = make(chan int)
+	fsint.initCh = make(chan int, 3)
 	fs.NotifyCallback = func(notifications []interface{}) {
 		fsint.Notify(notifications)
 	}
