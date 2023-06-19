@@ -13,14 +13,14 @@ import (
 
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/jacobsa/fuse/fuseutil"
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 	"github.com/yandex-cloud/geesefs/internal/pb"
 	"google.golang.org/grpc"
 )
 
 var (
-	ownerLog = GetLogger("owner")
-	statLog  = GetLogger("stat")
+	ownerLog = cfg.GetLogger("owner")
+	statLog  = cfg.GetLogger("stat")
 )
 
 const (
@@ -33,7 +33,7 @@ const (
 )
 
 type ClusterFs struct {
-	Flags  *FlagStorage
+	Flags  *cfg.FlagStorage
 	Conns  *ConnPool
 	Goofys *Goofys
 	mfs    Joinable
@@ -41,7 +41,7 @@ type ClusterFs struct {
 	stat Stat
 }
 
-func NewClusterGoofys(ctx context.Context, bucket string, flags *FlagStorage, conns *ConnPool) (*Goofys, error) {
+func NewClusterGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage, conns *ConnPool) (*Goofys, error) {
 	fs, err := NewGoofys(ctx, bucket, flags)
 	if err != nil {
 		return nil, err

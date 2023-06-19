@@ -6,21 +6,21 @@ import (
 	"context"
 	"net"
 
-	"github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 	"github.com/yandex-cloud/geesefs/internal/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 )
 
-var grpcLog = common.GetLogger("grpc")
+var grpcLog = cfg.GetLogger("grpc")
 
 type GrpcServer struct {
 	*grpc.Server
-	flags *common.FlagStorage
+	flags *cfg.FlagStorage
 }
 
-func NewGrpcServer(flags *common.FlagStorage) *GrpcServer {
+func NewGrpcServer(flags *cfg.FlagStorage) *GrpcServer {
 	return &GrpcServer{
 		Server: grpc.NewServer(grpc.ChainUnaryInterceptor(
 			LogServerInterceptor,
@@ -50,7 +50,7 @@ const (
 	DST_NODE_ID_METADATA_KEY = "dst-node-id"
 )
 
-var traceLog = common.GetLogger("trace")
+var traceLog = cfg.GetLogger("trace")
 
 func LogServerInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 	// theese requests generate a lot of bytes of logs, so disable it for now

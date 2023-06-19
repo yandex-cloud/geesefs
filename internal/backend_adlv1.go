@@ -16,7 +16,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"bytes"
 	"context"
@@ -38,8 +38,8 @@ import (
 type ADLv1 struct {
 	cap Capabilities
 
-	flags  *FlagStorage
-	config *ADLv1Config
+	flags  *cfg.FlagStorage
+	config *cfg.ADLv1Config
 
 	client  *adl.Client
 	account string
@@ -66,7 +66,7 @@ func (err ADLv1Err) Error() string {
 
 const ADL1_REQUEST_ID = "X-Ms-Request-Id"
 
-var adls1Log = GetLogger("adlv1")
+var adls1Log = cfg.GetLogger("adlv1")
 
 type ADLv1MultipartBlobCommitInput struct {
 	Size uint64
@@ -87,7 +87,7 @@ func adlLogResp(level logrus.Level, r *http.Response) {
 	}
 }
 
-func NewADLv1(bucket string, flags *FlagStorage, config *ADLv1Config) (*ADLv1, error) {
+func NewADLv1(bucket string, flags *cfg.FlagStorage, config *cfg.ADLv1Config) (*ADLv1, error) {
 	parts := strings.SplitN(config.Endpoint, ".", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("Invalid endpoint: %v", config.Endpoint)
@@ -141,7 +141,7 @@ func NewADLv1(bucket string, flags *FlagStorage, config *ADLv1Config) (*ADLv1, e
 	adlClient.BaseClient.Client.RequestInspector = LogRequest
 	adlClient.BaseClient.Client.ResponseInspector = LogResponse
 	adlClient.BaseClient.AdlsFileSystemDNSSuffix = parts[1]
-	adlClient.BaseClient.Sender.(*http.Client).Transport = GetHTTPTransport()
+	adlClient.BaseClient.Sender.(*http.Client).Transport = cfg.GetHTTPTransport()
 
 	b := &ADLv1{
 		flags:   flags,

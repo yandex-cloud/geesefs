@@ -19,7 +19,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 	"github.com/yandex-cloud/geesefs/internal"
 )
 
@@ -57,7 +57,7 @@ func (p *Daemonizer) NotifySuccess(success bool) {
 func mount(
 	ctx context.Context,
 	bucketName string,
-	flags *common.FlagStorage) (fs *internal.Goofys, mfs internal.MountedFS, err error) {
+	flags *cfg.FlagStorage) (fs *internal.Goofys, mfs internal.MountedFS, err error) {
 	return internal.MountWin(ctx, bucketName, flags)
 }
 

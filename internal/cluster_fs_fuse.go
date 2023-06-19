@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"sync/atomic"
 
-	"github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 	"github.com/jacobsa/fuse"
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/jacobsa/fuse/fuseutil"
@@ -895,26 +895,26 @@ func (fs *ClusterFsFuse) ForgetInode(ctx context.Context, op *fuseops.ForgetInod
 func MountCluster(
 	ctx context.Context,
 	bucketName string,
-	flags *common.FlagStorage,
+	flags *cfg.FlagStorage,
 ) (*Goofys, MountedFS, error) {
 
 	if flags.DebugS3 {
-		common.SetCloudLogLevel(logrus.DebugLevel)
+		cfg.SetCloudLogLevel(logrus.DebugLevel)
 	}
 
 	mountConfig := &fuse.MountConfig{
 		FSName:                  bucketName,
 		Subtype:                 "geesefs",
 		Options:                 convertFuseOptions(flags),
-		ErrorLogger:             common.GetStdLogger(common.NewLogger("fuse"), logrus.ErrorLevel),
+		ErrorLogger:             cfg.GetStdLogger(cfg.NewLogger("fuse"), logrus.ErrorLevel),
 		DisableWritebackCaching: true,
 		UseVectoredRead:         true,
 	}
 
 	if flags.DebugFuse {
-		fuseLog := common.GetLogger("fuse")
+		fuseLog := cfg.GetLogger("fuse")
 		fuseLog.Level = logrus.DebugLevel
-		mountConfig.DebugLogger = common.GetStdLogger(fuseLog, logrus.DebugLevel)
+		mountConfig.DebugLogger = cfg.GetStdLogger(fuseLog, logrus.DebugLevel)
 	}
 
 	if flags.DebugFuse || flags.DebugMain {
@@ -922,7 +922,7 @@ func MountCluster(
 	}
 
 	if flags.DebugGrpc {
-		grpcLog := common.GetLogger("grpc")
+		grpcLog := cfg.GetLogger("grpc")
 		grpcLog.Level = logrus.DebugLevel
 	}
 

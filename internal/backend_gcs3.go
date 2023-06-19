@@ -16,7 +16,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"context"
 	"os"
@@ -34,7 +34,7 @@ type GCS3 struct {
 	jsonCredFile string
 }
 
-func NewGCS3(bucket string, flags *FlagStorage, config *S3Config) (*GCS3, error) {
+func NewGCS3(bucket string, flags *cfg.FlagStorage, config *cfg.S3Config) (*GCS3, error) {
 	s3Backend, err := NewS3(bucket, flags, config)
 	if err != nil {
 		return nil, err

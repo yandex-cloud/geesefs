@@ -29,7 +29,7 @@ import (
 	"github.com/kardianos/osext"
 	daemon "github.com/sevlyar/go-daemon"
 
-	"github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 	"github.com/yandex-cloud/geesefs/internal"
 )
 
@@ -128,7 +128,7 @@ func (p *Daemonizer) NotifySuccess(success bool) {
 func mount(
 	ctx context.Context,
 	bucketName string,
-	flags *common.FlagStorage) (fs *internal.Goofys, mfs internal.MountedFS, err error) {
+	flags *cfg.FlagStorage) (fs *internal.Goofys, mfs internal.MountedFS, err error) {
 	if flags.ClusterMode {
 		return internal.MountCluster(ctx, bucketName, flags)
 	} else {

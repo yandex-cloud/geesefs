@@ -16,7 +16,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 	"io"
 	"runtime"
 	"runtime/debug"
@@ -26,7 +26,7 @@ import (
 	"github.com/shirou/gopsutil/mem"
 )
 
-var bufferLog = GetLogger("buffer")
+var bufferLog = cfg.GetLogger("buffer")
 
 // BufferPool tracks memory used by cache buffers
 type BufferPool struct {

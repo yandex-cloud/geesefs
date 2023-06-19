@@ -18,7 +18,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"bufio"
 	"bytes"
@@ -195,7 +195,7 @@ func (t *GoofysTest) DeleteADLBlobs(cloud StorageBackend, items []string) error 
 	return nil
 }
 
-func (s *GoofysTest) selectTestConfig(t *C, flags *FlagStorage) (conf S3Config) {
+func (s *GoofysTest) selectTestConfig(t *C, flags *cfg.FlagStorage) (conf cfg.S3Config) {
 	(&conf).Init()
 
 	if hasEnv("AWS") {
@@ -487,7 +487,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 	}
 
 	uid, gid := MyUserAndGroup()
-	flags := &FlagStorage{
+	flags := &cfg.FlagStorage{
 		DirMode:     0700,
 		FileMode:    0700,
 		Uid:         uint32(uid),
@@ -515,7 +515,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		IgnoreFsync: false,
 		SymlinkAttr: "--symlink-target",
 		RefreshAttr: ".invalidate",
-		PartSizes: []PartSizeConfig{
+		PartSizes: []cfg.PartSizeConfig{
 			{ PartSize: 5*1024*1024, PartCount: 1000 },
 			{ PartSize: 25*1024*1024, PartCount: 1000 },
 			{ PartSize: 125*1024*1024, PartCount: 8000 },
@@ -524,10 +524,10 @@ func (s *GoofysTest) SetUpTest(t *C) {
 	if hasEnv("DEBUG") {
 		flags.DebugS3 = true
 		flags.DebugFuse = true
-		SetCloudLogLevel(logrus.DebugLevel)
-		l := GetLogger("fuse")
+		cfg.SetCloudLogLevel(logrus.DebugLevel)
+		l := cfg.GetLogger("fuse")
 		l.Level = logrus.DebugLevel
-		l = GetLogger("s3")
+		l = cfg.GetLogger("s3")
 		l.Level = logrus.DebugLevel
 	}
 
@@ -566,7 +566,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		t.Assert(s.cloud, NotNil)
 		t.Assert(err, IsNil)
 	} else if cloud == "azblob" {
-		config, err := AzureBlobConfig(os.Getenv("ENDPOINT"), "", "blob")
+		config, err := cfg.AzureBlobConfig(os.Getenv("ENDPOINT"), "", "blob")
 		t.Assert(err, IsNil)
 
 		if config.Endpoint == AzuriteEndpoint {
@@ -624,7 +624,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		auth, err := cred.Authorizer()
 		t.Assert(err, IsNil)
 
-		config := ADLv1Config{
+		config := cfg.ADLv1Config{
 			Endpoint:   os.Getenv("ENDPOINT"),
 			Authorizer: auth,
 		}
@@ -640,7 +640,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		var auth autorest.Authorizer
 
 		if os.Getenv("AZURE_STORAGE_ACCOUNT") != "" && os.Getenv("AZURE_STORAGE_KEY") != "" {
-			auth = &AZBlobConfig{
+			auth = &cfg.AZBlobConfig{
 				AccountName: os.Getenv("AZURE_STORAGE_ACCOUNT"),
 				AccountKey:  os.Getenv("AZURE_STORAGE_KEY"),
 			}
@@ -654,7 +654,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 			t.Assert(err, IsNil)
 		}
 
-		config := ADLv2Config{
+		config := cfg.ADLv2Config{
 			Endpoint:   os.Getenv("ENDPOINT"),
 			Authorizer: auth,
 		}
@@ -678,7 +678,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 
 	if hasEnv("EVENTUAL_CONSISTENCY") {
 		s.fs, _ = newGoofys(context.Background(), bucket, flags,
-			func(bucket string, flags *FlagStorage) (StorageBackend, error) {
+			func(bucket string, flags *cfg.FlagStorage) (StorageBackend, error) {
 				cloud, err := NewBackend(bucket, flags)
 				if err != nil {
 					return nil, err

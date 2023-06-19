@@ -17,7 +17,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"context"
 	"encoding/base64"
@@ -43,8 +43,8 @@ import (
 type ADLv2 struct {
 	cap Capabilities
 
-	flags  *FlagStorage
-	config *ADLv2Config
+	flags  *cfg.FlagStorage
+	config *cfg.ADLv2Config
 
 	client adl2PathClient
 	bucket string
@@ -53,7 +53,7 @@ type ADLv2 struct {
 const ADL2_CLIENT_REQUEST_ID = "X-Ms-Client-Request-Id"
 const ADL2_REQUEST_ID = "X-Ms-Request-Id"
 
-var adl2Log = GetLogger("adlv2")
+var adl2Log = cfg.GetLogger("adlv2")
 
 type ADLv2MultipartBlobCommitInput struct {
 	Size           uint64
@@ -84,7 +84,7 @@ func adl2LogResp(level logrus.Level, r *http.Response) {
 	}
 }
 
-func NewADLv2(bucket string, flags *FlagStorage, config *ADLv2Config) (*ADLv2, error) {
+func NewADLv2(bucket string, flags *cfg.FlagStorage, config *cfg.ADLv2Config) (*ADLv2, error) {
 	u, err := url.Parse(config.Endpoint)
 	if err != nil {
 		return nil, err
@@ -167,7 +167,7 @@ func NewADLv2(bucket string, flags *FlagStorage, config *ADLv2Config) (*ADLv2, e
 	client.Authorizer = config.Authorizer
 	client.RequestInspector = LogRequest
 	client.ResponseInspector = LogResponse
-	client.Sender.(*http.Client).Transport = GetHTTPTransport()
+	client.Sender.(*http.Client).Transport = cfg.GetHTTPTransport()
 
 	b := &ADLv2{
 		flags:  flags,

@@ -16,7 +16,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"bytes"
 	"context"
@@ -59,7 +59,7 @@ var pipelineHTTPClient = newDefaultHTTPClient()
 // Clone of https://github.com/Azure/azure-pipeline-go/blob/master/pipeline/core.go#L202
 func newDefaultHTTPClient() *http.Client {
 	return &http.Client{
-		Transport: GetHTTPTransport(),
+		Transport: cfg.GetHTTPTransport(),
 	}
 }
 
@@ -97,7 +97,7 @@ func newAzBlobHTTPClientFactory() pipeline.Factory {
 }
 
 type AZBlob struct {
-	config *AZBlobConfig
+	config *cfg.AZBlobConfig
 	cap    Capabilities
 
 	mu sync.Mutex
@@ -108,15 +108,15 @@ type AZBlob struct {
 
 	bucket           string
 	bareURL          string
-	sasTokenProvider SASTokenProvider
+	sasTokenProvider cfg.SASTokenProvider
 	tokenExpire      time.Time
 	tokenRenewBuffer time.Duration
 	tokenRenewGate   chan int
 }
 
-var azbLog = GetLogger("azblob")
+var azbLog = cfg.GetLogger("azblob")
 
-func NewAZBlob(container string, config *AZBlobConfig) (*AZBlob, error) {
+func NewAZBlob(container string, config *cfg.AZBlobConfig) (*AZBlob, error) {
 	po := azblob.PipelineOptions{
 		Log: pipeline.LogOptions{
 			Log: func(level pipeline.LogLevel, msg string) {

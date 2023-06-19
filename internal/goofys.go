@@ -16,7 +16,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"context"
 	"fmt"
@@ -50,7 +50,7 @@ import (
 type Goofys struct {
 	bucket string
 
-	flags *FlagStorage
+	flags *cfg.FlagStorage
 
 	umask uint32
 
@@ -124,22 +124,22 @@ type OpStats struct {
 	ts time.Time
 }
 
-var s3Log = GetLogger("s3")
-var log = GetLogger("main")
-var fuseLog = GetLogger("fuse")
+var s3Log = cfg.GetLogger("s3")
+var log = cfg.GetLogger("main")
+var fuseLog = cfg.GetLogger("fuse")
 
-func NewBackend(bucket string, flags *FlagStorage) (cloud StorageBackend, err error) {
+func NewBackend(bucket string, flags *cfg.FlagStorage) (cloud StorageBackend, err error) {
 	if flags.Backend == nil {
-		flags.Backend = (&S3Config{}).Init()
+		flags.Backend = (&cfg.S3Config{}).Init()
 	}
 
-	if config, ok := flags.Backend.(*AZBlobConfig); ok {
+	if config, ok := flags.Backend.(*cfg.AZBlobConfig); ok {
 		cloud, err = NewAZBlob(bucket, config)
-	} else if config, ok := flags.Backend.(*ADLv1Config); ok {
+	} else if config, ok := flags.Backend.(*cfg.ADLv1Config); ok {
 		cloud, err = NewADLv1(bucket, flags, config)
-	} else if config, ok := flags.Backend.(*ADLv2Config); ok {
+	} else if config, ok := flags.Backend.(*cfg.ADLv2Config); ok {
 		cloud, err = NewADLv2(bucket, flags, config)
-	} else if config, ok := flags.Backend.(*S3Config); ok {
+	} else if config, ok := flags.Backend.(*cfg.S3Config); ok {
 		if strings.HasSuffix(flags.Endpoint, "/storage.googleapis.com") {
 			cloud, err = NewGCS3(bucket, flags, config)
 		} else {
@@ -193,23 +193,23 @@ func ParseBucketSpec(bucket string) (spec BucketSpec, err error) {
 	return
 }
 
-func NewGoofys(ctx context.Context, bucketName string, flags *FlagStorage) (*Goofys, error) {
+func NewGoofys(ctx context.Context, bucketName string, flags *cfg.FlagStorage) (*Goofys, error) {
 	if flags.DebugS3 {
-		SetCloudLogLevel(logrus.DebugLevel)
+		cfg.SetCloudLogLevel(logrus.DebugLevel)
 	}
 	if flags.Backend == nil {
 		if spec, err := ParseBucketSpec(bucketName); err == nil {
 			switch spec.Scheme {
 			case "adl":
-				auth, err := AzureAuthorizerConfig{
-					Log: GetLogger("adlv1"),
+				auth, err := cfg.AzureAuthorizerConfig{
+					Log: cfg.GetLogger("adlv1"),
 				}.Authorizer()
 				if err != nil {
 					err = fmt.Errorf("couldn't load azure credentials: %v",
 						err)
 					return nil, err
 				}
-				flags.Backend = &ADLv1Config{
+				flags.Backend = &cfg.ADLv1Config{
 					Endpoint:   spec.Bucket,
 					Authorizer: auth,
 				}
@@ -221,7 +221,7 @@ func NewGoofys(ctx context.Context, bucketName string, flags *FlagStorage) (*Goo
 					bucketName = ":" + spec.Prefix
 				}
 			case "wasb":
-				config, err := AzureBlobConfig(flags.Endpoint, spec.Bucket, "blob")
+				config, err := cfg.AzureBlobConfig(flags.Endpoint, spec.Bucket, "blob")
 				if err != nil {
 					return nil, err
 				}
@@ -238,7 +238,7 @@ func NewGoofys(ctx context.Context, bucketName string, flags *FlagStorage) (*Goo
 					bucketName += ":" + spec.Prefix
 				}
 			case "abfs":
-				config, err := AzureBlobConfig(flags.Endpoint, spec.Bucket, "dfs")
+				config, err := cfg.AzureBlobConfig(flags.Endpoint, spec.Bucket, "dfs")
 				if err != nil {
 					return nil, err
 				}
@@ -255,7 +255,7 @@ func NewGoofys(ctx context.Context, bucketName string, flags *FlagStorage) (*Goo
 					bucketName += ":" + spec.Prefix
 				}
 
-				flags.Backend = &ADLv2Config{
+				flags.Backend = &cfg.ADLv2Config{
 					Endpoint:   config.Endpoint,
 					Authorizer: &config,
 				}
@@ -269,8 +269,8 @@ func NewGoofys(ctx context.Context, bucketName string, flags *FlagStorage) (*Goo
 	return newGoofys(ctx, bucketName, flags, NewBackend)
 }
 
-func newGoofys(ctx context.Context, bucket string, flags *FlagStorage,
-	newBackend func(string, *FlagStorage) (StorageBackend, error)) (*Goofys, error) {
+func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
+	newBackend func(string, *cfg.FlagStorage) (StorageBackend, error)) (*Goofys, error) {
 	// Set up the basic struct.
 	fs := &Goofys{
 		bucket: bucket,

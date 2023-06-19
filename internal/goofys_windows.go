@@ -27,7 +27,7 @@ import (
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/sirupsen/logrus"
 
-	"github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 )
 
 // winfsp/cgofuse interface to the file system
@@ -905,7 +905,7 @@ func (fs *GoofysWin) Notify(notifications []interface{}) {
 func MountWin(
 	ctx context.Context,
 	bucketName string,
-	flags *common.FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
+	flags *cfg.FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
 
 	if flags.DebugFuse || flags.DebugMain {
 		log.Level = logrus.DebugLevel

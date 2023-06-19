@@ -18,7 +18,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"context"
 	"fmt"
@@ -845,7 +845,7 @@ func (m *FuseMfsWrapper) Unmount() error {
 	return TryUnmount(m.mountPoint)
 }
 
-func convertFuseOptions(flags *FlagStorage) map[string]string {
+func convertFuseOptions(flags *cfg.FlagStorage) map[string]string {
 	optMap := make(map[string]string)
 	for _, o := range flags.MountOptions {
 		// NOTE(jacobsa): The man pages don't define how escaping works, and as far
@@ -874,7 +874,7 @@ func convertFuseOptions(flags *FlagStorage) map[string]string {
 func MountFuse(
 	ctx context.Context,
 	bucketName string,
-	flags *FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
+	flags *cfg.FlagStorage) (fs *Goofys, mfs MountedFS, err error) {
 	fs, err = NewGoofys(ctx, bucketName, flags)
 	if fs == nil {
 		if err == nil {
@@ -892,15 +892,15 @@ func mountFuseFS(fs *Goofys) (mfs MountedFS, err error) {
 		FSName:                  fs.bucket,
 		Subtype:                 "geesefs",
 		Options:                 convertFuseOptions(fs.flags),
-		ErrorLogger:             GetStdLogger(NewLogger("fuse"), logrus.ErrorLevel),
+		ErrorLogger:             cfg.GetStdLogger(cfg.NewLogger("fuse"), logrus.ErrorLevel),
 		DisableWritebackCaching: true,
 		UseVectoredRead:         true,
 	}
 
 	if fs.flags.DebugFuse {
-		fuseLog := GetLogger("fuse")
+		fuseLog := cfg.GetLogger("fuse")
 		fuseLog.Level = logrus.DebugLevel
-		mountCfg.DebugLogger = GetStdLogger(fuseLog, logrus.DebugLevel)
+		mountCfg.DebugLogger = cfg.GetStdLogger(fuseLog, logrus.DebugLevel)
 	}
 
 	if fs.flags.DebugFuse || fs.flags.DebugMain {

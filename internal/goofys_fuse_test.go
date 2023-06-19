@@ -20,7 +20,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"bytes"
 	"context"
@@ -124,9 +124,9 @@ func (s *GoofysTest) runFuseTest(t *C, mountPoint string, umount bool, cmdArgs .
 	cmd.Env = append(cmd.Env, "CLEANUP=false")
 
 	if true {
-		logger := NewLogger("test")
+		logger := cfg.NewLogger("test")
 		lvl := logrus.InfoLevel
-		logger.Formatter.(*LogHandle).Lvl = &lvl
+		logger.Formatter.(*cfg.LogHandle).Lvl = &lvl
 		w := logger.Writer()
 
 		cmd.Stdout = w

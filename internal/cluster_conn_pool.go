@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -16,7 +16,7 @@ import (
 
 const OUTSTAGE_TIMEOUT = 10 * time.Second
 
-var connsLog = GetLogger("conns")
+var connsLog = cfg.GetLogger("conns")
 
 type Peer struct {
 	mu      sync.RWMutex
@@ -25,14 +25,14 @@ type Peer struct {
 }
 
 type ConnPool struct {
-	flags *FlagStorage
+	flags *cfg.FlagStorage
 	id    NodeId
 	peers map[NodeId]*Peer
 }
 
 type Request func(ctx context.Context, conn *grpc.ClientConn) error
 
-func NewConnPool(flags *FlagStorage) *ConnPool {
+func NewConnPool(flags *cfg.FlagStorage) *ConnPool {
 	id := NodeId(flags.ClusterMe.Id)
 
 	peers := make(map[NodeId]*Peer)

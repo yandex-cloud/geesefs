@@ -16,7 +16,7 @@
 package main
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 	. "github.com/yandex-cloud/geesefs/internal"
 
 	"fmt"
@@ -33,9 +33,9 @@ import (
 	_ "net/http/pprof"
 )
 
-var log = GetLogger("main")
+var log = cfg.GetLogger("main")
 
-func registerSIGINTHandler(fs *Goofys, mfs MountedFS, flags *FlagStorage) {
+func registerSIGINTHandler(fs *Goofys, mfs MountedFS, flags *cfg.FlagStorage) {
 	// Register for SIGINT.
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, signalsToHandle...)
@@ -69,7 +69,7 @@ func main() {
 
 	app := NewApp()
 
-	var flags *FlagStorage
+	var flags *cfg.FlagStorage
 	var child *os.Process
 
 	app.Action = func(c *cli.Context) (err error) {
@@ -114,7 +114,7 @@ func main() {
 				return err
 			}
 		}
-		InitLoggers(flags.LogFile)
+		cfg.InitLoggers(flags.LogFile)
 
 		pprof := flags.PProf
 		if pprof == "" && os.Getenv("PPROF") != "" {

@@ -16,7 +16,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"encoding/json"
 	"errors"
@@ -46,8 +46,8 @@ type S3Backend struct {
 
 	bucket    string
 	awsConfig *aws.Config
-	flags     *FlagStorage
-	config    *S3Config
+	flags     *cfg.FlagStorage
+	config    *cfg.S3Config
 	sseType   string
 
 	gcs      bool
@@ -59,7 +59,7 @@ type S3Backend struct {
 	iamRefreshTimer *time.Timer
 }
 
-func NewS3(bucket string, flags *FlagStorage, config *S3Config) (*S3Backend, error) {
+func NewS3(bucket string, flags *cfg.FlagStorage, config *cfg.S3Config) (*S3Backend, error) {
 	if config.MultipartCopyThreshold == 0 {
 		config.MultipartCopyThreshold = 128*1024*1024
 	}

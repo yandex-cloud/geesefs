@@ -5,15 +5,15 @@ package internal
 import (
 	"context"
 
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 	"github.com/yandex-cloud/geesefs/internal/pb"
 )
 
-var recLog = GetLogger("rec")
+var recLog = cfg.GetLogger("rec")
 
 type Recovery struct {
 	pb.UnimplementedRecoveryServer
-	Flags *FlagStorage
+	Flags *cfg.FlagStorage
 }
 
 func (rec *Recovery) Unmount(ctx context.Context, req *pb.UnmountRequest) (*pb.UnmountResponse, error) {

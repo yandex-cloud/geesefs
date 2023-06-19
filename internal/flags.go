@@ -17,7 +17,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"io"
 	"os"
@@ -84,7 +84,7 @@ var VersionHash string
 func NewApp() (app *cli.App) {
 	uid, gid := MyUserAndGroup()
 
-	s3Default := (&S3Config{}).Init()
+	s3Default := (&cfg.S3Config{}).Init()
 
 	fsFlags := []cli.Flag{
 		/////////////////////////
@@ -640,7 +640,7 @@ func NewApp() (app *cli.App) {
 	return
 }
 
-func parsePartSizes(s string) (result []PartSizeConfig) {
+func parsePartSizes(s string) (result []cfg.PartSizeConfig) {
 	partSizes := strings.Split(s, ",")
 	totalCount := uint64(0)
 	for pi, ps := range partSizes {
@@ -672,7 +672,7 @@ func parsePartSizes(s string) (result []PartSizeConfig) {
 		if size > 5*1024 {
 			panic("Maximum part size is 5 GB")
 		}
-		result = append(result, PartSizeConfig{
+		result = append(result, cfg.PartSizeConfig{
 			PartSize: size*1024*1024,
 			PartCount: count,
 		})
@@ -680,7 +680,7 @@ func parsePartSizes(s string) (result []PartSizeConfig) {
 	return
 }
 
-func parseNode(s string) *NodeConfig {
+func parseNode(s string) *cfg.NodeConfig {
 	parts := strings.SplitN(s, ":", 2)
 	if len(parts) != 2 {
 		panic("Incorrect syntax for node config, should be: <node-id>:<address>")
@@ -689,7 +689,7 @@ func parseNode(s string) *NodeConfig {
 	if err != nil {
 		panic("Incorrect syntax for node config, <node-id> shoud be uint64")
 	}
-	return &NodeConfig{
+	return &cfg.NodeConfig{
 		Id: nodeId,
 		Address: parts[1],
 	}
@@ -697,13 +697,13 @@ func parseNode(s string) *NodeConfig {
 
 // PopulateFlags adds the flags accepted by run to the supplied flag set, returning the
 // variables into which the flags will parse.
-func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
+func PopulateFlags(c *cli.Context) (ret *cfg.FlagStorage) {
 	singlePart := c.Int("single-part")
 	if singlePart < 5 {
 		singlePart = 5
 	}
 
-	flags := &FlagStorage{
+	flags := &cfg.FlagStorage{
 		// File system
 		MountOptions:           c.StringSlice("o"),
 		DirMode:                os.FileMode(c.Int("dir-mode")),
@@ -786,8 +786,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 	// S3 by default, if not initialized in api/api.go
 	if flags.Backend == nil {
-		flags.Backend = (&S3Config{}).Init()
-		config, _ := flags.Backend.(*S3Config)
+		flags.Backend = (&cfg.S3Config{}).Init()
+		config, _ := flags.Backend.(*cfg.S3Config)
 		config.Region        = c.String("region")
 		config.RegionSet     = c.IsSet("region")
 		config.RequesterPays = c.Bool("requester-pays")

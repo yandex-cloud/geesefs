@@ -15,7 +15,7 @@
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 	. "gopkg.in/check.v1"
 
 	"fmt"
@@ -32,7 +32,7 @@ var _ = Suite(&AwsTest{})
 
 func (s *AwsTest) SetUpSuite(t *C) {
 	var err error
-	s.s3, err = NewS3("", &FlagStorage{}, &S3Config{
+	s.s3, err = NewS3("", &cfg.FlagStorage{}, &cfg.S3Config{
 		Region: "us-east-1",
 	})
 	t.Assert(err, IsNil)

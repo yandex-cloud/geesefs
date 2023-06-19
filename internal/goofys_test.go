@@ -38,7 +38,7 @@ NOTES:
 package internal
 
 import (
-	. "github.com/yandex-cloud/geesefs/api/common"
+	cfg "github.com/yandex-cloud/geesefs/api/common"
 
 	"bytes"
 	"fmt"
@@ -2116,7 +2116,7 @@ func (s *GoofysTest) newBackend(t *C, bucket string, createBucket bool) (cloud S
 	var err error
 	switch s.cloud.Delegate().(type) {
 	case *S3Backend:
-		config, _ := s.fs.flags.Backend.(*S3Config)
+		config, _ := s.fs.flags.Backend.(*cfg.S3Config)
 		s3, err := NewS3(bucket, s.fs.flags, config)
 		t.Assert(err, IsNil)
 
@@ -2134,19 +2134,19 @@ func (s *GoofysTest) newBackend(t *C, bucket string, createBucket bool) (cloud S
 			cloud = s3
 		}
 	case *GCS3:
-		config, _ := s.fs.flags.Backend.(*S3Config)
+		config, _ := s.fs.flags.Backend.(*cfg.S3Config)
 		cloud, err = NewGCS3(bucket, s.fs.flags, config)
 		t.Assert(err, IsNil)
 	case *AZBlob:
-		config, _ := s.fs.flags.Backend.(*AZBlobConfig)
+		config, _ := s.fs.flags.Backend.(*cfg.AZBlobConfig)
 		cloud, err = NewAZBlob(bucket, config)
 		t.Assert(err, IsNil)
 	case *ADLv1:
-		config, _ := s.fs.flags.Backend.(*ADLv1Config)
+		config, _ := s.fs.flags.Backend.(*cfg.ADLv1Config)
 		cloud, err = NewADLv1(bucket, s.fs.flags, config)
 		t.Assert(err, IsNil)
 	case *ADLv2:
-		config, _ := s.fs.flags.Backend.(*ADLv2Config)
+		config, _ := s.fs.flags.Backend.(*cfg.ADLv2Config)
 		cloud, err = NewADLv2(bucket, s.fs.flags, config)
 		t.Assert(err, IsNil)
 	default:
@@ -2371,7 +2371,7 @@ func (s *GoofysTest) TestMountsError(t *C) {
 		cloud, err = NewS3(bucket, &flags, &config)
 		t.Assert(err, IsNil)
 	} else if _, ok := s.cloud.(*ADLv1); ok {
-		config, _ := s.fs.flags.Backend.(*ADLv1Config)
+		config, _ := s.fs.flags.Backend.(*cfg.ADLv1Config)
 		config.Authorizer = nil
 
 		var err error
