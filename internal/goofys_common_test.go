@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Tests which are ran over Linux FUSE FS
+// Common test initialization routines
 
 package internal
 

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Tests which are ran over Linux FUSE FS
+// Tests which are ran over a mounted Linux FUSE FS
 
 // +build !windows
 
