@@ -351,6 +351,94 @@ func (s *GoofysTest) TestPythonCopyTree(t *C) {
 		mountPoint)
 }
 
+func (s *GoofysTest) TestCreateRenameBeforeCloseFuse(t *C) {
+	if s.azurite {
+		// Azurite returns 400 when copy source doesn't exist
+		// https://github.com/Azure/Azurite/issues/219
+		// so our code to ignore ENOENT fails
+		t.Skip("https://github.com/Azure/Azurite/issues/219")
+	}
+
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
+
+	s.mount(t, mountPoint)
+	defer s.umount(t, mountPoint)
+
+	from := mountPoint + "/newfile"
+	to := mountPoint + "/newfile2"
+
+	fh, err := os.Create(from)
+	t.Assert(err, IsNil)
+	defer func() {
+		// close the file if the test failed so we can unmount
+		if fh != nil {
+			fh.Close()
+		}
+	}()
+
+	_, err = fh.WriteString("hello world")
+	t.Assert(err, IsNil)
+
+	err = os.Rename(from, to)
+	t.Assert(err, IsNil)
+
+	err = fh.Close()
+	t.Assert(err, IsNil)
+	fh = nil
+
+	_, err = os.Stat(from)
+	t.Assert(err, NotNil)
+	pathErr, ok := err.(*os.PathError)
+	t.Assert(ok, Equals, true)
+	t.Assert(pathErr.Err, Equals, syscall.ENOENT)
+
+	content, err := ioutil.ReadFile(to)
+	t.Assert(err, IsNil)
+	t.Assert(string(content), Equals, "hello world")
+}
+
+func (s *GoofysTest) TestRenameBeforeCloseFuse(t *C) {
+	mountPoint := s.tmp + "/mnt" + s.fs.bucket
+
+	s.mount(t, mountPoint)
+	defer s.umount(t, mountPoint)
+
+	from := mountPoint + "/newfile"
+	to := mountPoint + "/newfile2"
+
+	err := ioutil.WriteFile(from, []byte(""), 0600)
+	t.Assert(err, IsNil)
+
+	fh, err := os.OpenFile(from, os.O_WRONLY, 0600)
+	t.Assert(err, IsNil)
+	defer func() {
+		// close the file if the test failed so we can unmount
+		if fh != nil {
+			fh.Close()
+		}
+	}()
+
+	_, err = fh.WriteString("hello world")
+	t.Assert(err, IsNil)
+
+	err = os.Rename(from, to)
+	t.Assert(err, IsNil)
+
+	err = fh.Close()
+	t.Assert(err, IsNil)
+	fh = nil
+
+	_, err = os.Stat(from)
+	t.Assert(err, NotNil)
+	pathErr, ok := err.(*os.PathError)
+	t.Assert(ok, Equals, true)
+	t.Assert(pathErr.Err, Equals, syscall.ENOENT)
+
+	content, err := ioutil.ReadFile(to)
+	t.Assert(err, IsNil)
+	t.Assert(string(content), Equals, "hello world")
+}
+
 func containsFile(dir, wantedFile string) bool {
 	files, err := os.ReadDir(dir)
 	if err != nil {
