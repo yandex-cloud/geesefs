@@ -25,8 +25,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-
 	"github.com/jacobsa/fuse/fuseops"
 )
 
@@ -499,7 +497,7 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	myList := dh.inode.fs.addInflightListing()
 
 	params := &ListBlobsInput{
-		Delimiter:         aws.String("/"),
+		Delimiter:         PString("/"),
 		ContinuationToken: dh.inode.dir.listMarker,
 		Prefix:            &prefix,
 	}
@@ -1931,9 +1929,9 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 			n++
 			go func() {
 				prefixList, prefixError = cloud.ListBlobs(&ListBlobsInput{
-					Delimiter: aws.String("/"),
+					Delimiter: PString("/"),
 					MaxKeys:   PUInt32(1),
-					Prefix:    aws.String(key+"/"),
+					Prefix:    PString(key+"/"),
 				})
 				results <- 3
 			}()
@@ -1962,7 +1960,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 				return &prefixList.Items[0], nil
 			}
 			return &BlobItemOutput{
-				Key: aws.String(key+"/"),
+				Key: PString(key+"/"),
 			}, nil
 		}
 	}

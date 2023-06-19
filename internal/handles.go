@@ -28,8 +28,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-
 	"github.com/jacobsa/fuse/fuseops"
 
 	"github.com/sirupsen/logrus"
@@ -609,7 +607,7 @@ func escapeMetadata(meta map[string][]byte) (metadata map[string]*string) {
 	metadata = make(map[string]*string)
 	for k, v := range meta {
 		k = strings.ToLower(xattrEscape(k))
-		metadata[k] = aws.String(xattrEscape(string(v)))
+		metadata[k] = PString(xattrEscape(string(v)))
 	}
 	return
 }
