@@ -17,7 +17,7 @@ package main
 
 import (
 	"github.com/yandex-cloud/geesefs/internal/cfg"
-	. "github.com/yandex-cloud/geesefs/internal"
+	"github.com/yandex-cloud/geesefs/internal"
 
 	"fmt"
 	"os"
@@ -35,7 +35,7 @@ import (
 
 var log = cfg.GetLogger("main")
 
-func registerSIGINTHandler(fs *Goofys, mfs MountedFS, flags *cfg.FlagStorage) {
+func registerSIGINTHandler(fs *internal.Goofys, mfs internal.MountedFS, flags *cfg.FlagStorage) {
 	// Register for SIGINT.
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, signalsToHandle...)
