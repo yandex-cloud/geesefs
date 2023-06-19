@@ -88,6 +88,8 @@ type FlagStorage struct {
 	MtimeAttr             string
 	SymlinkAttr           string
 	RefreshAttr           string
+	RefreshFilename       string
+	FlushFilename         string
 	CachePopularThreshold int64
 	CacheMaxHits          int64
 	CacheAgeInterval      int64

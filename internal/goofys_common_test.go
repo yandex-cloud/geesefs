@@ -515,6 +515,8 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		IgnoreFsync: false,
 		SymlinkAttr: "--symlink-target",
 		RefreshAttr: ".invalidate",
+		RefreshFilename: ".invalidate",
+		FlushFilename: ".fsyncdir",
 		PartSizes: []cfg.PartSizeConfig{
 			{ PartSize: 5*1024*1024, PartCount: 1000 },
 			{ PartSize: 25*1024*1024, PartCount: 1000 },

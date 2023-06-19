@@ -19,6 +19,7 @@ package cfg
 import (
 	"io"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -518,6 +519,19 @@ MISC OPTIONS:
 		},
 	}
 
+	if runtime.GOOS == "windows" {
+		tuningFlags = append(tuningFlags, cli.StringFlag{
+			Name:  "refresh-filename",
+			Value: ".invalidate",
+			Usage: "Trying to open a file with this name refreshes the cache of its directory.",
+		})
+		tuningFlags = append(tuningFlags, cli.StringFlag{
+			Name:  "flush-filename",
+			Value: ".fsyncdir",
+			Usage: "Trying to open a file with this name flushes the cache of its directory to server.",
+		})
+	}
+
 	debugFlags := []cli.Flag{
 		/////////////////////////
 		// Debugging
@@ -769,6 +783,11 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		// Cluster Mode
 		ClusterMode:            c.Bool("cluster"),
 		ClusterGrpcReflection:  c.Bool("grpc-reflection"),
+	}
+
+	if runtime.GOOS == "windows" {
+		flags.RefreshFilename = c.String("refresh-filename")
+		flags.FlushFilename = c.String("flush-filename")
 	}
 
 	flags.PartSizes = parsePartSizes(c.String("part-sizes"))
