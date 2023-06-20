@@ -1,15 +1,22 @@
+geesefs (0.36.2) unstable; urgency=medium
+
+  * Add --refresh-filename and --flush-filename to allow to invalidate and flush cache on Windows
+  * Refactor tests and make them work on Windows
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 20 Jun 2023 13:57:57 +0300
+
 geesefs (0.36.1) unstable; urgency=medium
 
   * Fix copying files into existing directories on Windows
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Fri, 09 Jun 2023 20:43:44 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 09 Jun 2023 20:43:44 +0300
 
 geesefs (0.36.0) unstable; urgency=medium
 
   * Experimental Windows support using WinFSP
   * Experimental "cluster mode" with synchronized caches on different hosts
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Fri, 09 Jun 2023 10:39:26 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 09 Jun 2023 10:39:26 +0300
 
 geesefs (0.35.4) unstable; urgency=medium
 
