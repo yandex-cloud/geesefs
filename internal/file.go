@@ -1251,6 +1251,8 @@ func (inode *Inode) GetMultiReader(offset uint64, size uint64) (reader *MultiRea
 func (inode *Inode) recordFlushError(err error) {
 	inode.flushError = err
 	inode.flushErrorTime = time.Now()
+	// The original idea was to schedule retry only if err != nil
+	// However, current version unblocks flushing in case of bugs, so... okay. Let it be
 	inode.fs.ScheduleRetryFlush()
 }
 
@@ -1557,7 +1559,6 @@ func (inode *Inode) SendUpload() bool {
 	partLocked := false
 	partEvicted := false
 	partZero := false
-	hasEvictedParts := false
 	canComplete := true
 	processPart := func() bool {
 		// Don't flush parts that are being currently flushed
@@ -1591,8 +1592,6 @@ func (inode *Inode) SendUpload() bool {
 					return true
 				}
 			}
-		} else if partDirty && partEvicted {
-			hasEvictedParts = true
 		}
 		return false
 	}
@@ -1633,7 +1632,7 @@ func (inode *Inode) SendUpload() bool {
 		}
 	}
 	if canComplete && (inode.fileHandles == 0 || inode.forceFlush ||
-		atomic.LoadInt32(&inode.fs.wantFree) > 0 && hasEvictedParts) {
+		atomic.LoadInt32(&inode.fs.wantFree) > 0) {
 		// Complete the multipart upload
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
@@ -1645,6 +1644,7 @@ func (inode *Inode) SendUpload() bool {
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
 			inode.fs.WakeupFlusher()
 		}()
+		initiated = true
 	}
 
 	return initiated

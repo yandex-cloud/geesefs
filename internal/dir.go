@@ -1064,6 +1064,7 @@ func (inode *Inode) SendDelete() {
 		if err != nil {
 			log.Errorf("Failed to delete object %v: %v", key, err)
 			inode.mu.Unlock()
+			inode.fs.WakeupFlusher()
 			return
 		}
 		forget := false
@@ -1315,6 +1316,7 @@ func (dir *Inode) SendMkDir() {
 		dir.recordFlushError(err)
 		if err != nil {
 			log.Errorf("Failed to create directory object %v: %v", key, err)
+			dir.fs.WakeupFlusher()
 			return
 		}
 		if dir.CacheState == ST_CREATED || dir.CacheState == ST_MODIFIED {
