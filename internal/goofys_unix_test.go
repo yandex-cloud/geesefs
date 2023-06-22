@@ -71,6 +71,7 @@ func (s *GoofysTest) mountCommon(t *C, mountPoint string, sameProc bool) {
 		t.Assert(err, IsNil)
 
 	} else {
+		s.fs.flags.MountPoint = mountPoint
 		s.mfs, err = mountFuseFS(s.fs)
 		t.Assert(err, IsNil)
 	}
