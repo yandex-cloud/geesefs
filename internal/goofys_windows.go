@@ -434,12 +434,7 @@ func (fs *GoofysWin) Create(path string, flags int, mode uint32) (ret int, fhId 
 
 	inode.setFileMode(fuseops.ConvertFileMode(mode))
 
-	// Allocate a handle.
-	fs.mu.Lock()
-	handleID := fs.nextHandleID
-	fs.nextHandleID++
-	fs.fileHandles[handleID] = fh
-	fs.mu.Unlock()
+	handleID := fs.AddFileHandle(fh)
 
 	return 0, uint64(handleID)
 }
@@ -495,11 +490,7 @@ func (fs *GoofysWin) Open(path string, flags int) (ret int, fhId uint64) {
 		return mapWinError(err), 0
 	}
 
-	fs.mu.Lock()
-	handleID := fs.nextHandleID
-	fs.nextHandleID++
-	fs.fileHandles[handleID] = fh
-	fs.mu.Unlock()
+	handleID := fs.AddFileHandle(fh)
 
 	return 0, uint64(handleID)
 }
@@ -715,12 +706,7 @@ func (fs *GoofysWin) Opendir(path string) (ret int, dhId uint64) {
 	}
 
 	dh := inode.OpenDir()
-
-	fs.mu.Lock()
-	handleID := fs.nextHandleID
-	fs.nextHandleID++
-	fs.dirHandles[handleID] = dh
-	fs.mu.Unlock()
+	handleID := fs.AddDirHandle(dh)
 
 	return 0, uint64(handleID)
 }

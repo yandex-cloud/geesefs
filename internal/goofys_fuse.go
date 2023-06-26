@@ -298,23 +298,13 @@ func (fs *GoofysFuse) OpenDir(
 		return syscall.ESTALE
 	}
 
-	fs.mu.Lock()
-	handleID := fs.nextHandleID
-	fs.nextHandleID++
-	fs.mu.Unlock()
-
 	if atomic.LoadInt32(&in.refreshed) == -1 {
 		// Stale inode
 		return syscall.ESTALE
 	}
 
 	dh := in.OpenDir()
-
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	fs.dirHandles[handleID] = dh
-	op.Handle = handleID
+	op.Handle = fs.AddDirHandle(dh)
 
 	return
 }
@@ -428,18 +418,7 @@ func (fs *GoofysFuse) OpenFile(
 		return
 	}
 
-	fs.mu.Lock()
-
-	handleID := fs.nextHandleID
-	fs.nextHandleID++
-
-	fs.fileHandles[handleID] = fh
-	fs.mu.Unlock()
-
-	op.Handle = handleID
-
-	in.mu.Lock()
-	defer in.mu.Unlock()
+	op.Handle = fs.AddFileHandle(fh)
 
 	// this flag appears to tell the kernel if this open should
 	// use the page cache or not. "use" here means:
@@ -540,10 +519,6 @@ func (fs *GoofysFuse) CreateFile(
 		return err
 	}
 
-	// Always take inode locks after fs lock if you need both...
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
 	inode.setFileMode(op.Mode)
 
 	op.Entry.Child = inode.Id
@@ -551,13 +526,7 @@ func (fs *GoofysFuse) CreateFile(
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 
-	// Allocate a handle.
-	handleID := fs.nextHandleID
-	fs.nextHandleID++
-
-	fs.fileHandles[handleID] = fh
-
-	op.Handle = handleID
+	op.Handle = fs.AddFileHandle(fh)
 
 	inode.logFuse("<-- CreateFile")
 

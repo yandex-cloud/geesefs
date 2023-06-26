@@ -90,11 +90,7 @@ func (fs *ClusterFs) createFile(parent *Inode, name string, mode os.FileMode) (
 	// allocate file handle
 	fh := NewFileHandle(child)
 	child.fileHandles = 1
-	fs.Goofys.mu.Lock()
-	handleId := fs.Goofys.nextHandleID
-	fs.Goofys.nextHandleID++
-	fs.Goofys.fileHandles[handleId] = fh
-	fs.Goofys.mu.Unlock()
+	handleId := fs.Goofys.AddFileHandle(fh)
 
 	pbInode := child.pbInode()
 	childId := uint64(child.Id)
@@ -193,11 +189,7 @@ func (fs *ClusterFs) openFile(inode *Inode) fuseops.HandleID {
 		inode.Parent.addModified(1)
 	}
 
-	fs.Goofys.mu.Lock()
-	handleId := fs.Goofys.nextHandleID
-	fs.Goofys.nextHandleID++
-	fs.Goofys.fileHandles[handleId] = fh
-	fs.Goofys.mu.Unlock()
+	handleId := fs.Goofys.AddFileHandle(fh)
 
 	return handleId
 }
@@ -382,21 +374,12 @@ func (fs *ClusterFs) rmDir(parent *Inode, name string) error {
 
 // REQUIRED_LOCK(inode.KeepOwnerLock)
 func (fs *ClusterFs) openDir(inode *Inode) fuseops.HandleID {
-	fs.Goofys.mu.Lock()
-	handleId := fs.Goofys.nextHandleID
-	fs.Goofys.nextHandleID++
-	fs.Goofys.mu.Unlock()
-
 	dh := NewDirHandle(inode)
 	inode.mu.Lock()
 	inode.dir.handles = append(inode.dir.handles, dh)
 	atomic.AddInt32(&inode.fileHandles, 1)
 	inode.mu.Unlock()
-
-	fs.Goofys.mu.Lock()
-	fs.Goofys.dirHandles[handleId] = dh
-	fs.Goofys.mu.Unlock()
-
+	handleId := fs.Goofys.AddDirHandle(dh)
 	return handleId
 }
 

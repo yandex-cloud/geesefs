@@ -420,6 +420,24 @@ func (fs *Goofys) getInodeOrDie(id fuseops.InodeID) (inode *Inode) {
 	return
 }
 
+func (fs *Goofys) AddDirHandle(dh *DirHandle) fuseops.HandleID {
+	fs.mu.Lock()
+	handleID := fs.nextHandleID
+	fs.nextHandleID++
+	fs.dirHandles[handleID] = dh
+	fs.mu.Unlock()
+	return handleID
+}
+
+func (fs *Goofys) AddFileHandle(fh *FileHandle) fuseops.HandleID {
+	fs.mu.Lock()
+	handleID := fs.nextHandleID
+	fs.nextHandleID++
+	fs.fileHandles[handleID] = fh
+	fs.mu.Unlock()
+	return handleID
+}
+
 func (fs *Goofys) StatPrinter() {
 	for {
 		time.Sleep(fs.flags.StatsInterval)
