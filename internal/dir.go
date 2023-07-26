@@ -47,6 +47,7 @@ type DirInodeData struct {
 	listMarker *string
 	lastFromCloud *string
 	listDone bool
+	forgetDuringList bool
 	// Time at which we started fetching child entries
 	// from cloud for this handle.
 	refreshStartTime time.Time
@@ -578,6 +579,7 @@ func (dh *DirHandle) loadListing() error {
 		parent.dir.lastFromCloud = nil
 		parent.dir.refreshStartTime = time.Now()
 		parent.dir.Gaps = nil
+		parent.dir.forgetDuringList = false
 	}
 
 	// We don't want to wait for the whole slurp to finish when we just do 'ls ./dir/subdir'
@@ -741,6 +743,10 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 	if offset >= len(dh.inode.dir.Children) {
 		// we've reached the end
 		parent.dir.listDone = false
+		if parent.dir.forgetDuringList {
+			parent.dir.DirTime = time.Time{}
+			parent.dir.Gaps = nil
+		}
 		return
 	}
 

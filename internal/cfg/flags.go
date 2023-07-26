@@ -280,6 +280,12 @@ MISC OPTIONS:
 		},
 
 		cli.IntFlag{
+			Name:  "entry-limit",
+			Usage: "Maximum metadata entries to cache in memory (1 entry uses ~1 KB of memory)",
+			Value: 100000,
+		},
+
+		cli.IntFlag{
 			Name:  "gc-interval",
 			Usage: "Force garbage collection after this amount of data buffer allocations",
 			Value: 250,
@@ -726,6 +732,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 		// Tuning,
 		MemoryLimit:            uint64(1024*1024*c.Int("memory-limit")),
+		EntryLimit:             c.Int("entry-limit"),
 		GCInterval:             uint64(1024*1024*c.Int("gc-interval")),
 		Cheap:                  c.Bool("cheap"),
 		ExplicitDir:            c.Bool("no-implicit-dir"),

@@ -67,6 +67,8 @@ type Goofys struct {
 	flusherCond *sync.Cond
 	flushPending int32
 
+	metaPurgeQ chan struct{}
+
 	// The next inode ID to hand out. We assume that this will never overflow,
 	// since even if we were handing out inode IDs at 4 GHz, it would still take
 	// over a century to do so.
@@ -366,6 +368,9 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 		fs.diskFdCond = sync.NewCond(&fs.diskFdMu)
 		go fs.FDCloser()
 	}
+
+	fs.metaPurgeQ = make(chan struct{}, 1)
+	go fs.MetaPurger()
 
 	return fs, nil
 }
@@ -730,6 +735,66 @@ func (fs *Goofys) Flusher() {
 	}
 }
 
+func (fs *Goofys) MetaPurger() {
+	for {
+		<-fs.metaPurgeQ
+		// Try to keep the number of cached inodes under control %)
+		// FIXME: count inodes with refcnt==1
+		fs.mu.RLock()
+		inodeCnt := len(fs.inodes)
+		fs.mu.RUnlock()
+		var cacheItem *LFRUItem
+		//var notifications []interface{}
+		for inodeCnt > fs.flags.EntryLimit {
+			cacheItem = fs.lfru.Pick(cacheItem)
+			if cacheItem == nil {
+				break
+			}
+			fs.mu.RLock()
+			childTmp := fs.inodes[cacheItem.Id()]
+			fs.mu.RUnlock()
+			// FIXME Condition similar to dir.go::ReadDir()
+			if childTmp == nil ||
+				childTmp.Id == fuseops.RootInodeID ||
+				atomic.LoadInt32(&childTmp.fileHandles) > 0 ||
+				atomic.LoadInt32(&childTmp.CacheState) != ST_CACHED ||
+				childTmp.isDir() && atomic.LoadInt64(&childTmp.dir.ModifiedChildren) > 0 {
+				continue
+			}
+			if !childTmp.mu.TryLock() {
+				continue
+			}
+			if atomic.LoadInt64(&childTmp.refcnt) > 1 {
+				childTmp.mu.Unlock()
+				continue
+			}
+			tmpParent := childTmp.Parent
+			// Respect locking order: parent before child, inode before fs
+			childTmp.mu.Unlock()
+			if !tmpParent.mu.TryLock() {
+				continue
+			}
+			if childTmp.mu.TryLock() {
+				if childTmp.Parent == tmpParent && atomic.LoadInt64(&childTmp.refcnt) == 1 {
+					found := tmpParent.findChildUnlocked(childTmp.Name)
+					if found == childTmp {
+						childTmp.resetCache()
+						childTmp.SetCacheState(ST_DEAD)
+						if childTmp.isDir() {
+							childTmp.removeAllChildrenUnlocked()
+						}
+						tmpParent.removeChildUnlocked(childTmp)
+						tmpParent.dir.forgetDuringList = true
+					}
+					inodeCnt--
+				}
+				childTmp.mu.Unlock()
+			}
+			tmpParent.mu.Unlock()
+		}
+	}
+}
+
 type Mount struct {
 	// Mount Point relative to goofys's root mount.
 	name    string
@@ -1004,7 +1069,14 @@ func (fs *Goofys) insertInode(parent *Inode, inode *Inode) {
 	}
 	fs.mu.Lock()
 	inode.Id = fs.allocateInodeId()
+	if len(fs.inodes) > fs.flags.EntryLimit {
+		select {
+		case fs.metaPurgeQ <- struct{}{}:
+		default:
+		}
+	}
 	parent.insertChildUnlocked(inode)
+	fs.lfru.Hit(inode.Id, 0)
 	fs.inodes[inode.Id] = inode
 	fs.mu.Unlock()
 }
