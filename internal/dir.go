@@ -59,13 +59,6 @@ type DirInodeData struct {
 	handles []*DirHandle
 }
 
-type DirHandleEntry struct {
-	Name   string
-	Inode  fuseops.InodeID
-	IsDir  bool
-	Offset fuseops.DirOffset
-}
-
 // Returns true if any char in `inp` has a value < '/'.
 // This should work for unicode also: unicode chars are all greater than 128.
 // See TestHasCharLtSlash for examples.
@@ -553,24 +546,6 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	return
 }
 
-func (dh *DirHandle) readDirFromCache(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry) {
-	child := dh.inode.dir.Children[internalOffset]
-	en = &DirHandleEntry{
-		Name:   child.Name,
-		Inode:  child.Id,
-		Offset: offset + 1,
-	}
-	if child.isDir() {
-		en.IsDir = true
-	}
-
-	if dh.inode.dir.lastFromCloud != nil && en.Name == *dh.inode.dir.lastFromCloud {
-		dh.inode.dir.lastFromCloud = nil
-	}
-
-	return
-}
-
 // LOCKS_REQUIRED(dh.mu)
 // LOCKS_REQUIRED(dh.inode.mu)
 func (dh *DirHandle) checkDirPosition() {
@@ -681,7 +656,7 @@ func (dh *DirHandle) Seek(newOffset fuseops.DirOffset) {
 // LOCKS_REQUIRED(dh.mu)
 // LOCKS_EXCLUDED(dh.inode.mu)
 // LOCKS_EXCLUDED(dh.inode.fs)
-func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *DirHandleEntry, err error) {
+func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (inode *Inode, err error) {
 	parent := dh.inode
 	fs := parent.fs
 	if parent.dir == nil {
@@ -742,10 +717,14 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 		return
 	}
 
-	en = dh.readDirFromCache(dh.lastInternalOffset, dh.lastExternalOffset)
+	child := dh.inode.dir.Children[dh.lastInternalOffset]
+	if dh.inode.dir.lastFromCloud != nil && child.Name == *dh.inode.dir.lastFromCloud {
+		dh.inode.dir.lastFromCloud = nil
+	}
+
 	parent.mu.Unlock()
 
-	return en, nil
+	return child, nil
 }
 
 func (dh *DirHandle) CloseDir() error {

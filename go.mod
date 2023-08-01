@@ -18,7 +18,7 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/google/uuid v1.1.2
 	github.com/gopherjs/gopherjs v0.0.0-20210202160940-bed99a852dfe // indirect
-	github.com/jacobsa/fuse v0.0.0-20210818065549-10d864429bf7
+	github.com/jacobsa/fuse v0.0.0-20230624161425-b8484ee15dad
 	github.com/jtolds/gls v4.2.0+incompatible // indirect
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 	github.com/kr/pretty v0.1.1-0.20190720101428-71e7e4993750 // indirect
@@ -47,4 +47,4 @@ replace github.com/aws/aws-sdk-go => ./s3ext
 
 replace github.com/winfsp/cgofuse => github.com/vitalif/cgofuse v0.0.0-20230609211427-22e8fa44f6b8
 
-replace github.com/jacobsa/fuse => github.com/vitalif/fusego v0.0.0-20230609084715-8312d628746f
+replace github.com/jacobsa/fuse => github.com/vitalif/fusego v0.0.0-20230803123617-efe41d860d78

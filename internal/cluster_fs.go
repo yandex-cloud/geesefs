@@ -401,8 +401,6 @@ func (fs *ClusterFs) readDir(handleId fuseops.HandleID, offset fuseops.DirOffset
 	dh := fs.Goofys.dirHandles[handleId]
 	fs.Goofys.mu.RUnlock()
 
-	inode := dh.inode
-
 	dh.mu.Lock()
 	defer dh.mu.Unlock()
 
@@ -419,19 +417,17 @@ func (fs *ClusterFs) readDir(handleId fuseops.HandleID, offset fuseops.DirOffset
 	}
 
 	for {
-		var e *DirHandleEntry
-		if dh.lastInternalOffset < len(dh.inode.dir.Children) {
-			inode.UpgradeToStateLock()
-			dh.checkDirPosition()
-			e = dh.readDirFromCache(dh.lastInternalOffset, dh.lastExternalOffset)
-			inode.DowngradeToKeepOwnerLock()
+		e, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
+		if err != nil {
+			dh.mu.Unlock()
+			err = mapAwsError(err)
+			return err
 		}
-
 		if e == nil {
 			break
 		}
 
-		n := fuseutil.WriteDirent(dst[*bytesRead:], makeDirEntry(e))
+		n := fuseutil.WriteDirent(dst[*bytesRead:], makeDirEntry(e, dh.lastExternalOffset))
 		if n == 0 {
 			break
 		}
