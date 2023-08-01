@@ -742,30 +742,28 @@ func (fs *GoofysWin) Readdir(path string,
 	dh.Seek(fuseops.DirOffset(ofst))
 
 	for {
-		e, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
+		inode, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
 		if err != nil {
 			return mapWinError(err)
 		}
-		if e == nil {
+		if inode == nil {
 			break
 		}
-		fs.mu.RLock()
-		inode := fs.inodes[e.Inode]
-		fs.mu.RUnlock()
-		if inode != nil {
-			st := &fuse.Stat_t{}
-			makeFuseAttributes(inode.GetAttributes(), st)
-			if !fill(e.Name, st, int64(e.Offset)) {
-				break
-			}
-			fuseLog.Debugf("<- Readdir %v %v %v = %v %v", path, ofst, dhId, e.Name, e.Offset)
+		st := &fuse.Stat_t{}
+		inode.mu.Lock()
+		name := inode.Name
+		makeFuseAttributes(inode.GetAttributes(), st)
+		inode.mu.Unlock()
+		if !fill(name, st, int64(dh.lastExternalOffset)) {
+			break
 		}
+		fuseLog.Debugf("<- Readdir %v %v %v = %v %v", path, ofst, dhId, name, dh.lastExternalOffset)
 		// We have to modify it here because fill() MAY not send the entry
 		if dh.lastInternalOffset >= 0 {
 			dh.lastInternalOffset++
 		}
 		dh.lastExternalOffset++
-		dh.lastName = e.Name
+		dh.lastName = name
 	}
 
 	return 0

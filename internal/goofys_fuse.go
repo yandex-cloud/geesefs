@@ -303,16 +303,16 @@ func (fs *GoofysFuse) OpenDir(
 	return
 }
 
-func makeDirEntry(en *DirHandleEntry) fuseutil.Dirent {
+func makeDirEntry(inode *Inode, offset fuseops.DirOffset) fuseutil.Dirent {
 	dt := fuseutil.DT_File
-	if en.IsDir {
+	if inode.isDir() {
 		dt = fuseutil.DT_Directory
 	}
 	return fuseutil.Dirent{
-		Name:   en.Name,
+		Name:   inode.Name,
 		Type:   dt,
-		Inode:  en.Inode,
-		Offset: en.Offset,
+		Inode:  inode.Id,
+		Offset: offset+1,
 	}
 }
 
@@ -349,16 +349,32 @@ func (fs *GoofysFuse) ReadDir(
 			break
 		}
 
-		if e.Inode == 0 {
-			panic(fmt.Sprintf("unset inode %v", e.Name))
+		n := 0
+		if op.Plus {
+			var inodeEntry fuseops.ChildInodeEntry
+			e.mu.Lock()
+			inodeEntry.Child = e.Id
+			inodeEntry.Attributes = e.InflateAttributes()
+			inodeEntry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+			inodeEntry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+			dirent := makeDirEntry(e, dh.lastExternalOffset)
+			e.mu.Unlock()
+			n = fuseutil.WriteDirentPlus(op.Dst[op.BytesRead:], &inodeEntry, dirent)
+			if n == 0 {
+				break
+			}
+			e.Ref()
+		} else {
+			e.mu.Lock()
+			dirent := makeDirEntry(e, dh.lastExternalOffset)
+			e.mu.Unlock()
+			n = fuseutil.WriteDirent(op.Dst[op.BytesRead:], dirent)
+			if n == 0 {
+				break
+			}
 		}
 
-		n := fuseutil.WriteDirent(op.Dst[op.BytesRead:], makeDirEntry(e))
-		if n == 0 {
-			break
-		}
-
-		dh.inode.logFuse("<-- ReadDir", e.Name, e.Offset)
+		dh.inode.logFuse("<-- ReadDir", e.Name, dh.lastExternalOffset)
 
 		op.BytesRead += n
 		// We have to modify it here because WriteDirent MAY not send the entry
@@ -860,6 +876,7 @@ func mountFuseFS(fs *Goofys) (mfs MountedFS, err error) {
 		ErrorLogger:             cfg.GetStdLogger(cfg.NewLogger("fuse"), logrus.ErrorLevel),
 		DisableWritebackCaching: true,
 		UseVectoredRead:         true,
+		UseReadDirPlus:          true,
 	}
 
 	if fs.flags.DebugFuse {

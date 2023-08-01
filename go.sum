@@ -254,6 +254,8 @@ github.com/vitalif/cgofuse v0.0.0-20230609211427-22e8fa44f6b8 h1:oskCaIGAfveNfZl
 github.com/vitalif/cgofuse v0.0.0-20230609211427-22e8fa44f6b8/go.mod h1:uxjoF2jEYT3+x+vC2KJddEGdk/LU8pRowXmyVMHSV5I=
 github.com/vitalif/fusego v0.0.0-20230609084715-8312d628746f h1:CK+eOV0HkW+fMynx2ptwqdmgv3XF6WkzaIeznXepJNU=
 github.com/vitalif/fusego v0.0.0-20230609084715-8312d628746f/go.mod h1:liOmRdJd8oTwHCQ5M9JemRE3CebdlYcZWLk+ZjQeuq0=
+github.com/vitalif/fusego v0.0.0-20230803123617-efe41d860d78 h1:WUKXKbRl2uj/BxUh1iSjP94+Ssc5mu07ULzKFwPgjBg=
+github.com/vitalif/fusego v0.0.0-20230803123617-efe41d860d78/go.mod h1:liOmRdJd8oTwHCQ5M9JemRE3CebdlYcZWLk+ZjQeuq0=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.32/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=

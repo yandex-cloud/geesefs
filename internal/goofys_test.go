@@ -110,7 +110,7 @@ func (s *GoofysTest) TestGetInodeAttributes(t *C) {
 	t.Assert(attr.Size, Equals, uint64(len("file1")))
 }
 
-func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []DirHandleEntry) {
+func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []*Inode) {
 	dh.mu.Lock()
 
 	en, err := dh.ReadDir(0, fuseops.DirOffset(0))
@@ -123,7 +123,7 @@ func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []DirHandleEntry
 	t.Assert(err, IsNil)
 	t.Assert(en, NotNil)
 	t.Assert(en.Name, Equals, "..")
-	dh.lastName = "."
+	dh.lastName = ".."
 
 	for i := 2; ; i++ {
 		en, err = dh.ReadDir(i, fuseops.DirOffset(i))
@@ -134,7 +134,7 @@ func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []DirHandleEntry
 			return
 		}
 
-		entries = append(entries, *en)
+		entries = append(entries, en)
 		dh.lastName = en.Name
 	}
 
@@ -142,7 +142,7 @@ func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []DirHandleEntry
 	return
 }
 
-func nameMap(entries []DirHandleEntry) (names map[string]bool) {
+func nameMap(entries []*Inode) (names map[string]bool) {
 	names = make(map[string]bool)
 	for _, en := range entries {
 		names[en.Name] = true
@@ -150,7 +150,7 @@ func nameMap(entries []DirHandleEntry) (names map[string]bool) {
 	return
 }
 
-func namesOf(entries []DirHandleEntry) (names []string) {
+func namesOf(entries []*Inode) (names []string) {
 	for _, en := range entries {
 		names = append(names, en.Name)
 	}
@@ -279,11 +279,8 @@ func (s *GoofysTest) TestReadFiles(t *C) {
 	entries := s.readDirFully(t, dh)
 
 	for _, en := range entries {
-		if !en.IsDir && (en.Name == "file1" || en.Name == "file2" || en.Name == "zero") {
-			in, err := parent.LookUp(en.Name, false)
-			t.Assert(err, IsNil)
-
-			fh, err := in.OpenFile()
+		if !en.isDir() && (en.Name == "file1" || en.Name == "file2" || en.Name == "zero") {
+			fh, err := en.OpenFile()
 			t.Assert(err, IsNil)
 
 			bufs, nread, err := fh.ReadFile(0, 4096)
