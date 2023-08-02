@@ -141,9 +141,6 @@ type Inode struct {
 
 	dir *DirInodeData
 
-	ImplicitDir bool
-	refreshed int32
-
 	fileHandles int32
 	lastWriteEnd uint64
 
@@ -534,7 +531,7 @@ func (inode *Inode) setFileMode(newMode os.FileMode) (changed bool, err error) {
 
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) fillXattr() (err error) {
-	if !inode.ImplicitDir && inode.userMetadata == nil {
+	if inode.userMetadata == nil && (inode.dir == nil || !inode.dir.ImplicitDir) {
 		cloud, key := inode.cloud()
 		if inode.oldParent != nil {
 			_, key = inode.oldParent.cloud()
@@ -551,7 +548,7 @@ func (inode *Inode) fillXattr() (err error) {
 			if err == syscall.ENOENT {
 				err = nil
 				if inode.isDir() {
-					inode.ImplicitDir = true
+					inode.dir.ImplicitDir = true
 				}
 			}
 			return err

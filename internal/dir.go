@@ -42,6 +42,7 @@ type DirInodeData struct {
 	lastOpenDirIdx  int
 	seqOpenDirScore uint8
 	DirTime         time.Time
+	ImplicitDir     bool
 
 	listMarker *string
 	lastFromCloud *string
@@ -594,6 +595,7 @@ func (dh *DirHandle) loadListing() error {
 		parent.dir.listDone = false
 		parent.dir.lastFromCloud = nil
 		parent.dir.refreshStartTime = time.Now()
+		parent.dir.Gaps = nil
 	}
 
 	// We don't want to wait for the whole slurp to finish when we just do 'ls ./dir/subdir'
@@ -710,12 +712,13 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (en *
 			atomic.LoadInt32(&childTmp.CacheState) <= ST_DEAD &&
 			(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
 			childTmp.mu.Lock()
+			childTmp.resetCache()
+			childTmp.SetCacheState(ST_DEAD)
 			notifications = append(notifications, &fuseops.NotifyDelete{
 				Parent: parent.Id,
 				Child: childTmp.Id,
 				Name: childTmp.Name,
 			})
-			atomic.StoreInt32(&childTmp.refreshed, -1)
 			if childTmp.isDir() {
 				childTmp.removeAllChildrenUnlocked()
 			}
@@ -802,7 +805,7 @@ func (inode *Inode) ResetForUnmount() {
 	inode.userMetadata = nil
 	inode.s3Metadata = nil
 	inode.Attributes = InodeAttributes{}
-	inode.ImplicitDir = false
+	inode.dir.ImplicitDir = false
 	inode.mu.Unlock()
 	// Reset DirTime for recursively for this node and all its child nodes.
 	// Note: resetDirTimeRec should be called without holding the lock.
@@ -938,7 +941,7 @@ func (parent *Inode) removeAllChildrenUnlocked() {
 		dh.lastInternalOffset = -1
 	}
 	if len(parent.dir.Children) > 2 {
-		parent.dir.Children = parent.dir.Children[0 : 2]
+		parent.dir.Children = []*Inode{parent.dir.Children[0], parent.dir.Children[1]}
 	}
 }
 
@@ -1037,12 +1040,15 @@ func (inode *Inode) SendDelete() {
 		inode.oldParent = nil
 		inode.oldName = ""
 	}
-	if inode.isDir() && !cloud.Capabilities().DirBlob {
-		key += "/"
+	implicit := false
+	if inode.isDir() {
+		implicit = inode.dir.ImplicitDir
+		if !cloud.Capabilities().DirBlob {
+			key += "/"
+		}
 	}
 	atomic.AddInt64(&inode.Parent.fs.activeFlushers, 1)
 	inode.IsFlushing += inode.fs.flags.MaxParallelParts
-	implicit := inode.ImplicitDir
 	go func() {
 		// Delete may race with a parallel listing
 		var err error
@@ -1069,6 +1075,7 @@ func (inode *Inode) SendDelete() {
 		}
 		forget := false
 		if inode.CacheState == ST_DELETED {
+			inode.resetCache()
 			inode.SetCacheState(ST_DEAD)
 			// We don't remove directories until all children are deleted
 			// So that we don't revive the directory after removing it
@@ -1233,7 +1240,7 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 	if !parent.fs.flags.NoDirObject {
 		inode.SetCacheState(ST_CREATED)
 	} else {
-		inode.ImplicitDir = true
+		inode.dir.ImplicitDir = true
 	}
 	inode.AttrTime = time.Now()
 	return
@@ -1304,7 +1311,7 @@ func (dir *Inode) SendMkDir() {
 		DirBlob:  true,
 		Metadata: escapeMetadata(dir.userMetadata),
 	}
-	dir.ImplicitDir = false
+	dir.dir.ImplicitDir = false
 	dir.IsFlushing += dir.fs.flags.MaxParallelParts
 	atomic.AddInt64(&dir.fs.activeFlushers, 1)
 	go func() {
@@ -1535,7 +1542,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 	toDir := newParent.doMkDir(to)
 	toDir.userMetadata = fromInode.userMetadata
-	toDir.ImplicitDir = fromInode.ImplicitDir
+	toDir.dir.ImplicitDir = fromInode.dir.ImplicitDir
 	// Trick IDs
 	oldId := fromInode.Id
 	newId := toDir.Id
@@ -1706,7 +1713,8 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			// replace unmodified file item with a directory
 			if atomic.LoadInt32(&inode.CacheState) <= ST_DEAD {
 				inode.mu.Lock()
-				atomic.StoreInt32(&inode.refreshed, -1)
+				inode.resetCache()
+				inode.SetCacheState(ST_DEAD)
 				parent.removeChildUnlocked(inode)
 				inode.mu.Unlock()
 				// create a directory inode instead
