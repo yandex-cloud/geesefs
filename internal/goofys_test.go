@@ -113,20 +113,24 @@ func (s *GoofysTest) TestGetInodeAttributes(t *C) {
 func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []*Inode) {
 	dh.mu.Lock()
 
-	en, err := dh.ReadDir(0, fuseops.DirOffset(0))
+	en, err := dh.ReadDir()
 	t.Assert(err, IsNil)
 	t.Assert(en, NotNil)
-	t.Assert(en.Name, Equals, ".")
-	dh.lastName = "."
+	t.Assert(en.Id, Equals, dh.inode.Id)
+	dh.Next(".")
 
-	en, err = dh.ReadDir(1, fuseops.DirOffset(1))
+	en, err = dh.ReadDir()
 	t.Assert(err, IsNil)
 	t.Assert(en, NotNil)
-	t.Assert(en.Name, Equals, "..")
-	dh.lastName = ".."
+	if dh.inode.Parent == nil {
+		t.Assert(en.Id, Equals, dh.inode.Id)
+	} else {
+		t.Assert(en.Id, Equals, dh.inode.Parent.Id)
+	}
+	dh.Next("..")
 
 	for i := 2; ; i++ {
-		en, err = dh.ReadDir(i, fuseops.DirOffset(i))
+		en, err = dh.ReadDir()
 		t.Assert(err, IsNil)
 
 		if en == nil {
@@ -135,7 +139,7 @@ func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []*Inode) {
 		}
 
 		entries = append(entries, en)
-		dh.lastName = en.Name
+		dh.Next(en.Name)
 	}
 
 	dh.mu.Unlock()
@@ -183,11 +187,12 @@ func (s *GoofysTest) readDirIntoCache(t *C, inode fuseops.InodeID) {
 	dh := in.OpenDir()
 	dh.mu.Lock()
 	for i := 0; ; i++ {
-		en, err := dh.ReadDir(i, fuseops.DirOffset(i))
+		en, err := dh.ReadDir()
 		t.Assert(err, IsNil)
 		if en == nil {
 			break
 		}
+		dh.Next(en.Name)
 	}
 	dh.CloseDir()
 	dh.mu.Unlock()
@@ -1630,20 +1635,20 @@ func (s *GoofysTest) TestInodeInsert(t *C) {
 	in := NewInode(s.fs, root, "2")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
-	t.Assert(root.dir.Children[2].Name, Equals, "2")
+	t.Assert(root.dir.Children[0].Name, Equals, "2")
 
 	in = NewInode(s.fs, root, "1")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
-	t.Assert(root.dir.Children[2].Name, Equals, "1")
-	t.Assert(root.dir.Children[3].Name, Equals, "2")
+	t.Assert(root.dir.Children[0].Name, Equals, "1")
+	t.Assert(root.dir.Children[1].Name, Equals, "2")
 
 	in = NewInode(s.fs, root, "4")
 	in.Attributes = InodeAttributes{}
 	root.insertChild(in)
-	t.Assert(root.dir.Children[2].Name, Equals, "1")
-	t.Assert(root.dir.Children[3].Name, Equals, "2")
-	t.Assert(root.dir.Children[4].Name, Equals, "4")
+	t.Assert(root.dir.Children[0].Name, Equals, "1")
+	t.Assert(root.dir.Children[1].Name, Equals, "2")
+	t.Assert(root.dir.Children[2].Name, Equals, "4")
 
 	inode := root.findChild("1")
 	t.Assert(inode, NotNil)
@@ -1663,10 +1668,10 @@ func (s *GoofysTest) TestInodeInsert(t *C) {
 	inode = root.findChild("3")
 	t.Assert(inode, IsNil)
 
-	root.removeChild(root.dir.Children[3])
-	root.removeChild(root.dir.Children[2])
-	root.removeChild(root.dir.Children[2])
-	t.Assert(len(root.dir.Children), Equals, 2)
+	root.removeChild(root.dir.Children[1])
+	root.removeChild(root.dir.Children[0])
+	root.removeChild(root.dir.Children[0])
+	t.Assert(len(root.dir.Children), Equals, 0)
 }
 
 func (s *GoofysTest) TestReadDirSlurpHeuristic(t *C) {

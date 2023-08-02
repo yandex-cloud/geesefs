@@ -350,7 +350,6 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 	root.Attributes.Ctime = fs.rootAttrs.Ctime
 
 	fs.inodes[fuseops.RootInodeID] = root
-	fs.addDotAndDotDot(root)
 
 	fs.nextHandleID = 1
 	fs.dirHandles = make(map[fuseops.HandleID]*DirHandle)
@@ -865,7 +864,7 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 		dh := inode.OpenDir()
 		dh.mu.Lock()
 		for {
-			en, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
+			en, err := dh.ReadDir()
 			if err != nil {
 				mappedErr = mapAwsError(err)
 				break
@@ -880,8 +879,7 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 					Name: en.Name,
 				})
 			}
-			dh.lastInternalOffset++
-			dh.lastExternalOffset++
+			dh.Next(en.Name)
 		}
 		dh.CloseDir()
 		dh.mu.Unlock()
@@ -1001,46 +999,14 @@ func expired(cache time.Time, ttl time.Duration) bool {
 // LOCKS_REQUIRED(parent.mu)
 // LOCKS_EXCLUDED(fs.mu)
 func (fs *Goofys) insertInode(parent *Inode, inode *Inode) {
-	addInode := false
-	if inode.Name == "." {
-		inode.Id = parent.Id
-	} else if inode.Name == ".." {
-		inode.Id = fuseops.InodeID(fuseops.RootInodeID)
-		if parent.Parent != nil {
-			inode.Id = parent.Parent.Id
-		}
-	} else {
-		if inode.Id != 0 {
-			panic(fmt.Sprintf("inode id is set: %v %v", inode.Name, inode.Id))
-		}
-		fs.mu.Lock()
-		inode.Id = fs.allocateInodeId()
-		addInode = true
+	if inode.Id != 0 {
+		panic(fmt.Sprintf("inode id is set: %v %v", inode.Name, inode.Id))
 	}
+	fs.mu.Lock()
+	inode.Id = fs.allocateInodeId()
 	parent.insertChildUnlocked(inode)
-	if addInode {
-		fs.inodes[inode.Id] = inode
-		fs.mu.Unlock()
-
-		// if we are inserting a new directory, also create
-		// the child . and ..
-		if inode.isDir() {
-			fs.addDotAndDotDot(inode)
-		}
-	}
-}
-
-// LOCKS_EXCLUDED(fs.mu)
-func (fs *Goofys) addDotAndDotDot(dir *Inode) {
-	dot := NewInode(fs, dir, ".")
-	dot.ToDir()
-	dot.AttrTime = TIME_MAX
-	fs.insertInode(dir, dot)
-
-	dot = NewInode(fs, dir, "..")
-	dot.ToDir()
-	dot.AttrTime = TIME_MAX
-	fs.insertInode(dir, dot)
+	fs.inodes[inode.Id] = inode
+	fs.mu.Unlock()
 }
 
 // LOCKS_EXCLUDED(fs.mu)

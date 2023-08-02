@@ -308,8 +308,14 @@ func makeDirEntry(inode *Inode, offset fuseops.DirOffset) fuseutil.Dirent {
 	if inode.isDir() {
 		dt = fuseutil.DT_Directory
 	}
+	name := inode.Name
+	if offset == 0 {
+		name = "."
+	} else if offset == 1 {
+		name = ".."
+	}
 	return fuseutil.Dirent{
-		Name:   inode.Name,
+		Name:   name,
 		Type:   dt,
 		Inode:  inode.Id,
 		Offset: offset+1,
@@ -339,7 +345,7 @@ func (fs *GoofysFuse) ReadDir(
 	dh.Seek(op.Offset)
 
 	for {
-		e, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
+		e, err := dh.ReadDir()
 		if err != nil {
 			dh.mu.Unlock()
 			err = mapAwsError(err)
@@ -349,6 +355,7 @@ func (fs *GoofysFuse) ReadDir(
 			break
 		}
 
+		var dirent fuseutil.Dirent
 		n := 0
 		if op.Plus {
 			var inodeEntry fuseops.ChildInodeEntry
@@ -357,7 +364,7 @@ func (fs *GoofysFuse) ReadDir(
 			inodeEntry.Attributes = e.InflateAttributes()
 			inodeEntry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 			inodeEntry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-			dirent := makeDirEntry(e, dh.lastExternalOffset)
+			dirent = makeDirEntry(e, dh.lastExternalOffset)
 			e.mu.Unlock()
 			n = fuseutil.WriteDirentPlus(op.Dst[op.BytesRead:], &inodeEntry, dirent)
 			if n == 0 {
@@ -366,7 +373,7 @@ func (fs *GoofysFuse) ReadDir(
 			e.Ref()
 		} else {
 			e.mu.Lock()
-			dirent := makeDirEntry(e, dh.lastExternalOffset)
+			dirent = makeDirEntry(e, dh.lastExternalOffset)
 			e.mu.Unlock()
 			n = fuseutil.WriteDirent(op.Dst[op.BytesRead:], dirent)
 			if n == 0 {
@@ -378,11 +385,7 @@ func (fs *GoofysFuse) ReadDir(
 
 		op.BytesRead += n
 		// We have to modify it here because WriteDirent MAY not send the entry
-		if dh.lastInternalOffset >= 0 {
-			dh.lastInternalOffset++
-		}
-		dh.lastExternalOffset++
-		dh.lastName = e.Name
+		dh.Next(dirent.Name)
 	}
 
 	dh.mu.Unlock()
