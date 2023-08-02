@@ -298,8 +298,6 @@ func (fs *ClusterFs) mkDir(parent *Inode, name string, mode os.FileMode) (
 
 				// insert resurrected child in tree
 				parent.insertChildUnlocked(child)
-				child.dir.Children[0].Id = child.Id  // "."
-				child.dir.Children[1].Id = parent.Id // ".."
 
 				pbInode := child.pbInode()
 				childId := uint64(child.Id)
@@ -355,7 +353,7 @@ func (fs *ClusterFs) rmDir(parent *Inode, name string) error {
 
 	child.UpgradeToStateLock()
 
-	if len(child.dir.Children) != 2 {
+	if len(child.dir.Children) > 0 {
 		child.StateUnlock()
 		parent.DowngradeToKeepOwnerLock()
 		return syscall.ENOTEMPTY
@@ -417,7 +415,7 @@ func (fs *ClusterFs) readDir(handleId fuseops.HandleID, offset fuseops.DirOffset
 	}
 
 	for {
-		e, err := dh.ReadDir(dh.lastInternalOffset, dh.lastExternalOffset)
+		e, err := dh.ReadDir()
 		if err != nil {
 			dh.mu.Unlock()
 			err = mapAwsError(err)
@@ -434,11 +432,7 @@ func (fs *ClusterFs) readDir(handleId fuseops.HandleID, offset fuseops.DirOffset
 
 		*bytesRead += n
 		// We have to modify it here because WriteDirent MAY not send the entry
-		if dh.lastInternalOffset >= 0 {
-			dh.lastInternalOffset++
-		}
-		dh.lastExternalOffset++
-		dh.lastName = e.Name
+		dh.Next(e.Name)
 	}
 
 	return nil
@@ -690,7 +684,7 @@ func (fs *ClusterFs) tryYield(inode *Inode, newOwner NodeId) *pb.StolenInode {
 	if inode.CacheState == ST_CACHED && inode.fileHandles == 0 {
 		if inode.isDir() {
 			var children []*pb.Inode
-			for _, child := range inode.dir.Children[2:] {
+			for _, child := range inode.dir.Children {
 				child.KeepOwnerLock()
 				if child.owner == UNKNOWN_OWNER {
 					child.KeepOwnerUnlock()
@@ -702,14 +696,14 @@ func (fs *ClusterFs) tryYield(inode *Inode, newOwner NodeId) *pb.StolenInode {
 					child.KeepOwnerLock()
 				}
 			}
-			for _, child := range inode.dir.Children[2:] {
+			for _, child := range inode.dir.Children {
 				children = append(children, child.pbInode())
 			}
-			for _, child := range inode.dir.Children[2:] {
+			for _, child := range inode.dir.Children {
 				child.KeepOwnerUnlock()
 			}
 			if len(inode.dir.DeletedChildren) == 0 {
-				inode.dir.Children = inode.dir.Children[:2]
+				inode.dir.Children = nil
 				inode.dir.DeletedChildren = nil
 
 				inode.ownerTerm++
@@ -837,7 +831,6 @@ func (fs *ClusterFs) ensure(parent *Inode, pbInode *pb.Inode) *Inode {
 		child.Id = fuseops.InodeID(pbInode.Id)
 		if pbInode.Dir {
 			child.ToDir()
-			fs.Goofys.addDotAndDotDot(child)
 		}
 		if pbInode.Symlink {
 			child.Attributes.Mode = child.Attributes.Mode | iofs.ModeSymlink

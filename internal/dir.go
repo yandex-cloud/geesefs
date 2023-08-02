@@ -142,11 +142,11 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 
 		if parent.dir.lastOpenDirIdx < 0 {
 			// check if we are opening the first child
-			// (after . and ..)  cap the search to 1000
+			// cap the search to 1000
 			// peers to bound the time. If the next dir is
 			// more than 1000 away, slurping isn't going
 			// to be helpful anyway
-			for i := 2; i < MinInt(numChildren, 1000); i++ {
+			for i := 0; i < MinInt(numChildren, 1000); i++ {
 				c := parent.dir.Children[i]
 				if c.isDir() {
 					if c.Name == inode.Name {
@@ -552,9 +552,16 @@ func (dh *DirHandle) checkDirPosition() {
 	if dh.lastInternalOffset < 0 {
 		parent := dh.inode
 		// Directory position invalidated, try to find it again using lastName
-		dh.lastInternalOffset = sort.Search(len(parent.dir.Children), parent.findInodeFunc(dh.lastName))
-		if dh.lastInternalOffset < len(parent.dir.Children) && parent.dir.Children[dh.lastInternalOffset].Name == dh.lastName {
-			dh.lastInternalOffset++
+		if dh.lastName == "." {
+			dh.lastInternalOffset = 1
+		} else if dh.lastName == ".." {
+			dh.lastInternalOffset = 2
+		} else {
+			dh.lastInternalOffset = sort.Search(len(parent.dir.Children), parent.findInodeFunc(dh.lastName))
+			if dh.lastInternalOffset < len(parent.dir.Children) && parent.dir.Children[dh.lastInternalOffset].Name == dh.lastName {
+				dh.lastInternalOffset++
+			}
+			dh.lastInternalOffset += 2
 		}
 	}
 }
@@ -635,15 +642,17 @@ func (dh *DirHandle) Seek(newOffset fuseops.DirOffset) {
 		dh.inode.mu.Lock()
 		dh.lastExternalOffset = newOffset
 		dh.lastInternalOffset = int(newOffset)
-		if dh.lastInternalOffset > len(dh.inode.dir.Children) {
-			dh.lastInternalOffset = len(dh.inode.dir.Children)
+		if dh.lastInternalOffset > 2+len(dh.inode.dir.Children) {
+			dh.lastInternalOffset = 2+len(dh.inode.dir.Children)
 		}
-		if len(dh.inode.dir.Children) > 0 {
-			dh.inode.dir.Children[dh.lastInternalOffset-1].mu.Lock()
-			dh.lastName = dh.inode.dir.Children[dh.lastInternalOffset-1].Name
-			dh.inode.dir.Children[dh.lastInternalOffset-1].mu.Unlock()
+		if dh.lastInternalOffset == 1 {
+			dh.lastName = "."
+		} else if dh.lastInternalOffset == 2 {
+			dh.lastName = ".."
 		} else {
-			dh.lastName = ""
+			dh.inode.dir.Children[dh.lastInternalOffset-3].mu.Lock()
+			dh.lastName = dh.inode.dir.Children[dh.lastInternalOffset-3].Name
+			dh.inode.dir.Children[dh.lastInternalOffset-3].mu.Unlock()
 		}
 		dh.inode.mu.Unlock()
 	} else if newOffset == 0 {
@@ -654,24 +663,43 @@ func (dh *DirHandle) Seek(newOffset fuseops.DirOffset) {
 }
 
 // LOCKS_REQUIRED(dh.mu)
+func (dh *DirHandle) Next(name string) {
+	if dh.lastInternalOffset >= 0 {
+		dh.lastInternalOffset++
+	}
+	dh.lastExternalOffset++
+	dh.lastName = name
+}
+
+// LOCKS_REQUIRED(dh.mu)
 // LOCKS_EXCLUDED(dh.inode.mu)
 // LOCKS_EXCLUDED(dh.inode.fs)
-func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (inode *Inode, err error) {
+func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 	parent := dh.inode
 	fs := parent.fs
 	if parent.dir == nil {
 		panic("ReadDir non-directory "+parent.FullName())
 	}
 	parent.mu.Lock()
+	defer parent.mu.Unlock()
 
-	dh.lastInternalOffset = internalOffset
-	dh.lastExternalOffset = offset
 	dh.checkDirPosition()
+	if dh.lastInternalOffset == 0 {
+		// "."
+		return parent, nil
+	} else if dh.lastInternalOffset == 1 {
+		// ".."
+		if parent.Parent != nil {
+			return parent.Parent, nil
+		} else {
+			return parent, nil
+		}
+	}
+	offset := dh.lastInternalOffset-2
 
 	if expired(dh.inode.dir.DirTime, dh.inode.fs.flags.StatCacheTTL) {
 		err = dh.loadListing()
 		if err != nil {
-			parent.mu.Unlock()
 			return nil, err
 		}
 		dh.checkDirPosition()
@@ -679,7 +707,7 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (inod
 
 	// Skip stale inodes
 	var notifications []interface{}
-	for i := dh.lastInternalOffset; i < len(parent.dir.Children); i++ {
+	for i := offset; i < len(parent.dir.Children); i++ {
 		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
 		childTmp := parent.dir.Children[i]
 		if childTmp.AttrTime.Before(parent.dir.refreshStartTime) &&
@@ -710,19 +738,16 @@ func (dh *DirHandle) ReadDir(internalOffset int, offset fuseops.DirOffset) (inod
 	// May be -1 if we remove inodes above
 	dh.checkDirPosition()
 
-	if dh.lastInternalOffset >= len(dh.inode.dir.Children) {
+	if offset >= len(dh.inode.dir.Children) {
 		// we've reached the end
 		parent.dir.listDone = false
-		parent.mu.Unlock()
 		return
 	}
 
-	child := dh.inode.dir.Children[dh.lastInternalOffset]
+	child := dh.inode.dir.Children[offset]
 	if dh.inode.dir.lastFromCloud != nil && child.Name == *dh.inode.dir.lastFromCloud {
 		dh.inode.dir.lastFromCloud = nil
 	}
-
-	parent.mu.Unlock()
 
 	return child, nil
 }
@@ -754,8 +779,8 @@ func (inode *Inode) resetDirTimeRec() {
 	// Make a copy of the child nodes before giving up the lock.
 	// This protects us from any addition/removal of child nodes
 	// under this node.
-	children := make([]*Inode, len(inode.dir.Children)-2)
-	copy(children, inode.dir.Children[2:])
+	children := make([]*Inode, len(inode.dir.Children))
+	copy(children, inode.dir.Children)
 	inode.mu.Unlock()
 	for _, child := range children {
 		child.resetDirTimeRec()
@@ -822,20 +847,13 @@ func (parent *Inode) findChild(name string) (inode *Inode) {
 }
 
 func (parent *Inode) findInodeFunc(name string) func(i int) bool {
-	// . and .. must always come before all other entries
-	// FIXME: In fact, . and .. are fake entries and it would be totally fine to not store them at all
 	if name == "" {
 		return func(i int) bool {
 			return true
 		}
 	}
-	if name == "." || name == ".." {
-		return func(i int) bool {
-			return i >= 2 || parent.dir.Children[i].Name >= name
-		}
-	}
 	return func(i int) bool {
-		return i >= 2 && parent.dir.Children[i].Name >= name
+		return parent.dir.Children[i].Name >= name
 	}
 }
 
@@ -893,7 +911,7 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 	parent.dir.Children[l-1] = nil
 	parent.dir.Children = parent.dir.Children[:l-1]
 
-	if cap(parent.dir.Children)-len(parent.dir.Children) > 20 {
+	if cap(parent.dir.Children) >= len(parent.dir.Children)*2 {
 		tmp := make([]*Inode, len(parent.dir.Children))
 		copy(tmp, parent.dir.Children)
 		parent.dir.Children = tmp
@@ -905,7 +923,7 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 // LOCKS_REQUIRED(parent.mu)
 // LOCKS_EXCLUDED(parent.fs.mu)
 func (parent *Inode) removeAllChildrenUnlocked() {
-	for i := 2; i < len(parent.dir.Children); i++ {
+	for i := 0; i < len(parent.dir.Children); i++ {
 		child := parent.dir.Children[i]
 		child.mu.Lock()
 		if child.isDir() {
@@ -919,9 +937,7 @@ func (parent *Inode) removeAllChildrenUnlocked() {
 	for _, dh := range parent.dir.handles {
 		dh.lastInternalOffset = -1
 	}
-	if len(parent.dir.Children) > 2 {
-		parent.dir.Children = []*Inode{parent.dir.Children[0], parent.dir.Children[1]}
-	}
+	parent.dir.Children = nil
 }
 
 // LOCKS_EXCLUDED(parent.fs.mu)
@@ -933,7 +949,7 @@ func (parent *Inode) removeChild(inode *Inode) {
 
 	l := len(parent.dir.Children)
 	i := sort.Search(l, parent.findInodeFunc(inode.Name))
-	if l <= 2 || i >= l || parent.dir.Children[i] != inode {
+	if i >= l || parent.dir.Children[i] != inode {
 		return
 	}
 
@@ -1193,8 +1209,6 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 					parent.Attributes.Mtime = oldInode.Attributes.Mtime
 				}
 				parent.insertChildUnlocked(oldInode)
-				oldInode.dir.Children[0].Id = inode.Id // "."
-				oldInode.dir.Children[1].Id = parent.Id // ".."
 				return oldInode
 			}
 		}
@@ -1323,7 +1337,8 @@ func appendChildName(parent, child string) string {
 func (inode *Inode) isEmptyDir() (bool, error) {
 	dh := NewDirHandle(inode)
 	dh.mu.Lock()
-	en, err := dh.ReadDir(2, 2)
+	dh.Seek(2)
+	en, err := dh.ReadDir()
 	dh.mu.Unlock()
 	return en == nil, err
 }
@@ -1374,7 +1389,8 @@ func (parent *Inode) RmDir(name string) (err error) {
 
 		dh := NewDirHandle(inode)
 		dh.mu.Lock()
-		en, err := dh.ReadDir(2, 2)
+		dh.Seek(2)
+		en, err := dh.ReadDir()
 		dh.mu.Unlock()
 		if err != nil {
 			return err
@@ -1534,9 +1550,8 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 	fs.mu.Unlock()
 	// Swap reference counts - the kernel will still send forget ops for the new inode
 	fromInode.refcnt, toDir.refcnt = toDir.refcnt, fromInode.refcnt
-	// 2 is to skip . and ..
-	for len(fromInode.dir.Children) > 2 {
-		child := fromInode.dir.Children[2]
+	for len(fromInode.dir.Children) > 0 {
+		child := fromInode.dir.Children[0]
 		child.mu.Lock()
 		if child.isDir() {
 			renameRecursive(child, toDir, child.Name)
@@ -1734,11 +1749,7 @@ func (parent *Inode) findChildMaxTime() (maxMtime, maxCtime time.Time) {
 	maxCtime = parent.Attributes.Ctime
 	maxMtime = parent.Attributes.Mtime
 
-	for i, c := range parent.dir.Children {
-		if i < 2 {
-			// skip . and ..
-			continue
-		}
+	for _, c := range parent.dir.Children {
 		if c.Attributes.Ctime.After(maxCtime) {
 			maxCtime = c.Attributes.Ctime
 		}
