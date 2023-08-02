@@ -96,7 +96,7 @@ func (fs *GoofysFuse) GetInodeAttributes(
 
 	inode := fs.getInodeOrDie(op.Inode)
 
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
+	if atomic.LoadInt32(&inode.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -114,7 +114,7 @@ func (fs *GoofysFuse) GetXattr(ctx context.Context,
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
+	if atomic.LoadInt32(&inode.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -143,7 +143,7 @@ func (fs *GoofysFuse) ListXattr(ctx context.Context,
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
+	if atomic.LoadInt32(&inode.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -179,7 +179,7 @@ func (fs *GoofysFuse) RemoveXattr(ctx context.Context,
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
+	if atomic.LoadInt32(&inode.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -194,7 +194,7 @@ func (fs *GoofysFuse) SetXattr(ctx context.Context,
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
+	if atomic.LoadInt32(&inode.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -214,7 +214,7 @@ func (fs *GoofysFuse) CreateSymlink(ctx context.Context,
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
+	if atomic.LoadInt32(&parent.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -236,7 +236,7 @@ func (fs *GoofysFuse) ReadSymlink(ctx context.Context,
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
+	if atomic.LoadInt32(&inode.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -292,13 +292,7 @@ func (fs *GoofysFuse) OpenDir(
 	atomic.AddInt64(&fs.stats.noops, 1)
 
 	in := fs.getInodeOrDie(op.Inode)
-	if atomic.LoadInt32(&in.refreshed) == -1 {
-		// Stale inode
-		fs.mu.Unlock()
-		return syscall.ESTALE
-	}
-
-	if atomic.LoadInt32(&in.refreshed) == -1 {
+	if atomic.LoadInt32(&in.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -407,7 +401,7 @@ func (fs *GoofysFuse) OpenFile(
 
 	atomic.AddInt64(&fs.stats.noops, 1)
 
-	if atomic.LoadInt32(&in.refreshed) == -1 {
+	if atomic.LoadInt32(&in.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -509,7 +503,7 @@ func (fs *GoofysFuse) CreateFile(
 
 	parent := fs.getInodeOrDie(op.Parent)
 
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
+	if atomic.LoadInt32(&parent.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -550,7 +544,7 @@ func (fs *GoofysFuse) MkNode(
 
 	parent := fs.getInodeOrDie(op.Parent)
 
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
+	if atomic.LoadInt32(&parent.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -589,7 +583,7 @@ func (fs *GoofysFuse) MkDir(
 
 	parent := fs.getInodeOrDie(op.Parent)
 
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
+	if atomic.LoadInt32(&parent.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -622,7 +616,7 @@ func (fs *GoofysFuse) RmDir(
 
 	parent := fs.getInodeOrDie(op.Parent)
 
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
+	if atomic.LoadInt32(&parent.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -641,7 +635,7 @@ func (fs *GoofysFuse) SetInodeAttributes(
 
 	inode := fs.getInodeOrDie(op.Inode)
 
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
+	if atomic.LoadInt32(&inode.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -690,7 +684,7 @@ func (fs *GoofysFuse) Unlink(
 
 	parent := fs.getInodeOrDie(op.Parent)
 
-	if atomic.LoadInt32(&parent.refreshed) == -1 {
+	if atomic.LoadInt32(&parent.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -711,8 +705,8 @@ func (fs *GoofysFuse) Rename(
 	parent := fs.getInodeOrDie(op.OldParent)
 	newParent := fs.getInodeOrDie(op.NewParent)
 
-	if atomic.LoadInt32(&parent.refreshed) == -1 ||
-		atomic.LoadInt32(&newParent.refreshed) == -1 {
+	if atomic.LoadInt32(&parent.CacheState) == ST_DEAD ||
+		atomic.LoadInt32(&newParent.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}
@@ -739,7 +733,7 @@ func (fs *GoofysFuse) Fallocate(
 
 	inode := fs.getInodeOrDie(op.Inode)
 
-	if atomic.LoadInt32(&inode.refreshed) == -1 {
+	if atomic.LoadInt32(&inode.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
 	}

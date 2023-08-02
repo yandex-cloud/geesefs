@@ -860,7 +860,7 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 		// everything will be refreshed just fine.
 		// But root directory is a special case: we should invalidate all
 		// inodes in it ourselves. Basically this means that we have to do
-		// a listing and notify the kernel about every file in a root
+		// a listing and notify the kernel about every file in the root
 		// directory.
 		dh := inode.OpenDir()
 		dh.mu.Lock()
@@ -874,7 +874,7 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 				break
 			}
 			if dh.lastInternalOffset >= 2 {
-				// Delete notifications are send by ReadDir() itself
+				// Delete notifications are sent by ReadDir() itself
 				notifications = append(notifications, &fuseops.NotifyInvalEntry{
 					Parent: inode.Id,
 					Name: en.Name,
@@ -1131,7 +1131,7 @@ func (fs *Goofys) LookupParent(path string) (parent *Inode, child string, err er
 			if !parent.isDir() {
 				return nil, "", syscall.ENOTDIR
 			}
-			if atomic.LoadInt32(&parent.refreshed) == -1 {
+			if atomic.LoadInt32(&parent.CacheState) == ST_DEAD {
 				// Stale inode
 				return nil, "", syscall.ESTALE
 			}
@@ -1154,7 +1154,7 @@ func (fs *Goofys) LookupPath(path string) (inode *Inode, err error) {
 			if err != nil {
 				return
 			}
-			if atomic.LoadInt32(&inode.refreshed) == -1 {
+			if atomic.LoadInt32(&inode.CacheState) == ST_DEAD {
 				// Stale inode
 				return nil, syscall.ESTALE
 			}
