@@ -68,6 +68,7 @@ type Goofys struct {
 	flushPending int32
 
 	metaPurgeQ chan struct{}
+	purgeCandidates []fuseops.InodeID
 
 	// The next inode ID to hand out. We assume that this will never overflow,
 	// since even if we were handing out inode IDs at 4 GHz, it would still take
@@ -735,63 +736,70 @@ func (fs *Goofys) Flusher() {
 	}
 }
 
+func (fs *Goofys) purgeNode(id fuseops.InodeID) bool {
+	fs.mu.RLock()
+	childTmp := fs.inodes[id]
+	fs.mu.RUnlock()
+	// FIXME Condition similar to dir.go::ReadDir()
+	if childTmp == nil ||
+		childTmp.Id == fuseops.RootInodeID ||
+		atomic.LoadInt32(&childTmp.fileHandles) > 0 ||
+		atomic.LoadInt32(&childTmp.CacheState) != ST_CACHED ||
+		childTmp.isDir() && atomic.LoadInt64(&childTmp.dir.ModifiedChildren) > 0 {
+		return false
+	}
+	if !childTmp.mu.TryLock() {
+		return false
+	}
+	if atomic.LoadInt64(&childTmp.refcnt) > 0 {
+		childTmp.mu.Unlock()
+		return false
+	}
+	tmpParent := childTmp.Parent
+	// Respect locking order: parent before child, inode before fs
+	childTmp.mu.Unlock()
+	if !tmpParent.mu.TryLock() {
+		return false
+	}
+	r := false
+	if childTmp.mu.TryLock() {
+		if childTmp.Parent == tmpParent && atomic.LoadInt64(&childTmp.refcnt) == 1 {
+			found := tmpParent.findChildUnlocked(childTmp.Name)
+			if found == childTmp {
+				childTmp.resetCache()
+				childTmp.SetCacheState(ST_DEAD)
+				if childTmp.isDir() {
+					childTmp.removeAllChildrenUnlocked()
+				}
+				tmpParent.removeChildUnlocked(childTmp)
+				tmpParent.dir.forgetDuringList = true
+				r = true
+			}
+		}
+		childTmp.mu.Unlock()
+	}
+	tmpParent.mu.Unlock()
+	return r
+}
+
 func (fs *Goofys) MetaPurger() {
 	for {
 		<-fs.metaPurgeQ
 		// Try to keep the number of cached inodes under control %)
-		// FIXME: count inodes with refcnt==1
-		fs.mu.RLock()
-		inodeCnt := len(fs.inodes)
-		fs.mu.RUnlock()
-		var cacheItem *LFRUItem
-		//var notifications []interface{}
-		for inodeCnt > fs.flags.EntryLimit {
-			cacheItem = fs.lfru.Pick(cacheItem)
-			if cacheItem == nil {
-				break
+		fs.mu.Lock()
+		purgeCandidates := fs.purgeCandidates
+		fs.purgeCandidates = nil
+		fs.mu.Unlock()
+		j := 0
+		for i := 0; i < len(purgeCandidates); i++ {
+			if len(purgeCandidates)-(i-j) > fs.flags.EntryLimit && !fs.purgeNode(purgeCandidates[i]) {
+				purgeCandidates[j] = purgeCandidates[i]
+				j++
 			}
-			fs.mu.RLock()
-			childTmp := fs.inodes[cacheItem.Id()]
-			fs.mu.RUnlock()
-			// FIXME Condition similar to dir.go::ReadDir()
-			if childTmp == nil ||
-				childTmp.Id == fuseops.RootInodeID ||
-				atomic.LoadInt32(&childTmp.fileHandles) > 0 ||
-				atomic.LoadInt32(&childTmp.CacheState) != ST_CACHED ||
-				childTmp.isDir() && atomic.LoadInt64(&childTmp.dir.ModifiedChildren) > 0 {
-				continue
-			}
-			if !childTmp.mu.TryLock() {
-				continue
-			}
-			if atomic.LoadInt64(&childTmp.refcnt) > 1 {
-				childTmp.mu.Unlock()
-				continue
-			}
-			tmpParent := childTmp.Parent
-			// Respect locking order: parent before child, inode before fs
-			childTmp.mu.Unlock()
-			if !tmpParent.mu.TryLock() {
-				continue
-			}
-			if childTmp.mu.TryLock() {
-				if childTmp.Parent == tmpParent && atomic.LoadInt64(&childTmp.refcnt) == 1 {
-					found := tmpParent.findChildUnlocked(childTmp.Name)
-					if found == childTmp {
-						childTmp.resetCache()
-						childTmp.SetCacheState(ST_DEAD)
-						if childTmp.isDir() {
-							childTmp.removeAllChildrenUnlocked()
-						}
-						tmpParent.removeChildUnlocked(childTmp)
-						tmpParent.dir.forgetDuringList = true
-					}
-					inodeCnt--
-				}
-				childTmp.mu.Unlock()
-			}
-			tmpParent.mu.Unlock()
 		}
+		fs.mu.Lock()
+		fs.purgeCandidates = append(purgeCandidates[0:j], fs.purgeCandidates...)
+		fs.mu.Unlock()
 	}
 }
 
@@ -1069,14 +1077,7 @@ func (fs *Goofys) insertInode(parent *Inode, inode *Inode) {
 	}
 	fs.mu.Lock()
 	inode.Id = fs.allocateInodeId()
-	if len(fs.inodes) > fs.flags.EntryLimit {
-		select {
-		case fs.metaPurgeQ <- struct{}{}:
-		default:
-		}
-	}
 	parent.insertChildUnlocked(inode)
-	fs.lfru.Hit(inode.Id, 0)
 	fs.inodes[inode.Id] = inode
 	fs.mu.Unlock()
 }

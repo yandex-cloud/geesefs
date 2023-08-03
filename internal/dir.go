@@ -922,8 +922,6 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 		copy(tmp, parent.dir.Children)
 		parent.dir.Children = tmp
 	}
-
-	inode.DeRef(1)
 }
 
 // LOCKS_REQUIRED(parent.mu)
@@ -935,7 +933,6 @@ func (parent *Inode) removeAllChildrenUnlocked() {
 		if child.isDir() {
 			child.removeAllChildrenUnlocked()
 		}
-		child.DeRef(1)
 		if child.CacheState == ST_CACHED {
 			child.resetCache()
 			child.SetCacheState(ST_DEAD)
@@ -979,8 +976,6 @@ func (parent *Inode) insertChild(inode *Inode) {
 
 // LOCKS_REQUIRED(parent.mu)
 func (parent *Inode) insertChildUnlocked(inode *Inode) {
-	inode.Ref()
-
 	l := len(parent.dir.Children)
 	if l == 0 {
 		parent.dir.Children = []*Inode{inode}
@@ -1138,7 +1133,6 @@ func (parent *Inode) Create(name string) (inode *Inode, fh *FileHandle, err erro
 	}
 	// one ref is for lookup
 	inode.Ref()
-	// another ref is for being in Children
 	fs.insertInode(parent, inode)
 	inode.SetCacheState(ST_CREATED)
 	fs.WakeupFlusher()
@@ -1238,7 +1232,6 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 	}
 	// one ref is for lookup
 	inode.Ref()
-	// another ref is for being in Children
 	parent.fs.insertInode(parent, inode)
 	if !parent.fs.flags.NoDirObject {
 		inode.SetCacheState(ST_CREATED)
@@ -1281,7 +1274,6 @@ func (parent *Inode) CreateSymlink(
 	}
 	// one ref is for lookup
 	inode.Ref()
-	// another ref is for being in Children
 	fs.insertInode(parent, inode)
 	inode.SetCacheState(ST_CREATED)
 	fs.WakeupFlusher()
@@ -1429,12 +1421,15 @@ func (inode *Inode) SetCacheState(state int32) {
 	wasModified := inode.CacheState == ST_CREATED || inode.CacheState == ST_DELETED || inode.CacheState == ST_MODIFIED
 	willBeModified := state == ST_CREATED || state == ST_DELETED || state == ST_MODIFIED
 	atomic.StoreInt32(&inode.CacheState, state)
-	if wasModified != willBeModified && (inode.isDir() || inode.fileHandles == 0) {
+	if wasModified != willBeModified {
 		inc := int64(1)
 		if wasModified {
 			inc = -1
 		}
 		inode.Parent.addModified(inc)
+	}
+	if state == ST_DEAD {
+		inode.DeRef(0)
 	}
 }
 

@@ -278,6 +278,7 @@ func (fs *GoofysFuse) ForgetInode(
 
 	inode := fs.getInodeOrDie(op.Inode)
 
+	fmt.Printf("forget %v %v\n", op.Inode, op.N)
 	inode.mu.Lock()
 	inode.DeRef(int64(op.N))
 	inode.mu.Unlock()

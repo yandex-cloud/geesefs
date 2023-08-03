@@ -282,7 +282,7 @@ MISC OPTIONS:
 		cli.IntFlag{
 			Name:  "entry-limit",
 			Usage: "Maximum metadata entries to cache in memory (1 entry uses ~1 KB of memory)",
-			Value: 100000,
+			Value: 10000,
 		},
 
 		cli.IntFlag{

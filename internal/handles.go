@@ -390,14 +390,29 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 	} else {
 		inode.logFuse("DeRef", n, res)
 	}
-	if res == 0 && inode.CacheState <= ST_DEAD {
-		inode.resetCache()
-		inode.fs.mu.Lock()
-		delete(inode.fs.inodes, inode.Id)
-		inode.fs.forgotCnt += 1
-		inode.fs.mu.Unlock()
-		// Remove from LFRU tracker
-		inode.fs.lfru.Forget(inode.Id)
+	fmt.Printf("deref %v %v -> %v", inode.Id, inode.FullName(), res)
+	if res == 0 {
+		fmt.Printf("purge candidate: %v %v", inode.Id, inode.FullName())
+		if inode.CacheState == ST_DEAD {
+			inode.resetCache()
+			inode.fs.mu.Lock()
+			delete(inode.fs.inodes, inode.Id)
+			inode.fs.forgotCnt += 1
+			inode.fs.mu.Unlock()
+			// Remove from LFRU tracker
+			inode.fs.lfru.Forget(inode.Id)
+		} else if inode.CacheState == ST_CACHED {
+			// Mark as a candidate to free later
+			inode.fs.mu.Lock()
+			inode.fs.purgeCandidates = append(inode.fs.purgeCandidates, inode.Id)
+			if len(inode.fs.purgeCandidates) > inode.fs.flags.EntryLimit*2 {
+				select {
+					case inode.fs.metaPurgeQ <- struct{}{}:
+					default:
+				}
+			}
+			inode.fs.mu.Unlock()
+		}
 	}
 	return res == 0
 }
