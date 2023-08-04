@@ -276,11 +276,16 @@ func (fs *GoofysFuse) ForgetInode(
 
 	atomic.AddInt64(&fs.stats.metadataReads, 1)
 
-	inode := fs.getInodeOrDie(op.Inode)
+	fs.mu.RLock()
+	inode := fs.inodes[op.Inode]
+	fs.mu.RUnlock()
 
-	inode.mu.Lock()
-	inode.DeRef(int64(op.N))
-	inode.mu.Unlock()
+	// Forget requests are allowed for expired inodes which were dropped from memory
+	if inode != nil {
+		inode.mu.Lock()
+		inode.DeRef(int64(op.N))
+		inode.mu.Unlock()
+	}
 
 	return
 }

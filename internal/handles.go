@@ -249,7 +249,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	now := time.Now()
 	// don't want to update time if this inode is setup to never expire
 	if inode.AttrTime.Before(now) {
-		inode.AttrTime = now
+		inode.SetAttrTime(now)
 	}
 }
 
@@ -400,6 +400,31 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 		inode.fs.lfru.Forget(inode.Id)
 	}
 	return res == 0
+}
+
+// LOCKS_REQUIRED(inode.mu)
+// LOCKS_EXCLUDED(inode.fs.mu)
+func (inode *Inode) SetAttrTime(tm time.Time) {
+	oldTime := inode.AttrTime.Unix()
+	newTime := tm.Unix()
+	inode.AttrTime = tm
+	inode.fs.mu.Lock()
+	oldMap := inode.fs.inodesByTime[oldTime]
+	if oldMap != nil {
+		delete(oldMap, inode.Id)
+		if len(oldMap) == 0 {
+			delete(inode.fs.inodesByTime, oldTime)
+		}
+	}
+	if !tm.IsZero() {
+		newMap := inode.fs.inodesByTime[newTime]
+		if newMap == nil {
+			newMap = make(map[fuseops.InodeID]bool)
+			inode.fs.inodesByTime[newTime] = newMap
+		}
+		newMap[inode.Id] = true
+	}
+	inode.fs.mu.Unlock()
 }
 
 // LOCKS_EXCLUDED(inode.mu)

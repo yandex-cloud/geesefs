@@ -1373,7 +1373,7 @@ func (inode *Inode) SendUpload() bool {
 							if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
 								!inode.isStillDirty() {
 								inode.SetCacheState(ST_CACHED)
-								inode.AttrTime = time.Now()
+								inode.SetAttrTime(time.Now())
 							}
 						}
 						inode.mu.Unlock()
@@ -1406,7 +1406,7 @@ func (inode *Inode) SendUpload() bool {
 					if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
 						!inode.isStillDirty() {
 						inode.SetCacheState(ST_CACHED)
-						inode.AttrTime = time.Now()
+						inode.SetAttrTime(time.Now())
 					}
 					inode.renamingTo = false
 					inode.mu.Unlock()
@@ -1492,7 +1492,7 @@ func (inode *Inode) SendUpload() bool {
 					log.Errorf("Error flushing metadata using COPY for %v: %v", key, err)
 				} else if inode.CacheState == ST_MODIFIED && !inode.isStillDirty() {
 					inode.SetCacheState(ST_CACHED)
-					inode.AttrTime = time.Now()
+					inode.SetAttrTime(time.Now())
 				}
 				inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 				atomic.AddInt64(&inode.fs.activeFlushers, -1)
@@ -1705,7 +1705,7 @@ func (inode *Inode) resetCache() {
 	inode.userMetadataDirty = 0
 	inode.SetCacheState(ST_CACHED)
 	// Invalidate metadata entry
-	inode.AttrTime = time.Time{}
+	inode.SetAttrTime(time.Time{})
 }
 
 func (inode *Inode) FlushSmallObject() {
@@ -2086,7 +2086,7 @@ func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *tim
 	}
 	inode.knownSize = size
 	inode.knownETag = *etag
-	inode.AttrTime = time.Now()
+	inode.SetAttrTime(time.Now())
 }
 
 func (inode *Inode) SyncFile() (err error) {

@@ -85,6 +85,8 @@ type Goofys struct {
 	// GUARDED_BY(mu)
 	inodes map[fuseops.InodeID]*Inode
 
+	inodesByTime map[int64]map[fuseops.InodeID]bool
+
 	// Inflight changes are tracked to skip them in parallel listings
 	// Required because we don't have guarantees about listing & change ordering
 	inflightListingId int
@@ -339,6 +341,7 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 
 	fs.nextInodeID = fuseops.RootInodeID + 1
 	fs.inodes = make(map[fuseops.InodeID]*Inode)
+	fs.inodesByTime = make(map[int64]map[fuseops.InodeID]bool)
 	root := NewInode(fs, nil, "")
 	root.refcnt = 1
 	root.Id = fuseops.RootInodeID
@@ -366,6 +369,8 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 		fs.diskFdCond = sync.NewCond(&fs.diskFdMu)
 		go fs.FDCloser()
 	}
+
+	go fs.MetaEvictor()
 
 	return fs, nil
 }
@@ -730,6 +735,120 @@ func (fs *Goofys) Flusher() {
 	}
 }
 
+func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
+	fs.mu.RLock()
+	childTmp := fs.inodes[id]
+	fs.mu.RUnlock()
+	if childTmp == nil ||
+		childTmp.Id == fuseops.RootInodeID ||
+		atomic.LoadInt32(&childTmp.fileHandles) > 0 ||
+		atomic.LoadInt32(&childTmp.CacheState) > ST_DEAD ||
+		childTmp.isDir() && atomic.LoadInt64(&childTmp.dir.ModifiedChildren) > 0 {
+		return false
+	}
+	if !childTmp.mu.TryLock() {
+		return false
+	}
+	// We CAN evict inodes which are still referenced by the kernel,
+	// but only if they're expired!
+	if !expired(childTmp.AttrTime, fs.flags.StatCacheTTL) {
+		childTmp.mu.Unlock()
+		return false
+	}
+	tmpParent := childTmp.Parent
+	// Respect locking order: parent before child, inode before fs
+	childTmp.mu.Unlock()
+	if !tmpParent.mu.TryLock() {
+		return false
+	}
+	if !childTmp.mu.TryLock() {
+		tmpParent.mu.Unlock()
+		return false
+	}
+	if childTmp.Parent != tmpParent {
+		childTmp.mu.Unlock()
+		tmpParent.mu.Unlock()
+		return false
+	}
+	found := tmpParent.findChildUnlocked(childTmp.Name)
+	if found == childTmp {
+		tmpParent.removeChildUnlocked(childTmp)
+		tmpParent.dir.forgetDuringList = true
+	}
+	childTmp.resetCache()
+	childTmp.SetCacheState(ST_DEAD)
+	// Drop inode
+	fs.mu.Lock()
+	delete(fs.inodes, childTmp.Id)
+	fs.forgotCnt += 1
+	fs.mu.Unlock()
+	fs.lfru.Forget(childTmp.Id)
+	childTmp.mu.Unlock()
+	tmpParent.mu.Unlock()
+	return true
+}
+
+func (fs *Goofys) MetaEvictor() {
+	retry := false
+	var seen map[fuseops.InodeID]bool
+	for {
+		if !retry {
+			time.Sleep(1 * time.Second)
+			seen = make(map[fuseops.InodeID]bool)
+		}
+		// Try to keep the number of cached inodes under control %)
+		fs.mu.RLock()
+		toEvict := (len(fs.inodes)-fs.flags.EntryLimit)*2
+		if toEvict < 0 {
+			fs.mu.RUnlock()
+			retry = false
+			continue
+		}
+		if toEvict < fs.flags.EntryLimit/100 {
+			toEvict = fs.flags.EntryLimit/100
+		}
+		if toEvict < 10 {
+			toEvict = 10
+		}
+		expireUnix := time.Now().Add(-fs.flags.StatCacheTTL).Unix()
+		var scan []fuseops.InodeID
+		for tm, inodes := range fs.inodesByTime {
+			if tm < expireUnix {
+				for inode, _ := range inodes {
+					if !seen[inode] {
+						scan = append(scan, inode)
+					}
+					if len(scan) >= toEvict {
+						break
+					}
+				}
+			}
+			if len(scan) >= toEvict {
+				break
+			}
+		}
+		fs.mu.RUnlock()
+		evicted := 0
+		for _, id := range scan {
+			if fs.EvictEntry(id) {
+				evicted++
+			} else {
+				seen[id] = true
+			}
+		}
+		fs.mu.RLock()
+		totalInodes := len(fs.inodes)
+		retry = len(scan) >= toEvict && totalInodes > fs.flags.EntryLimit
+		fs.mu.RUnlock()
+		if len(scan) > 0 {
+			fmt.Fprintf(
+				os.Stderr, "%v metadata cache: alive %v, scanned %v, evicted %v\n",
+				time.Now().Format("2006/01/02 15:04:05.000000"), totalInodes, len(scan), evicted,
+			)
+		}
+	}
+}
+
 type Mount struct {
 	// Mount Point relative to goofys's root mount.
 	name    string
@@ -763,7 +882,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 		if dirInode == nil {
 			dirInode = NewInode(fs, mp, dirName)
 			dirInode.ToDir()
-			dirInode.AttrTime = TIME_MAX
+			dirInode.SetAttrTime(TIME_MAX)
 			dirInode.userMetadata = make(map[string][]byte)
 
 			fs.insertInode(mp, dirInode)
@@ -781,7 +900,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 		mountInode.ToDir()
 		mountInode.dir.cloud = b.cloud
 		mountInode.dir.mountPrefix = b.prefix
-		mountInode.AttrTime = TIME_MAX
+		mountInode.SetAttrTime(TIME_MAX)
 		mountInode.userMetadata = make(map[string][]byte)
 
 		fs.insertInode(mp, mountInode)
@@ -800,7 +919,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 		defer prev.mu.Unlock()
 		prev.dir.cloud = b.cloud
 		prev.dir.mountPrefix = b.prefix
-		prev.AttrTime = TIME_MAX
+		prev.SetAttrTime(TIME_MAX)
 
 	}
 	prev.addModified(1)

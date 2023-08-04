@@ -47,6 +47,7 @@ type DirInodeData struct {
 	listMarker *string
 	lastFromCloud *string
 	listDone bool
+	forgetDuringList bool
 	// Time at which we started fetching child entries
 	// from cloud for this handle.
 	refreshStartTime time.Time
@@ -426,7 +427,7 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, skip
 			// don't want to update time if this
 			// inode is setup to never expire
 			if inode.AttrTime.Before(now) {
-				inode.AttrTime = now
+				inode.SetAttrTime(now)
 			}
 		} else if _, deleted := parent.dir.DeletedChildren[dirName]; !deleted {
 			// don't revive deleted items
@@ -578,6 +579,7 @@ func (dh *DirHandle) loadListing() error {
 		parent.dir.lastFromCloud = nil
 		parent.dir.refreshStartTime = time.Now()
 		parent.dir.Gaps = nil
+		parent.dir.forgetDuringList = false
 	}
 
 	// We don't want to wait for the whole slurp to finish when we just do 'ls ./dir/subdir'
@@ -741,6 +743,10 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 	if offset >= len(dh.inode.dir.Children) {
 		// we've reached the end
 		parent.dir.listDone = false
+		if parent.dir.forgetDuringList {
+			parent.dir.DirTime = time.Time{}
+			parent.dir.Gaps = nil
+		}
 		return
 	}
 
@@ -769,7 +775,7 @@ func (dh *DirHandle) CloseDir() error {
 // ACQUIRES_LOCK(inode.mu)
 func (inode *Inode) resetDirTimeRec() {
 	inode.mu.Lock()
-	inode.AttrTime = time.Time{}
+	inode.SetAttrTime(time.Time{})
 	if inode.dir == nil {
 		inode.mu.Unlock()
 		return
@@ -1235,7 +1241,7 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 	} else {
 		inode.dir.ImplicitDir = true
 	}
-	inode.AttrTime = time.Now()
+	inode.SetAttrTime(time.Now())
 	return
 }
 
@@ -1321,7 +1327,7 @@ func (dir *Inode) SendMkDir() {
 		}
 		if dir.CacheState == ST_CREATED || dir.CacheState == ST_MODIFIED {
 			dir.SetCacheState(ST_CACHED)
-			dir.AttrTime = time.Now()
+			dir.SetAttrTime(time.Now())
 		}
 		dir.fs.WakeupFlusher()
 	}()
@@ -1728,7 +1734,7 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 			} else {
 				now := time.Now()
 				if inode.AttrTime.Before(now) {
-					inode.AttrTime = now
+					inode.SetAttrTime(now)
 				}
 			}
 
