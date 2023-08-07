@@ -133,12 +133,18 @@ func (s *S3Backend) TryIAM() (err error) {
 	} else {
 		resp, err = http.Get(credUrl)
 	}
-	if err != nil {
+	if err != nil || resp == nil {
 		s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
+		if err == nil {
+			err = fmt.Errorf("Failed to get IAM token from %v: no response", credUrl)
+		}
 		return err
 	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	var body []byte
+	if resp.Body != nil {
+		defer resp.Body.Close()
+		body, err = ioutil.ReadAll(resp.Body)
+	}
 	if err != nil {
 		s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
 		return err
