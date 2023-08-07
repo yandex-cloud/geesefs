@@ -165,16 +165,32 @@ There's a lot of tuning you can do. Consult `geesefs -h` to view the list of opt
 
 ## Memory Limit
 
-Default internal cache memory limit in GeeseFS (--memory-limit) is 1 GB. GeeseFS uses cache
-for read buffers when it needs to load data from the server. At the same time, default "large"
-readahead setting is configured to be 100 MB which is optimal for linear read performance.
+**New since 0.37.0:** metadata cache memory usage is now also limited, OOM errors
+caused by metadata should now go away.
 
-However, that means that more than 10 processes trying to read large files at the same time
-may exceed that memory limit by requesting more than 1000 MB of buffers and in that case
-GeeseFS will return ENOMEM errors to some of them.
+GeeseFS uses RAM for two purposes:
 
-You can overcome this problem by either raising --memory-limit (for example to 4 GB)
-or lowering --read-ahead-large (for example to 20 MB).
+1. **Metadata** (file listings). One metadata entry uses ~1 KB of data. Total
+   number of cached entries is limited by `--entry-limit` and `--stat-cache-ttl`,
+   because non-expired entries can't be removed from cache. Modified entries
+   and entries with open file/directory descriptors are also never removed from
+   cache. Cache TTL is 60 seconds by default, cached entry limit is 100000 by
+   default, but in reality GeeseFS is able to list files faster, so the actual
+   limit will be ~250000 when doing a plain listing of a very long bucket.
+
+2. **Data**. Default data cache limit in GeeseFS is 1 GB (`--memory-limit`).
+   GeeseFS uses cache for both read buffers when it needs to load data from the
+   server and write buffers when user applications write data.
+
+   At the same time, default "large" readahead setting is set to 100 MB which
+   is optimal for linear read performance.
+
+   However, that means that more than 10 processes trying to read large files
+   at the same time may exceed the memory limit by requesting more than 1000 MB
+   of buffers and in that case GeeseFS will return ENOMEM errors to some of them.
+
+   You can overcome this problem by either raising `--memory-limit` (for example
+   to 4 GB) or lowering `--read-ahead-large` (for example to 20 MB).
 
 ## Maximizing Throughput
 
