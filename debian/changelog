@@ -1,3 +1,12 @@
+geesefs (0.37.0) unstable; urgency=medium
+
+  * Limit metadata memory usage (--entry-limit)
+  * Use READDIRPLUS for faster directory listings
+  * Fix a crash when being unable to request token from IAM
+  * Some refactoring
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Mon, 07 Aug 2023 13:35:21 +0300
+
 geesefs (0.36.2) unstable; urgency=medium
 
   * Add --refresh-filename and --flush-filename to allow to invalidate and flush cache on Windows
