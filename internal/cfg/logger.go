@@ -48,6 +48,7 @@ func initFileLoggers(logFile string) {
 			return
 		}
 	}
+	appendTime = true
 }
 
 func SetCloudLogLevel(level logrus.Level) {

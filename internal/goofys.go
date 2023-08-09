@@ -123,6 +123,7 @@ type OpStats struct {
 	metadataReads int64
 	metadataWrites int64
 	noops int64
+	evicts int64
 	ts time.Time
 }
 
@@ -454,21 +455,25 @@ func (fs *Goofys) StatPrinter() {
 		metadataReads := atomic.SwapInt64(&fs.stats.metadataReads, 0)
 		metadataWrites := atomic.SwapInt64(&fs.stats.metadataWrites, 0)
 		noops := atomic.SwapInt64(&fs.stats.noops, 0)
+		evicts := atomic.SwapInt64(&fs.stats.evicts, 0)
+		fs.mu.RLock()
+		inodeCount := len(fs.inodes)
+		fs.mu.RUnlock()
 		fs.stats.ts = now
 		readsOr1 := float64(reads)
 		if reads == 0 {
 			readsOr1 = 1
 		}
-		fmt.Fprintf(
-			os.Stderr,
-			"%v I/O: %.2f read/s, %.2f %% hits, %.2f write/s; metadata: %.2f read/s, %.2f write/s; %.2f noop/s; %.2f flush/s\n",
-			now.Format("2006/01/02 15:04:05.000000"),
+		log.Infof(
+			"I/O: %.2f read/s, %.2f %% hits, %.2f write/s; metadata: %.2f read/s, %.2f write/s, %.2f noop/s, %v alive, %.2f evict/s; %.2f flush/s",
 			float64(reads) / d,
 			float64(readHits)/readsOr1*100,
 			float64(writes) / d,
 			float64(metadataReads) / d,
 			float64(metadataWrites) / d,
 			float64(noops) / d,
+			inodeCount,
+			float64(evicts) / d,
 			float64(flushes) / d,
 		)
 	}
@@ -840,11 +845,9 @@ func (fs *Goofys) MetaEvictor() {
 		totalInodes := len(fs.inodes)
 		retry = len(scan) >= toEvict && totalInodes > fs.flags.EntryLimit
 		fs.mu.RUnlock()
+		atomic.AddInt64(&fs.stats.evicts, int64(evicted))
 		if len(scan) > 0 {
-			fmt.Fprintf(
-				os.Stderr, "%v metadata cache: alive %v, scanned %v, evicted %v\n",
-				time.Now().Format("2006/01/02 15:04:05.000000"), totalInodes, len(scan), evicted,
-			)
+			log.Debugf("metadata cache: alive %v, scanned %v, evicted %v", totalInodes, len(scan), evicted)
 		}
 	}
 }
