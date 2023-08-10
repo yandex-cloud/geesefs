@@ -1433,7 +1433,7 @@ func (inode *Inode) SetCacheState(state int32) {
 	wasModified := inode.CacheState == ST_CREATED || inode.CacheState == ST_DELETED || inode.CacheState == ST_MODIFIED
 	willBeModified := state == ST_CREATED || state == ST_DELETED || state == ST_MODIFIED
 	atomic.StoreInt32(&inode.CacheState, state)
-	if wasModified != willBeModified {
+	if wasModified != willBeModified && (inode.isDir() || inode.fileHandles == 0) {
 		inc := int64(1)
 		if wasModified {
 			inc = -1
