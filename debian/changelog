@@ -1,3 +1,9 @@
+geesefs (0.37.1) unstable; urgency=medium
+
+  * Windows bug fixes
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Fri, 11 Aug 2023 00:27:56 +0300
+
 geesefs (0.37.0) unstable; urgency=medium
 
   * Limit metadata memory usage (--entry-limit)
