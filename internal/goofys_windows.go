@@ -752,7 +752,8 @@ func (fs *GoofysWin) Readdir(path string,
 		st := &fuse.Stat_t{}
 		inode.mu.Lock()
 		name := inode.Name
-		makeFuseAttributes(inode.GetAttributes(), st)
+		attr := inode.InflateAttributes()
+		makeFuseAttributes(&attr, st)
 		inode.mu.Unlock()
 		if dh.lastExternalOffset == 0 {
 			name = "."
