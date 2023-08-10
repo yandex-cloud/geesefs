@@ -1105,9 +1105,13 @@ func (inode *Inode) SendDelete() {
 	}()
 }
 
-func (parent *Inode) Create(name string) (inode *Inode, fh *FileHandle, err error) {
+func (parent *Inode) Create(name string) (*Inode, *FileHandle, error) {
+	return parent.CreateOrOpen(name, false)
+}
 
-	parent.logFuse("Create", name)
+func (parent *Inode) CreateOrOpen(name string, open bool) (inode *Inode, fh *FileHandle, err error) {
+
+	parent.logFuse("Create", name, open)
 
 	fs := parent.fs
 
@@ -1116,6 +1120,10 @@ func (parent *Inode) Create(name string) (inode *Inode, fh *FileHandle, err erro
 
 	inode = parent.findChildUnlocked(name)
 	if inode != nil {
+		if open {
+			fh, err := inode.OpenFile()
+			return inode, fh, err
+		}
 		return nil, nil, syscall.EEXIST
 	}
 

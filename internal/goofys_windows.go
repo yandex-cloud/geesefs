@@ -427,7 +427,7 @@ func (fs *GoofysWin) Create(path string, flags int, mode uint32) (ret int, fhId 
 		return mapWinError(err), 0
 	}
 
-	inode, fh, err := parent.Create(child)
+	inode, fh, err := parent.CreateOrOpen(child, true)
 	if err != nil {
 		return mapWinError(err), 0
 	}
