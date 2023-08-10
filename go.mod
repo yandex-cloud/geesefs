@@ -15,7 +15,7 @@ require (
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.0
 	github.com/google/uuid v1.1.2
-	github.com/jacobsa/fuse v0.0.0-20230624161425-b8484ee15dad
+	github.com/jacobsa/fuse v0.0.0-20230810134708-ab21db1af836
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/xattr v0.4.9
@@ -75,4 +75,4 @@ replace github.com/aws/aws-sdk-go => ./s3ext
 
 replace github.com/winfsp/cgofuse => github.com/vitalif/cgofuse v0.0.0-20230609211427-22e8fa44f6b8
 
-replace github.com/jacobsa/fuse => github.com/vitalif/fusego v0.0.0-20230803123617-efe41d860d78
+replace github.com/jacobsa/fuse => github.com/vitalif/fusego v0.0.0-20230810211941-8d4d89b65d93
