@@ -129,6 +129,7 @@ type Inode struct {
 	//   comparision just compares Time::ext field
 	// Ref: https://github.com/golang/go/blob/e42ae65a8507/src/time/time.go#L12:L56
 	AttrTime time.Time
+	ExpireTime time.Time
 
 	mu sync.Mutex // everything below is protected by mu
 	readCond *sync.Cond
@@ -405,9 +406,22 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 // LOCKS_REQUIRED(inode.mu)
 // LOCKS_EXCLUDED(inode.fs.mu)
 func (inode *Inode) SetAttrTime(tm time.Time) {
-	oldTime := inode.AttrTime.Unix()
-	newTime := tm.Unix()
 	inode.AttrTime = tm
+	// Expire when at least both AttrTime+TTL & ExpireTime pass
+	// AttrTime is required for Windows where we don't use SetExpireTime()
+	inode.SetExpireTime(tm.Add(inode.fs.flags.StatCacheTTL))
+}
+
+// LOCKS_REQUIRED(inode.mu)
+// LOCKS_EXCLUDED(inode.fs.mu)
+func (inode *Inode) SetExpireTime(tm time.Time) {
+	// Only rewind expire time forward. I.e. it's more ExtendExpireTime than SetExpireTime
+	if inode.ExpireTime.After(tm) {
+		return
+	}
+	oldTime := inode.ExpireTime.Unix()
+	newTime := tm.Unix()
+	inode.ExpireTime = tm
 	inode.fs.mu.Lock()
 	oldMap := inode.fs.inodesByTime[oldTime]
 	if oldMap != nil {
@@ -425,6 +439,14 @@ func (inode *Inode) SetAttrTime(tm time.Time) {
 		newMap[inode.Id] = true
 	}
 	inode.fs.mu.Unlock()
+}
+
+// LOCKS_EXCLUDED(inode.mu)
+// LOCKS_EXCLUDED(inode.fs.mu)
+func (inode *Inode) SetExpireLocked(tm time.Time) {
+	inode.mu.Lock()
+	inode.SetExpireTime(tm)
+	inode.mu.Unlock()
 }
 
 // LOCKS_EXCLUDED(inode.mu)

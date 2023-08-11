@@ -756,7 +756,7 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 	}
 	// We CAN evict inodes which are still referenced by the kernel,
 	// but only if they're expired!
-	if !expired(childTmp.AttrTime, fs.flags.StatCacheTTL) {
+	if childTmp.ExpireTime.After(time.Now()) {
 		childTmp.mu.Unlock()
 		return false
 	}

@@ -104,6 +104,7 @@ func (fs *GoofysFuse) GetInodeAttributes(
 	attr := inode.GetAttributes()
 	op.Attributes = *attr
 	op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+	inode.SetExpireLocked(op.AttributesExpiration)
 
 	return
 }
@@ -226,7 +227,8 @@ func (fs *GoofysFuse) CreateSymlink(ctx context.Context,
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+	op.Entry.EntryExpiration = op.Entry.AttributesExpiration
+	inode.SetExpireLocked(op.Entry.AttributesExpiration)
 	return
 }
 
@@ -265,7 +267,8 @@ func (fs *GoofysFuse) LookUpInode(
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+	op.Entry.EntryExpiration = op.Entry.AttributesExpiration
+	inode.SetExpireLocked(op.Entry.AttributesExpiration)
 
 	return
 }
@@ -368,7 +371,8 @@ func (fs *GoofysFuse) ReadDir(
 			inodeEntry.Child = e.Id
 			inodeEntry.Attributes = e.InflateAttributes()
 			inodeEntry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-			inodeEntry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+			inodeEntry.EntryExpiration = inodeEntry.AttributesExpiration
+			e.SetExpireTime(inodeEntry.AttributesExpiration)
 			dirent = makeDirEntry(e, dh.lastExternalOffset)
 			e.mu.Unlock()
 			n = fuseutil.WriteDirentPlus(op.Dst[op.BytesRead:], &inodeEntry, dirent)
@@ -542,7 +546,8 @@ func (fs *GoofysFuse) CreateFile(
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+	op.Entry.EntryExpiration = op.Entry.AttributesExpiration
+	inode.SetExpireLocked(op.Entry.AttributesExpiration)
 
 	op.Handle = fs.AddFileHandle(fh)
 
@@ -594,7 +599,8 @@ func (fs *GoofysFuse) MkNode(
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+	op.Entry.EntryExpiration = op.Entry.AttributesExpiration
+	inode.SetExpireLocked(op.Entry.AttributesExpiration)
 
 	return
 }
@@ -627,7 +633,8 @@ func (fs *GoofysFuse) MkDir(
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
-	op.Entry.EntryExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+	op.Entry.EntryExpiration = op.Entry.AttributesExpiration
+	inode.SetExpireLocked(op.Entry.AttributesExpiration)
 
 	return
 }
@@ -672,6 +679,7 @@ func (fs *GoofysFuse) SetInodeAttributes(
 	attr := inode.GetAttributes()
 	op.Attributes = *attr
 	op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
+	inode.SetExpireLocked(op.AttributesExpiration)
 
 	return
 }
