@@ -1,4 +1,5 @@
 // +build !windows
+// +build !linux
 
 // Copyright 2021 Yandex LLC
 //
@@ -23,4 +24,5 @@ import (
 const (
 	XATTR_CREATE  = unix.XATTR_CREATE
 	XATTR_REPLACE = unix.XATTR_REPLACE
+	ENOATTR       = unix.ENOATTR
 )

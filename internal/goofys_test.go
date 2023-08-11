@@ -1405,7 +1405,7 @@ func (s *GoofysTest) TestXAttrGet(t *C) {
 	t.Assert(names, DeepEquals, expectedXattrs)
 
 	_, err = file1.GetXattr("user.foobar")
-	t.Assert(err, Equals, syscall.ENODATA)
+	t.Assert(err, Equals, ENOATTR)
 
 	if checkETag {
 		value, err := file1.GetXattr("s3.etag")
@@ -1428,7 +1428,7 @@ func (s *GoofysTest) TestXAttrGet(t *C) {
 		t.Assert(len(names), Equals, 0, Commentf("names: %v", names))
 
 		value, err = dir1.GetXattr(xattrPrefix + "etag")
-		t.Assert(err, Equals, syscall.ENODATA)
+		t.Assert(err, Equals, ENOATTR)
 	}
 
 	// list dir1 to populate file3 in cache, then get file3's xattr
@@ -1567,7 +1567,7 @@ func (s *GoofysTest) TestXAttrRemove(t *C) {
 	t.Assert(err, IsNil)
 
 	_, err = in.GetXattr("user.name")
-	t.Assert(err, Equals, syscall.ENODATA)
+	t.Assert(err, Equals, ENOATTR)
 }
 
 func (s *GoofysTest) TestXAttrSet(t *C) {
@@ -1579,7 +1579,7 @@ func (s *GoofysTest) TestXAttrSet(t *C) {
 	t.Assert(err, IsNil)
 
 	err = in.SetXattr("user.bar", []byte("hello"), XATTR_REPLACE)
-	t.Assert(err, Equals, syscall.ENODATA)
+	t.Assert(err, Equals, ENOATTR)
 
 	err = in.SetXattr("user.bar", []byte("hello"), XATTR_CREATE)
 	t.Assert(err, IsNil)
@@ -1626,7 +1626,7 @@ func (s *GoofysTest) TestXAttrSet(t *C) {
 	t.Assert(err, IsNil)
 	// But check that the change is silently ignored
 	value, err = in.GetXattr("s3.bar")
-	t.Assert(err, Equals, syscall.ENODATA)
+	t.Assert(err, Equals, ENOATTR)
 }
 
 func (s *GoofysTest) TestInodeInsert(t *C) {

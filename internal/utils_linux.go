@@ -15,11 +15,11 @@
 package internal
 
 import (
-	"syscall"
+	"golang.org/x/sys/unix"
 )
 
 const (
-	XATTR_CREATE  = 0x1
-	XATTR_REPLACE = 0x2
-	ENOATTR       = syscall.ENODATA
+	XATTR_CREATE  = unix.XATTR_CREATE
+	XATTR_REPLACE = unix.XATTR_REPLACE
+	ENOATTR       = unix.ENODATA
 )

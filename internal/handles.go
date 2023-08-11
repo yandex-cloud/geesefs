@@ -611,12 +611,12 @@ func (inode *Inode) getXattrMap(name string, userOnly bool) (
 		if userOnly {
 			return nil, "", syscall.EPERM
 		} else {
-			return nil, "", syscall.ENODATA
+			return nil, "", ENOATTR
 		}
 	}
 
 	if meta == nil {
-		return nil, "", syscall.ENODATA
+		return nil, "", ENOATTR
 	}
 
 	return
@@ -676,7 +676,7 @@ func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
 			}
 		} else if flags == XATTR_REPLACE {
 			if !ok {
-				return syscall.ENODATA
+				return ENOATTR
 			}
 		}
 	}
@@ -719,7 +719,7 @@ func (inode *Inode) RemoveXattr(name string) error {
 		}
 		return err
 	} else {
-		return syscall.ENODATA
+		return ENOATTR
 	}
 }
 
@@ -738,7 +738,7 @@ func (inode *Inode) GetXattr(name string) ([]byte, error) {
 	if ok {
 		return value, nil
 	} else {
-		return nil, syscall.ENODATA
+		return nil, ENOATTR
 	}
 }
 
