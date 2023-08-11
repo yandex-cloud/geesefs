@@ -1,3 +1,12 @@
+geesefs (0.37.3) unstable; urgency=medium
+
+  * Hotfix for the new metadata eviction feature - it could lead to "panic:
+    unknown inode xxx" due to incorrect expiration timestamp being taken
+    into account
+  * Allow to disable xattrs for faster listings
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Fri, 11 Aug 2023 18:35:36 +0300
+
 geesefs (0.37.2) unstable; urgency=medium
 
   * Fix files not showing up in MacOS Finder (apart from directories and `ls` in terminal)
