@@ -426,6 +426,11 @@ MISC OPTIONS:
 				" Only works correctly if your S3 returns UserMetadata in listings (default: off)",
 		},
 
+		cli.BoolFlag{
+			Name:  "disable-xattr",
+			Usage: "Disable extended attributes. Improves performance of very long directory listings",
+		},
+
 		cli.StringFlag{
 			Name:  "uid-attr",
 			Value: "uid",
@@ -757,6 +762,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		EnablePerms:            c.Bool("enable-perms"),
 		EnableSpecials:         c.Bool("enable-specials"),
 		EnableMtime:            c.Bool("enable-mtime"),
+		DisableXattr:           c.Bool("disable-xattr"),
 		UidAttr:                c.String("uid-attr"),
 		GidAttr:                c.String("gid-attr"),
 		FileModeAttr:           c.String("mode-attr"),

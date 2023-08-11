@@ -138,6 +138,8 @@ func mapWinError(err error) int {
 		return -fuse.EAGAIN
 	case syscall.ESTALE:
 		return -fuse.EINVAL
+	case syscall.EOPNOTSUPP:
+		return -fuse.EOPNOTSUPP
 	default:
 		return -fuse.EIO
 	}
@@ -802,6 +804,10 @@ func (fs *GoofysWin) Fsyncdir(path string, datasync bool, fhId uint64) (ret int)
 
 // Setxattr sets extended attributes.
 func (fs *GoofysWin) Setxattr(path string, name string, value []byte, flags int) (ret int) {
+	if fs.flags.DisableXattr {
+		return -fuse.EOPNOTSUPP
+	}
+
 	if fuseLog.Level == logrus.DebugLevel {
 		fuseLog.Debugf("-> Setxattr %v %v %v %v", path, name, value, flags)
 		defer func() {
@@ -827,6 +833,10 @@ func (fs *GoofysWin) Setxattr(path string, name string, value []byte, flags int)
 
 // Getxattr gets extended attributes.
 func (fs *GoofysWin) Getxattr(path string, name string) (ret int, data []byte) {
+	if fs.flags.DisableXattr {
+		return -fuse.EOPNOTSUPP, nil
+	}
+
 	if fuseLog.Level == logrus.DebugLevel {
 		fuseLog.Debugf("-> Getxattr %v %v", path, name)
 		defer func() {
@@ -851,6 +861,10 @@ func (fs *GoofysWin) Getxattr(path string, name string) (ret int, data []byte) {
 
 // Removexattr removes extended attributes.
 func (fs *GoofysWin) Removexattr(path string, name string) (ret int) {
+	if fs.flags.DisableXattr {
+		return -fuse.EOPNOTSUPP
+	}
+
 	if fuseLog.Level == logrus.DebugLevel {
 		fuseLog.Debugf("-> Removexattr %v %v", path, name)
 		defer func() {
@@ -871,6 +885,10 @@ func (fs *GoofysWin) Removexattr(path string, name string) (ret int) {
 
 // Listxattr lists extended attributes.
 func (fs *GoofysWin) Listxattr(path string, fill func(name string) bool) (ret int) {
+	if fs.flags.DisableXattr {
+		return -fuse.EOPNOTSUPP
+	}
+
 	if fuseLog.Level == logrus.DebugLevel {
 		fuseLog.Debugf("-> Listxattr %v", path)
 		defer func() {
