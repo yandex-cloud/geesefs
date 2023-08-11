@@ -1,3 +1,9 @@
+geesefs (0.37.2) unstable; urgency=medium
+
+  * Fix files not showing up in MacOS Finder (apart from directories and `ls` in terminal)
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Fri, 11 Aug 2023 14:40:19 +0300
+
 geesefs (0.37.1) unstable; urgency=medium
 
   * Windows bug fixes
