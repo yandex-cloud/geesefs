@@ -700,7 +700,6 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 			return parent, nil
 		}
 	}
-	offset := dh.lastInternalOffset-2
 
 	if expired(dh.inode.dir.DirTime, dh.inode.fs.flags.StatCacheTTL) {
 		err = dh.loadListing()
@@ -712,7 +711,7 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 
 	// Skip stale inodes
 	var notifications []interface{}
-	for i := offset; i < len(parent.dir.Children); i++ {
+	for i := dh.lastInternalOffset-2; i < len(parent.dir.Children); i++ {
 		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
 		childTmp := parent.dir.Children[i]
 		if childTmp.AttrTime.Before(parent.dir.refreshStartTime) &&
@@ -743,7 +742,7 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 	// May be -1 if we remove inodes above
 	dh.checkDirPosition()
 
-	if offset >= len(dh.inode.dir.Children) {
+	if dh.lastInternalOffset-2 >= len(dh.inode.dir.Children) {
 		// we've reached the end
 		parent.dir.listDone = false
 		if parent.dir.forgetDuringList {
@@ -753,7 +752,7 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 		return
 	}
 
-	child := dh.inode.dir.Children[offset]
+	child := dh.inode.dir.Children[dh.lastInternalOffset-2]
 	if dh.inode.dir.lastFromCloud != nil && child.Name == *dh.inode.dir.lastFromCloud {
 		dh.inode.dir.lastFromCloud = nil
 	}
