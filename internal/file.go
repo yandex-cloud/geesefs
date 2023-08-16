@@ -133,6 +133,9 @@ func (inode *Inode) appendBuffer(buf *FileBuffer, data []byte) int64 {
 }
 
 func (inode *Inode) insertOrAppendBuffer(pos int, offset uint64, data []byte, state int16, copyData bool, dataPtr *BufferPointer) int64 {
+	if len(data) == 0 {
+		return 0
+	}
 	allocated := int64(0)
 	dirtyID := uint64(0)
 	if state == BUF_DIRTY {
@@ -324,6 +327,10 @@ func (inode *Inode) removeRange(offset, size uint64, state int16) (allocated int
 }
 
 func (inode *Inode) zeroRange(offset, size uint64) (bool, int64) {
+	if size == 0 {
+		return false, 0
+	}
+
 	// Check if it's already zeroed
 	pos := locateBuffer(inode.buffers, offset)
 	if pos < len(inode.buffers) && inode.buffers[pos].zero &&
@@ -1178,6 +1185,9 @@ func (fh *FileHandle) Release() {
 
 func (inode *Inode) splitBuffer(i int, size uint64) {
 	b := inode.buffers[i]
+	if size == 0 || size >= b.length {
+		return
+	}
 	endBuf := &FileBuffer{
 		offset: b.offset+size,
 		dirtyID: b.dirtyID,
