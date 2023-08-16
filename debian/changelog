@@ -1,3 +1,13 @@
+geesefs (0.37.4) unstable; urgency=medium
+
+  * Fix potential BUG: ModifiedChildren of xxx < 0
+  * Fix parallel inode eviction & listing bug sometimes leading to incorrect listings
+  * Update xfstests
+  * Fix a possible bug where flushing of a file could never finish (detected in xfstests)
+  * Print mount status both on the console and in syslog
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Thu, 17 Aug 2023 00:03:31 +0300
+
 geesefs (0.37.3) unstable; urgency=medium
 
   * Hotfix for the new metadata eviction feature - it could lead to "panic:
