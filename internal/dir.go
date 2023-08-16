@@ -211,7 +211,10 @@ func (inode *Inode) OpenDir() (dh *DirHandle) {
 	dh = NewDirHandle(inode)
 	inode.mu.Lock()
 	inode.dir.handles = append(inode.dir.handles, dh)
-	atomic.AddInt32(&inode.fileHandles, 1)
+	n := atomic.AddInt32(&inode.fileHandles, 1)
+	if n == 1 {
+		inode.Parent.addModified(1)
+	}
 	inode.mu.Unlock()
 	return
 }
@@ -765,7 +768,10 @@ func (dh *DirHandle) CloseDir() error {
 	}
 	if i < len(dh.inode.dir.handles) {
 		dh.inode.dir.handles = append(dh.inode.dir.handles[0 : i], dh.inode.dir.handles[i+1 : ]...)
-		atomic.AddInt32(&dh.inode.fileHandles, -1)
+		n := atomic.AddInt32(&dh.inode.fileHandles, -1)
+		if n == 0 {
+			dh.inode.Parent.addModified(-1)
+		}
 	}
 	dh.inode.mu.Unlock()
 	return nil
@@ -1149,6 +1155,8 @@ func (parent *Inode) CreateOrOpen(name string, open bool) (inode *Inode, fh *Fil
 
 	fh = NewFileHandle(inode)
 	inode.fileHandles = 1
+	// protect directories with open files from eviction
+	parent.addModified(1)
 
 	parent.touch()
 
@@ -1433,7 +1441,7 @@ func (inode *Inode) SetCacheState(state int32) {
 	wasModified := inode.CacheState == ST_CREATED || inode.CacheState == ST_DELETED || inode.CacheState == ST_MODIFIED
 	willBeModified := state == ST_CREATED || state == ST_DELETED || state == ST_MODIFIED
 	atomic.StoreInt32(&inode.CacheState, state)
-	if wasModified != willBeModified && (inode.isDir() || inode.fileHandles == 0) {
+	if wasModified != willBeModified {
 		inc := int64(1)
 		if wasModified {
 			inc = -1
@@ -1654,6 +1662,11 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	}
 	fromInode.Ref()
 	parent.removeChildUnlocked(fromInode)
+	if fromInode.fileHandles > 0 {
+		// Move filehandle modification protection
+		parent.addModified(-1)
+		newParent.addModified(1)
+	}
 	fromInode.Name = to
 	fromInode.Parent = newParent
 	if fromInode.CacheState == ST_CACHED {

@@ -798,7 +798,7 @@ func (inode *Inode) OpenFile() (fh *FileHandle, err error) {
 	fh = NewFileHandle(inode)
 
 	n := atomic.AddInt32(&inode.fileHandles, 1)
-	if n == 1 && inode.CacheState <= ST_DEAD {
+	if n == 1 {
 		// This is done to try to protect directories with open files
 		inode.Parent.addModified(1)
 	}

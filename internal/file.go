@@ -1170,7 +1170,7 @@ func (fh *FileHandle) Release() {
 	if n == -1 {
 		panic(fmt.Sprintf("Released more file handles than acquired, n = %v", n))
 	}
-	if n == 0 && atomic.LoadInt32(&fh.inode.CacheState) <= ST_DEAD {
+	if n == 0 {
 		fh.inode.Parent.addModified(-1)
 	}
 	fh.inode.fs.WakeupFlusher()
