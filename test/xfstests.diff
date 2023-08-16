@@ -1,8 +1,8 @@
 diff --git a/common/config b/common/config
-index 164381b7..88ae95b6 100644
+index 936ac22..0872664 100644
 --- a/common/config
 +++ b/common/config
-@@ -120,8 +120,11 @@ export MKFS_PROG="$(type -P mkfs)"
+@@ -122,8 +122,11 @@ export MKFS_PROG="$(type -P mkfs)"
  export MOUNT_PROG="$(type -P mount)"
  [ "$MOUNT_PROG" = "" ] && _fatal "mount not found"
  
@@ -17,44 +17,15 @@ index 164381b7..88ae95b6 100644
  export FSSTRESS_PROG="./ltp/fsstress"
  [ ! -x $FSSTRESS_PROG ] && _fatal "fsstress not found or executable"
 diff --git a/common/rc b/common/rc
-index 154bc2dd..588ed598 100644
+index 5c4429e..21f0718 100644
 --- a/common/rc
 +++ b/common/rc
-@@ -774,7 +774,7 @@ _scratch_mkfs()
- 	local mkfs_status
+@@ -4545,7 +4545,7 @@ init_rc()
  
- 	case $FSTYP in
--	nfs*|cifs|ceph|overlay|glusterfs|pvfs2|9p|virtiofs)
-+	nfs*|cifs|ceph|fuse.geesefs|overlay|glusterfs|pvfs2|9p|virtiofs)
- 		# unable to re-create this fstyp, just remove all files in
- 		# $SCRATCH_MNT to avoid EEXIST caused by the leftover files
- 		# created in previous runs
-@@ -1601,6 +1601,15 @@ _require_scratch_nocheck()
- 			_notrun "this test requires a valid \$SCRATCH_MNT"
- 		fi
- 		;;
-+	fuse.geesefs)
-+		echo $SCRATCH_DEV | grep -q ":" > /dev/null 2>&1
-+		if [ -z "$SCRATCH_DEV" -o "$?" != "0" ]; then
-+			_notrun "this test requires a valid \$SCRATCH_DEV"
-+		fi
-+		if [ ! -d "$SCRATCH_MNT" ]; then
-+			_notrun "this test requires a valid \$SCRATCH_MNT"
-+		fi
-+		;;
- 	pvfs2)
- 		echo $SCRATCH_DEV | grep -q "://" > /dev/null 2>&1
- 		if [ -z "$SCRATCH_DEV" -o "$?" != "0" ]; then
-@@ -1798,6 +1807,12 @@ _require_test()
- 			_notrun "this test requires a valid \$TEST_DIR"
- 		fi
- 		;;
-+	fuse*)
-+		if [ ! -d "$TEST_DIR" ]
-+		then
-+		     _notrun "this test requires a valid \$TEST_DIR"
-+		fi
-+		;;
- 	*)
- 		 if [ -z "$TEST_DEV" ] || [ "`_is_block_dev "$TEST_DEV"`" = "" ]
- 		 then
+ 	# Sanity check that TEST partition is not mounted at another mount point
+ 	# or as another fs type
+-	_check_mounted_on TEST_DEV $TEST_DEV TEST_DIR $TEST_DIR $FSTYP || exit 1
++	_check_mounted_on TEST_DEV $TEST_DEV TEST_DIR $TEST_DIR $FSTYP$FUSE_SUBTYP || exit 1
+ 	if [ -n "$SCRATCH_DEV" ]; then
+ 		# Sanity check that SCRATCH partition is not mounted at another
+ 		# mount point, because it is about to be unmounted and formatted.

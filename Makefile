@@ -7,7 +7,7 @@ run-xfstests: s3proxy.jar xfstests
 	./test/run-xfstests.sh
 
 xfstests:
-	git clone --depth=1 -b v2023.01.01 https://github.com/kdave/xfstests
+	git clone --depth=1 https://github.com/kdave/xfstests
 	cd xfstests && patch -p1 -l < ../test/xfstests.diff
 
 s3proxy.jar:
