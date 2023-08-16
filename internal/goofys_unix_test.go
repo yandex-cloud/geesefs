@@ -575,6 +575,9 @@ func (s *GoofysTest) testNotifyRefresh(t *C, testInSubdir bool, testRefreshDir b
 	err = xattr.Set(refreshFile, ".invalidate", []byte(""))
 	t.Assert(err, IsNil)
 
+	// Refresh is done asynchronously (it needs kernel locks), so wait a bit
+	time.Sleep(500 * time.Millisecond)
+
 	_, err = os.Open(testdir+"/testnotify")
 	t.Assert(os.IsNotExist(err), Equals, true)
 
