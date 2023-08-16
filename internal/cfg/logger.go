@@ -30,7 +30,7 @@ var loggers = make(map[string]*LogHandle)
 
 var log = GetLogger("main")
 var cloudLogLevel = logrus.InfoLevel
-var appendTime bool
+var appendTime bool = true
 
 func initFileLoggers(logFile string) {
 	if logFile != "stderr" && logFile != "/dev/stderr" && logFile != "" {
@@ -41,6 +41,11 @@ func initFileLoggers(logFile string) {
 		}
 		for _, l := range loggers {
 			l.Out = file
+		}
+		err = redirectStdout(file)
+		if err != nil {
+			log.Errorf("Couldn't redirect STDOUT to the log file %v", logFile)
+			return
 		}
 		err = redirectStderr(file)
 		if err != nil {

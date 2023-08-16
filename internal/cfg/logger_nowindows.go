@@ -40,6 +40,7 @@ func InitLoggers(logFile string) {
 		for _, l := range loggers {
 			l.Hooks.Add(syslogHook)
 		}
+		appendTime = false
 	} else {
 		initFileLoggers(logFile)
 	}

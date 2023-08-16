@@ -19,6 +19,14 @@ import (
 	"os"
 )
 
+func redirectStdout(target *os.File) error {
+	err := windows.SetStdHandle(windows.STD_OUTPUT_HANDLE, windows.Handle(target.Fd()))
+	if err == nil {
+		os.Stdout = target
+	}
+	return err
+}
+
 func redirectStderr(target *os.File) error {
 	err := windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(target.Fd()))
 	if err == nil {

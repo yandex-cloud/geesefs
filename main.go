@@ -100,21 +100,27 @@ func main() {
 		if !canDaemonize {
 			flags.Foreground = true
 		}
-		if flags.LogFile == "" {
+		logFile := flags.LogFile
+		if logFile == "" {
 			if flags.Foreground {
-				flags.LogFile = "stderr"
+				logFile = "stderr"
 			} else {
-				flags.LogFile = "syslog"
+				logFile = "syslog"
 			}
 		}
 		if !flags.Foreground {
 			daemonizer = NewDaemonizer()
-			err := daemonizer.Daemonize(flags.LogFile)
+			// Do not close stderr before mounting to print mount errors
+			initLogFile := logFile
+			if initLogFile == "syslog" {
+				initLogFile = "stderr"
+			}
+			err := daemonizer.Daemonize(initLogFile)
 			if err != nil {
 				return err
 			}
 		}
-		cfg.InitLoggers(flags.LogFile)
+		cfg.InitLoggers(logFile)
 
 		pprof := flags.PProf
 		if pprof == "" && os.Getenv("PPROF") != "" {
@@ -143,10 +149,12 @@ func main() {
 			log.Fatalf("Mounting file system: %v", err)
 			// fatal also terminates itself
 		} else {
+			log.Println("File system has been successfully mounted.")
 			if !flags.Foreground {
 				daemonizer.NotifySuccess(true)
+				os.Stderr.Close()
+				os.Stdout.Close()
 			}
-			log.Println("File system has been successfully mounted.")
 			// Let the user unmount with Ctrl-C (SIGINT)
 			registerSIGINTHandler(fs, mfs, flags)
 

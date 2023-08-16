@@ -19,6 +19,10 @@ import (
 	"syscall"
 )
 
+func redirectStdout(target *os.File) error {
+	return syscall.Dup3(int(target.Fd()), int(os.Stdout.Fd()), 0)
+}
+
 func redirectStderr(target *os.File) error {
 	return syscall.Dup3(int(target.Fd()), int(os.Stderr.Fd()), 0)
 }
