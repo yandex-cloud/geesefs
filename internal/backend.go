@@ -148,6 +148,22 @@ type PutBlobOutput struct {
 	RequestId string
 }
 
+type PatchBlobInput struct {
+	Key            string
+	Offset         uint64
+	Size           uint64
+	AppendPartSize int64
+
+	Body io.ReadSeeker
+}
+
+type PatchBlobOutput struct {
+	ETag         *string
+	LastModified *time.Time
+
+	RequestId string
+}
+
 type MultipartBlobBeginInput struct {
 	Key         string
 	Metadata    map[string]*string
@@ -247,6 +263,7 @@ type StorageBackend interface {
 	CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error)
 	GetBlob(param *GetBlobInput) (*GetBlobOutput, error)
 	PutBlob(param *PutBlobInput) (*PutBlobOutput, error)
+	PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error)
 	MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlobCommitInput, error)
 	MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error)
 	MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error)
@@ -383,6 +400,11 @@ func (s *StorageBackendInitWrapper) PutBlob(param *PutBlobInput) (*PutBlobOutput
 	return s.StorageBackend.PutBlob(param)
 }
 
+func (s *StorageBackendInitWrapper) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
+	s.Init("")
+	return s.StorageBackend.PatchBlob(param)
+}
+
 func (s *StorageBackendInitWrapper) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlobCommitInput, error) {
 	s.Init("")
 	return s.StorageBackend.MultipartBlobBegin(param)
@@ -512,6 +534,10 @@ func (e StorageBackendInitError) GetBlob(param *GetBlobInput) (*GetBlobOutput, e
 }
 
 func (e StorageBackendInitError) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
+	return nil, e
+}
+
+func (e StorageBackendInitError) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
 	return nil, e
 }
 

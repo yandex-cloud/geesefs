@@ -17,6 +17,7 @@ package internal
 
 import (
 	"github.com/yandex-cloud/geesefs/internal/cfg"
+	"golang.org/x/sync/errgroup"
 
 	"encoding/json"
 	"errors"
@@ -628,11 +629,7 @@ func (s *S3Backend) RenameBlob(param *RenameBlobInput) (*RenameBlobOutput, error
 	return nil, syscall.ENOTSUP
 }
 
-func (s *S3Backend) mpuCopyPart(from string, to string, mpuId string, bytes string, part int64,
-	sem semaphore, srcEtag *string, etag **string, errout *error) {
-
-	defer sem.P(1)
-
+func (s *S3Backend) mpuCopyPart(from string, to string, mpuId string, bytes string, part int64, srcEtag *string) (*string, error) {
 	// XXX use CopySourceIfUnmodifiedSince to ensure that
 	// we are copying from the same object
 	params := &s3.UploadPartCopyInput{
@@ -658,62 +655,68 @@ func (s *S3Backend) mpuCopyPart(from string, to string, mpuId string, bytes stri
 	resp, err := s.UploadPartCopy(params)
 	if err != nil {
 		s3Log.Errorf("UploadPartCopy %v = %v", params, err)
-		*errout = err
-		return
+		return nil, err
 	}
-
-	*etag = resp.CopyPartResult.ETag
-	return
+	return resp.CopyPartResult.ETag, nil
 }
 
-func sizeToParts(size int64) (int, int64) {
-	const MAX_S3_MPU_SIZE = 5 * 1024 * 1024 * 1024 * 1024
-	if size > MAX_S3_MPU_SIZE {
-		panic(fmt.Sprintf("object size: %v exceeds maximum S3 MPU size: %v", size, MAX_S3_MPU_SIZE))
-	}
-
-	// Use the maximum number of parts to allow the most server-side copy parallelism.
-	const MAX_PARTS = 10000
-	const MIN_PART_SIZE = 50 * 1024 * 1024
-	partSize := MaxInt64(size/(MAX_PARTS-1), MIN_PART_SIZE)
-
-	nParts := int(size / partSize)
-	if size%partSize != 0 {
-		nParts++
-	}
-
-	return nParts, partSize
-}
-
-func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId string,
-	srcEtag *string, etags []*string, partSize int64, err *error) {
-
-	rangeFrom := int64(0)
-	rangeTo := int64(0)
-
-	MAX_CONCURRENCY := MinInt(100, len(etags))
-	sem := make(semaphore, MAX_CONCURRENCY)
-	sem.P(MAX_CONCURRENCY)
-
-	for i := int64(1); rangeTo < size; i++ {
-		rangeFrom = rangeTo
-		rangeTo = i * partSize
-		if rangeTo > size {
-			rangeTo = size
+func (s *S3Backend) partsRequired(size int64) int {
+	var partsRequired int
+	for _, cfg := range s.flags.PartSizes {
+		totalSize := int64(cfg.PartCount * cfg.PartSize)
+		if totalSize >= size {
+			partsRequired += int((size + int64(cfg.PartSize) - 1) / int64(cfg.PartSize))
+			break
 		}
-		bytes := fmt.Sprintf("bytes=%v-%v", rangeFrom, rangeTo-1)
-
-		sem.V(1)
-		go s.mpuCopyPart(from, to, mpuId, bytes, i, sem, srcEtag, &etags[i-1], err)
+		partsRequired += int(cfg.PartCount)
+		size -= int64(totalSize)
 	}
+	return partsRequired
+}
 
-	sem.V(MAX_CONCURRENCY)
+func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId string, srcEtag *string) ([]*s3.CompletedPart, error) {
+	parts := make([]*s3.CompletedPart, s.partsRequired(size))
+
+	wg := errgroup.Group{}
+	wg.SetLimit(MinInt(128, len(parts)))
+
+	var (
+		startOffset int64
+		partIdx     int
+	)
+
+	for _, cfg := range s.flags.PartSizes {
+		for i := 0; i < int(cfg.PartCount) && startOffset < size; i++ {
+			endOffset := MinInt64(startOffset+int64(cfg.PartSize), size)
+			bytes := fmt.Sprintf("bytes=%v-%v", startOffset, endOffset-1)
+
+			partNum := int64(partIdx + 1)
+			wg.Go(func() error {
+				etag, err := s.mpuCopyPart(from, to, mpuId, bytes, partNum, srcEtag)
+				if err != nil {
+					return err
+				}
+				parts[partNum-1] = &s3.CompletedPart{
+					ETag:       etag,
+					PartNumber: &partNum,
+				}
+				return nil
+			})
+
+			partIdx++
+			startOffset += int64(cfg.PartSize)
+		}
+	}
+	return parts, wg.Wait()
 }
 
 func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuId string,
 	srcEtag *string, metadata map[string]*string, storageClass *string) (requestId string, err error) {
-	nParts, partSize := sizeToParts(size)
-	etags := make([]*string, nParts)
+
+	const MAX_S3_MPU_SIZE = 5 * 1024 * 1024 * 1024 * 1024
+	if size > MAX_S3_MPU_SIZE {
+		panic(fmt.Sprintf("object size: %v exceeds maximum S3 MPU size: %v", size, MAX_S3_MPU_SIZE))
+	}
 
 	if mpuId == "" {
 		params := &s3.CreateMultipartUploadInput{
@@ -747,37 +750,28 @@ func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuI
 		mpuId = *resp.UploadId
 	}
 
-	s.mpuCopyParts(size, from, to, mpuId, srcEtag, etags, partSize, &err)
-
+	parts, err := s.mpuCopyParts(size, from, to, mpuId, srcEtag)
 	if err != nil {
 		return
+	}
+
+	params := &s3.CompleteMultipartUploadInput{
+		Bucket:   &s.bucket,
+		Key:      &to,
+		UploadId: &mpuId,
+		MultipartUpload: &s3.CompletedMultipartUpload{
+			Parts: parts,
+		},
+	}
+
+	s3Log.Debug(params)
+
+	req, _ := s.CompleteMultipartUploadRequest(params)
+	err = req.Send()
+	if err != nil {
+		s3Log.Errorf("Complete MPU %v = %v", params, err)
 	} else {
-		parts := make([]*s3.CompletedPart, nParts)
-		for i := 0; i < nParts; i++ {
-			parts[i] = &s3.CompletedPart{
-				ETag:       etags[i],
-				PartNumber: aws.Int64(int64(i + 1)),
-			}
-		}
-
-		params := &s3.CompleteMultipartUploadInput{
-			Bucket:   &s.bucket,
-			Key:      &to,
-			UploadId: &mpuId,
-			MultipartUpload: &s3.CompletedMultipartUpload{
-				Parts: parts,
-			},
-		}
-
-		s3Log.Debug(params)
-
-		req, _ := s.CompleteMultipartUploadRequest(params)
-		err = req.Send()
-		if err != nil {
-			s3Log.Errorf("Complete MPU %v = %v", params, err)
-		} else {
-			requestId = s.getRequestId(req)
-		}
+		requestId = s.getRequestId(req)
 	}
 
 	return
@@ -971,6 +965,35 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 		ETag:         resp.ETag,
 		LastModified: getDate(req.HTTPResponse),
 		StorageClass: &storageClass,
+		RequestId:    s.getRequestId(req),
+	}, nil
+}
+
+func (s *S3Backend) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
+	patch := &s3.PatchObjectInput{
+		Bucket:       &s.bucket,
+		Key:          &param.Key,
+		ContentRange: PString(fmt.Sprintf("bytes=%d-%d", param.Offset, param.Offset+param.Size-1)),
+		Body:         param.Body,
+	}
+	if param.AppendPartSize > 0 {
+		patch.PatchAppendPartSize = &param.AppendPartSize
+	}
+
+	req, resp := s.PatchObjectRequest(patch)
+	err := req.Send()
+	if err != nil {
+		if awsErr, ok := err.(awserr.Error); ok {
+			if awsErr.Code() == "NotImplemented" {
+				return nil, syscall.ENOSYS
+			}
+		}
+		return nil, err
+	}
+
+	return &PatchBlobOutput{
+		ETag:         resp.ETag,
+		LastModified: resp.LastModified,
 		RequestId:    s.getRequestId(req),
 	}, nil
 }
@@ -1193,9 +1216,10 @@ func (s *S3Backend) MakeBucket(param *MakeBucketInput) (*MakeBucketOutput, error
 		for i := 0; i < 10; i++ {
 			_, err = s.PutBucketTagging(&param)
 			code := mapAwsError(err)
-			switch code {
-			case nil:
+			if code == nil {
 				break
+			}
+			switch code {
 			case syscall.ENXIO, syscall.EINTR:
 				s3Log.Infof("waiting for bucket")
 				time.Sleep((time.Duration(i) + 1) * 2 * time.Second)
