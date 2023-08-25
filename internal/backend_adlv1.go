@@ -505,6 +505,10 @@ func (b *ADLv1) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	return &PutBlobOutput{}, nil
 }
 
+func (s *ADLv1) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
+	return nil, syscall.ENOSYS
+}
+
 func (b *ADLv1) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlobCommitInput, error) {
 	// ADLv1 doesn't have the concept of atomic replacement which
 	// means that when we replace an object, readers may see

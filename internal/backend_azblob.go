@@ -809,6 +809,10 @@ func (b *AZBlob) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	}, nil
 }
 
+func (s *AZBlob) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
+	return nil, syscall.ENOSYS
+}
+
 func (b *AZBlob) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlobCommitInput, error) {
 	// we can have up to 50K parts, so %05d should be sufficient
 	uploadId := uuid.New().String() + "::%05d"

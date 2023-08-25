@@ -718,6 +718,10 @@ func (b *ADLv2) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	}
 }
 
+func (s *ADLv2) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
+	return nil, syscall.ENOSYS
+}
+
 // adlv2 doesn't have atomic multipart upload, instead we will hold a
 // lease, replace the object, then release the lease
 func (b *ADLv2) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlobCommitInput, error) {

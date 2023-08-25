@@ -155,3 +155,7 @@ func (s *GCS3) DeleteBlobs(param *DeleteBlobsInput) (*DeleteBlobsOutput, error) 
 func (s *GCS3) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
 	return nil, syscall.ENOSYS
 }
+
+func (s *GCS3) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
+	return nil, syscall.ENOSYS
+}

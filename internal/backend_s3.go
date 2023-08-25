@@ -1059,6 +1059,35 @@ func (s *S3Backend) selectStorageClass(size *uint64) *string {
 	return &storageClass
 }
 
+func (s *S3Backend) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
+	patch := &s3.PatchObjectInput{
+		Bucket:       &s.bucket,
+		Key:          &param.Key,
+		ContentRange: PString(fmt.Sprintf("bytes=%d-%d", param.Offset, param.Offset+param.Size-1)),
+		Body:         param.Body,
+	}
+	if param.AppendPartSize > 0 {
+		patch.PatchAppendPartSize = &param.AppendPartSize
+	}
+
+	req, resp := s.PatchObjectRequest(patch)
+	err := req.Send()
+	if err != nil {
+		if awsErr, ok := err.(awserr.Error); ok {
+			if awsErr.Code() == "NotImplemented" {
+				return nil, syscall.ENOSYS
+			}
+		}
+		return nil, err
+	}
+
+	return &PatchBlobOutput{
+		ETag:         resp.ETag,
+		LastModified: resp.LastModified,
+		RequestId:    s.getRequestId(req),
+	}, nil
+}
+
 func (s *S3Backend) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlobCommitInput, error) {
 	mpu := s3.CreateMultipartUploadInput{
 		Bucket:       &s.bucket,
