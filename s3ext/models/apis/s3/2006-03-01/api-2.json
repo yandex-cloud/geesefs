@@ -675,6 +675,15 @@
       "output":{"shape":"ListPartsOutput"},
       "documentationUrl":"http://docs.amazonwebservices.com/AmazonS3/latest/API/mpUploadListParts.html"
     },
+    "PatchObject":{
+      "name":"PatchObject",
+      "http":{
+        "method":"PATCH",
+        "requestUri":"/{Bucket}/{Key+}"
+      },
+      "input":{"shape":"PatchObjectRequest"},
+      "output":{"shape":"PatchObjectOutput"}
+    },
     "PutBucketAccelerateConfiguration":{
       "name":"PutBucketAccelerateConfiguration",
       "http":{
@@ -5303,6 +5312,79 @@
       "flattened":true
     },
     "PartsCount":{"type":"integer"},
+    "PatchAppendPartSize":{"type": "integer"},
+    "PatchObjectOutput":{
+      "type":"structure",
+      "members":{
+        "ETag":{"shape":"ETag"},
+        "LastModified":{"shape":"LastModified"}
+      }
+    },
+    "PatchObjectRequest":{
+      "type":"structure",
+      "required":[
+        "Bucket",
+        "Key",
+        "Range"
+      ],
+      "members":{
+        "Body":{
+          "shape":"Body",
+          "streaming":true
+        },
+        "Bucket":{
+          "shape":"BucketName",
+          "location":"uri",
+          "locationName":"Bucket"
+        },
+        "ContentLength":{
+          "shape":"ContentLength",
+          "location":"header",
+          "locationName":"Content-Length"
+        },
+        "ContentMD5":{
+          "shape":"ContentMD5",
+          "location":"header",
+          "locationName":"Content-MD5"
+        },
+        "ContentRange":{
+          "shape":"ContentRange",
+          "location":"header",
+          "locationName":"Content-Range"
+        },
+        "IfMatch":{
+          "shape":"IfMatch",
+          "location":"header",
+          "locationName":"If-Match"
+        },
+        "IfModifiedSince":{
+          "shape":"IfModifiedSince",
+          "location":"header",
+          "locationName":"If-Modified-Since"
+        },
+        "IfNoneMatch":{
+          "shape":"IfNoneMatch",
+          "location":"header",
+          "locationName":"If-None-Match"
+        },
+        "IfUnmodifiedSince":{
+          "shape":"IfUnmodifiedSince",
+          "location":"header",
+          "locationName":"If-Unmodified-Since"
+        },
+        "Key":{
+          "shape":"ObjectKey",
+          "location":"uri",
+          "locationName":"Key"
+        },
+        "PatchAppendPartSize":{
+          "shape":"PatchAppendPartSize",
+          "location":"header",
+          "locationName":"X-Yc-S3-Patch-Append-Part-Size"
+        }
+      },
+      "payload":"Body"
+    },
     "Payer":{
       "type":"string",
       "enum":[
