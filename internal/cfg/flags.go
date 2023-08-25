@@ -401,6 +401,16 @@ MISC OPTIONS:
 				" and then 125 MB for the rest of parts",
 		},
 
+		cli.BoolFlag{
+			Name:  "enable-patch",
+			Usage: "Use PATCH method to upload object data changes to s3. Yandex only. (default: off)",
+		},
+
+		cli.BoolFlag{
+			Name:  "drop-patch-conflicts",
+			Usage: "Drop local changes in case of conflicting concurrent PATCH updates. (default: off)",
+		},
+
 		cli.IntFlag{
 			Name:  "max-merge-copy",
 			Value: 0,
@@ -823,6 +833,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		CachePath:              c.String("cache"),
 		MaxDiskCacheFD:         int64(c.Int("max-disk-cache-fd")),
 		CacheFileMode:          os.FileMode(c.Int("cache-file-mode")),
+		UsePatch:               c.Bool("enable-patch"),
+		DropPatchConflicts:     c.Bool("drop-patch-conflicts"),
 
 		// Common Backend Config
 		Endpoint:               c.String("endpoint"),
@@ -886,7 +898,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 			panic("Unknown --iam-flavor: "+config.IAMFlavor)
 		}
 		listType := c.String("list-type")
-		isYandex := strings.Index(flags.Endpoint, "yandex") != -1
+		isYandex := strings.Contains(flags.Endpoint, "yandex")
 		if isYandex && !c.IsSet("no-specials") {
 			flags.EnableSpecials = true
 		}
