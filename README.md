@@ -75,6 +75,7 @@ See also [Common Issues](#common-issues).
 | No readahead on random read    |    +    |    -   |    +   |   -  |    +    |
 | Server-side copy on append     |    +    |    -   |    -   |   *  |    +    |
 | Server-side copy on update     |    +    |    -   |    -   |   *  |    -    |
+| Partial object updates         |    +*   |    -   |    -   |   -  |    -    |
 | xattrs without extra RTT       |    +*   |    -   |    -   |   -  |    +    |
 | Dir preload on file lookup     |    +    |    -   |    -   |   -  |    -    |
 | Fast recursive listings        |    +    |    -   |    *   |   -  |    +    |
@@ -91,6 +92,21 @@ See also [Common Issues](#common-issues).
 \* rclone mount has VFS cache, but it can only cache whole files. And it's also buggy - it often hangs on write.
 
 \* xattrs without extra RTT only work with Yandex S3 (--list-type=ext-v1).
+
+\* Partial object updates only work with Yandex S3.
+
+## Partial object updates
+
+With Yandex S3 it is possible to do partial object updates (data only) without server-side copy or reupload. 
+Currently the feature can be enabled by the flag `--enable-patch` and will be enabled by default for YC S3 in the future.
+
+Enabling patch uploads has the following benefits:
+- Fast [fsync](#fsync): since nothing needs to be copied, fsync is now much cheaper
+- Support for [concurrent updates](#concurrent-updates)
+- Better memory utilization: less intermediate state needs to be cached, so more memory can be used for (meta)data cache
+- Better performace for big files
+
+Note: new files, metadata changes and renames are still flushed to S3 as multipart uploads.
 
 # Installation
 
@@ -214,6 +230,25 @@ fio -name=test -ioengine=libaio -direct=1 -bs=4M -iodepth=1 -fallocate=none \
 ```
 
 ## Concurrent Updates
+
+### Yandex S3
+
+When using Yandex S3, it is possible to concurrently update a single object/file from multiple hosts
+using PATCH method (`--enable-patch`). However, concurrent changes are not reported back to the clients,
+so in order to see the actual object contents you need to stop all writes and refresh the inode cache (see below).
+
+It is strongly advised that clients from different hosts write data by non-overlapping offsets and
+the writes are aligned with object parts borders to avoid conflicts. If it impossible to avoid conflicts entirely,
+the conflicts are resolved by the LWW strategy. In case the conflict can't be resolved,
+you can choose to drop the cached update (`--drop-patch-conflicts`), otherwise the write will be retried later.
+
+The conflicts are reported in the log as following:
+
+```
+main.WARNING Failed to patch range %d-%d of file %s (inode %d) due to concurrent updates
+```
+
+### Other clouds
 
 GeeseFS doesn't support concurrent updates of the same file from multiple hosts. If you try to
 do that you should guarantee that one host calls `fsync()` on the modified file and then waits
