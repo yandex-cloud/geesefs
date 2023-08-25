@@ -30,7 +30,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-const GEESEFS_VERSION = "0.37.4"
+const GEESEFS_VERSION = "0.38.0"
 
 var flagCategories map[string]string
 
@@ -392,7 +392,7 @@ MISC OPTIONS:
 
 		cli.BoolFlag{
 			Name:  "enable-patch",
-			Usage: "Use PATCH method to upload object data changes to s3. Yandex only. (default: on for Yandex, off for others)",
+			Usage: "Use PATCH method to upload object data changes to s3. Yandex only. (default: off)",
 		},
 
 		cli.BoolFlag{
@@ -854,9 +854,6 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		isYandex := strings.Contains(flags.Endpoint, "yandex")
 		if isYandex && !c.IsSet("no-specials") {
 			flags.EnableSpecials = true
-		}
-		if isYandex && !c.IsSet("enable-patch") {
-			flags.UsePatch = true
 		}
 		if listType == "" {
 			if isYandex {

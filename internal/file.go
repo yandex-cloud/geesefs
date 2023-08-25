@@ -1802,7 +1802,7 @@ func (inode *Inode) patchFromBuffers(bufs []*FileBuffer) {
 	}
 	contiguous := bufsSize == size
 
-	// If bufs is a contiguous range of buffers than we can send them as PATCH immideately,
+	// If bufs is a contiguous range of buffers then we can send them as PATCH immideately,
 	// otherwise we need to read missing ranges first.
 	var reader io.ReadSeeker
 	if contiguous {
@@ -1899,7 +1899,7 @@ func (inode *Inode) sendPatch(offset, size uint64, r io.ReadSeeker) bool {
 
 func (inode *Inode) discardChanges(offset, size uint64) {
 	allocated := inode.removeRange(offset, size, BUF_DIRTY)
-	inode.fs.bufferPool.Use(-allocated, true)
+	inode.fs.bufferPool.Use(allocated, true)
 }
 
 func (inode *Inode) isStillDirty() bool {
