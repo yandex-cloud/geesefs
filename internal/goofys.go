@@ -34,8 +34,9 @@ import (
 
 	"github.com/jacobsa/fuse/fuseops"
 
-	"github.com/sirupsen/logrus"
 	"net/http"
+
+	"github.com/sirupsen/logrus"
 )
 
 // goofys is a Filey System written in Go. All the backend data is
@@ -1073,6 +1074,8 @@ func mapAwsError(err error) error {
 			return syscall.ENXIO
 		case "BucketAlreadyOwnedByYou":
 			return syscall.EEXIST
+		case "ConcurrentUpdatesPatchConflict", "ObjectVersionPatchConflict":
+			return syscall.EBUSY
 		}
 
 		if reqErr, ok := err.(awserr.RequestFailure); ok {

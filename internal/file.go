@@ -21,6 +21,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -1513,7 +1514,25 @@ func (inode *Inode) SendUpload() bool {
 		}
 	}
 
-	if inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024 && inode.mpu == nil {
+	if inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
+		return false
+	}
+
+	smallFile := inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024
+	canPatch := inode.fs.flags.UsePatch &&
+		// Can only patch modified inodes with completed MPUs.
+		inode.CacheState == ST_MODIFIED && inode.mpu == nil &&
+		// In current implemetation we should not patch big simple objects. Reupload them as multiparts first.
+		// If current ETag is unknown, try patching anyway, so that we don't trigger an unecessary mpu.
+		(inode.uploadedAsMultipart() || inode.knownETag == "" || smallFile) &&
+		// Currently PATCH does not support truncates. If the file was truncated, reupload it.
+		inode.knownSize <= inode.Attributes.Size
+
+	if canPatch {
+		return inode.patchObjectRanges()
+	}
+
+	if smallFile && inode.mpu == nil {
 		// Don't flush small files with active file handles (if not under memory pressure)
 		if inode.IsFlushing == 0 && (inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0) {
 			// Don't accidentally trigger a parallel multipart flush
@@ -1522,10 +1541,6 @@ func (inode *Inode) SendUpload() bool {
 			go inode.FlushSmallObject()
 			return true
 		}
-		return false
-	}
-
-	if inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
 		return false
 	}
 
@@ -1658,6 +1673,233 @@ func (inode *Inode) SendUpload() bool {
 	}
 
 	return initiated
+}
+
+func (inode *Inode) uploadedAsMultipart() bool {
+	return strings.Contains(inode.knownETag, "-")
+}
+
+func (inode *Inode) patchObjectRanges() (initiated bool) {
+	smallFile := inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024
+	wantFlush := inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0
+
+	if smallFile && wantFlush {
+		var flushBufs []*FileBuffer
+		for _, buf := range inode.buffers {
+			if buf.state == BUF_DIRTY {
+				flushBufs = append(flushBufs, buf)
+			}
+		}
+		inode.patchSimpleObj(flushBufs)
+		return true
+	}
+
+	tailPart := inode.fs.partNum(inode.knownSize)
+	updatedPart := inode.fs.partNum(inode.lastWriteEnd)
+
+	// In its current implementation PATCH doesn't support ranges with start offset larger than object size.
+	for part := uint64(0); part <= tailPart; part++ {
+		partStart, partSize := inode.fs.partRange(part)
+		partEnd := partStart + partSize
+
+		smallTail := part == tailPart && inode.Attributes.Size-partStart < partSize
+		if smallTail && !wantFlush {
+			return
+		}
+
+		partLocked := inode.IsRangeLocked(partStart, partEnd, true)
+		if !wantFlush && part == updatedPart || partLocked {
+			continue
+		}
+
+		var flushBufs []*FileBuffer
+		for pos := locateBuffer(inode.buffers, partStart); pos < len(inode.buffers); pos++ {
+			buf := inode.buffers[pos]
+			if buf.offset >= partEnd {
+				break
+			}
+			if buf.state != BUF_DIRTY || buf.zero && !wantFlush && part != tailPart {
+				continue
+			}
+
+			if buf.offset < partStart {
+				inode.splitBuffer(pos, partStart-buf.offset)
+				continue
+			}
+			if buf.offset+buf.length > partEnd {
+				inode.splitBuffer(pos, partEnd-buf.offset)
+			}
+
+			flushBufs = append(flushBufs, buf)
+		}
+
+		if len(flushBufs) != 0 {
+			inode.patchPart(part, flushBufs)
+			initiated = true
+		}
+
+		if inode.flushLimitsExceeded() {
+			return
+		}
+	}
+	return
+}
+
+func (inode *Inode) flushLimitsExceeded() bool {
+	return atomic.LoadInt64(&inode.fs.activeFlushers) >= inode.fs.flags.MaxFlushers ||
+		inode.IsFlushing >= inode.fs.flags.MaxParallelParts
+}
+
+func (inode *Inode) patchSimpleObj(bufs []*FileBuffer) {
+	inode.LockRange(0, inode.Attributes.Size, true)
+	inode.IsFlushing += inode.fs.flags.MaxParallelParts
+	atomic.AddInt64(&inode.fs.activeFlushers, 1)
+
+	go func() {
+		inode.mu.Lock()
+		inode.patchFromBuffers(bufs)
+
+		inode.UnlockRange(0, inode.Attributes.Size, true)
+		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+		inode.mu.Unlock()
+
+		atomic.AddInt64(&inode.fs.activeFlushers, -1)
+		inode.fs.WakeupFlusher()
+	}()
+}
+
+func (inode *Inode) patchPart(partNum uint64, bufs []*FileBuffer) {
+	partOffset, partSize := inode.fs.partRange(partNum)
+
+	inode.LockRange(partOffset, partSize, true)
+	inode.IsFlushing++
+	atomic.AddInt64(&inode.fs.activeFlushers, 1)
+
+	go func() {
+		inode.mu.Lock()
+		inode.patchFromBuffers(bufs)
+
+		inode.UnlockRange(partOffset, partSize, true)
+		inode.IsFlushing--
+		inode.mu.Unlock()
+
+		atomic.AddInt64(&inode.fs.activeFlushers, -1)
+		inode.fs.WakeupFlusher()
+	}()
+}
+
+func (inode *Inode) patchFromBuffers(bufs []*FileBuffer) {
+	if len(bufs) == 0 {
+		return
+	}
+
+	first, last := bufs[0], bufs[len(bufs)-1]
+	offset, size := first.offset, last.offset+last.length-first.offset
+
+	var bufsSize uint64
+	for _, b := range bufs {
+		bufsSize += b.length
+	}
+	contiguous := bufsSize == size
+
+	// If bufs is a contiguous range of buffers than we can send them as PATCH immideately,
+	// otherwise we need to read missing ranges first.
+	var reader io.ReadSeeker
+	if contiguous {
+		r := NewMultiReader()
+		for _, buf := range bufs {
+			if !buf.zero {
+				r.AddBuffer(buf.data)
+			} else {
+				r.AddZero(buf.length)
+			}
+		}
+		reader = r
+	} else {
+		key := inode.FullName()
+		_, err := inode.LoadRange(offset, size, 0, true)
+		if err != nil {
+			switch mapAwsError(err) {
+			case syscall.ENOENT, syscall.ERANGE:
+				s3Log.Warnf("File %s (inode %d) is deleted or resized remotely, discarding all local changes", key, inode.Id)
+				inode.resetCache()
+			default:
+				log.Errorf("Failed to load range %d-%d of file %s (inode %d) to patch it: %s", offset, offset+size, key, inode.Id, err)
+			}
+			return
+		}
+		// File size or inode state may have been changed again, abort patch. These are local changes,
+		// so we don't need to drop any cached state here.
+		if inode.Attributes.Size < offset || inode.CacheState != ST_MODIFIED {
+			log.Warnf("Local state of file %s (inode %d) changed, aborting patch", key, inode.Id)
+			return
+		}
+		reader, _ = inode.GetMultiReader(offset, size)
+	}
+
+	if ok := inode.sendPatch(offset, size, reader); !ok {
+		return
+	}
+
+	for _, b := range bufs {
+		b.state, b.dirtyID = BUF_CLEAN, 0
+	}
+	if !inode.isStillDirty() {
+		inode.SetCacheState(ST_CACHED)
+	}
+}
+
+func (inode *Inode) sendPatch(offset, size uint64, r io.ReadSeeker) bool {
+	_, partSize := inode.fs.partRange(inode.fs.partNum(offset))
+	cloud, key := inode.cloud()
+	if inode.oldParent != nil {
+		_, key = inode.oldParent.cloud()
+		key = appendChildName(key, inode.oldName)
+	}
+	log.Debugf("Patching range %d-%d of file %s (inode %d)", offset, offset+size, key, inode.Id)
+
+	inode.mu.Unlock()
+	inode.fs.addInflightChange(key)
+	resp, err := cloud.PatchBlob(&PatchBlobInput{
+		Key:            key,
+		Offset:         offset,
+		Size:           size,
+		AppendPartSize: int64(partSize),
+		Body:           r,
+	})
+	inode.fs.completeInflightChange(key)
+	inode.mu.Lock()
+
+	// File was deleted while we were flushing it
+	if inode.CacheState == ST_DELETED {
+		return false
+	}
+
+	inode.recordFlushError(err)
+	if err != nil {
+		switch mapAwsError(err) {
+		case syscall.ENOENT, syscall.ERANGE:
+			s3Log.Warnf("File %s (inode %d) is deleted or resized remotely, discarding all local changes", key, inode.Id)
+			inode.resetCache()
+		case syscall.EBUSY:
+			s3Log.Warnf("Failed to patch range %d-%d of file %s (inode %d) due to concurrent updates", offset, offset+size, key, inode.Id)
+			if inode.fs.flags.DropPatchConflicts {
+				inode.discardChanges(offset, size)
+			}
+		default:
+			log.Errorf("Failed to patch range %d-%d of file %s (inode %d): %s", offset, offset+size, key, inode.Id, err)
+		}
+		return false
+	}
+
+	log.Debugf("Succesfully patched range %d-%d of file %s (inode %d), etag: %s", offset, offset+size, key, inode.Id, NilStr(resp.ETag))
+	inode.updateFromFlush(MaxUInt64(inode.knownSize, offset+size), resp.ETag, resp.LastModified, nil)
+	return true
+}
+
+func (inode *Inode) discardChanges(offset, size uint64) {
+	allocated := inode.removeRange(offset, size, BUF_DIRTY)
+	inode.fs.bufferPool.Use(-allocated, true)
 }
 
 func (inode *Inode) isStillDirty() bool {

@@ -212,10 +212,14 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 
+	patchInProgress := inode.fs.flags.UsePatch && inode.mpu == nil && inode.CacheState == ST_MODIFIED && inode.IsFlushing > 0
 	// We always just drop our local cache when inode size or etag changes remotely
 	// It's the simplest method of conflict resolution
 	// Otherwise we may not be able to make a correct object version
-	if item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize {
+	//
+	// If ongoing patch requests exist, then concurrent etag changes is normal. In current implementation
+	// it is hard to reliably distinguish actual data conflicts from concurrent patch updates.
+	if !patchInProgress && (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) {
 		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
 			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
 				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
