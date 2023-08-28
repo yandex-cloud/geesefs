@@ -1546,6 +1546,10 @@ func (inode *Inode) SendUpload() bool {
 
 	// Initiate multipart upload, if not yet
 	if inode.mpu == nil {
+		// Wait for other updates to complete.
+		if inode.IsFlushing > 0 {
+			return false
+		}
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
 		go func() {
@@ -1684,6 +1688,9 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 	wantFlush := inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0
 
 	if smallFile && wantFlush {
+		if inode.flushLimitsExceeded() {
+			return
+		}
 		var flushBufs []*FileBuffer
 		for _, buf := range inode.buffers {
 			if buf.state == BUF_DIRTY {
@@ -1697,16 +1704,25 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 	tailPart := inode.fs.partNum(inode.knownSize)
 	updatedPart := inode.fs.partNum(inode.lastWriteEnd)
 
+	prevSize := inode.fs.flags.PartSizes[0].PartSize
 	// In its current implementation PATCH doesn't support ranges with start offset larger than object size.
 	for part := uint64(0); part <= tailPart; part++ {
+		if inode.flushLimitsExceeded() {
+			return
+		}
 		partStart, partSize := inode.fs.partRange(part)
-		partEnd := partStart + partSize
+
+		if part == tailPart && partStart == inode.knownSize && partSize != prevSize {
+			partSize = prevSize
+		}
+		prevSize = partSize
 
 		smallTail := part == tailPart && inode.Attributes.Size-partStart < partSize
 		if smallTail && !wantFlush {
 			return
 		}
 
+		partEnd := partStart + partSize
 		partLocked := inode.IsRangeLocked(partStart, partEnd, true)
 		if !wantFlush && part == updatedPart || partLocked {
 			continue
@@ -1734,12 +1750,8 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 		}
 
 		if len(flushBufs) != 0 {
-			inode.patchPart(part, flushBufs)
+			inode.patchPart(partStart, partSize, flushBufs)
 			initiated = true
-		}
-
-		if inode.flushLimitsExceeded() {
-			return
 		}
 	}
 	return
@@ -1757,7 +1769,7 @@ func (inode *Inode) patchSimpleObj(bufs []*FileBuffer) {
 
 	go func() {
 		inode.mu.Lock()
-		inode.patchFromBuffers(bufs)
+		inode.patchFromBuffers(bufs, 0)
 
 		inode.UnlockRange(0, inode.Attributes.Size, true)
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
@@ -1768,16 +1780,14 @@ func (inode *Inode) patchSimpleObj(bufs []*FileBuffer) {
 	}()
 }
 
-func (inode *Inode) patchPart(partNum uint64, bufs []*FileBuffer) {
-	partOffset, partSize := inode.fs.partRange(partNum)
-
+func (inode *Inode) patchPart(partOffset, partSize uint64, bufs []*FileBuffer) {
 	inode.LockRange(partOffset, partSize, true)
 	inode.IsFlushing++
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
 
 	go func() {
 		inode.mu.Lock()
-		inode.patchFromBuffers(bufs)
+		inode.patchFromBuffers(bufs, partSize)
 
 		inode.UnlockRange(partOffset, partSize, true)
 		inode.IsFlushing--
@@ -1788,7 +1798,7 @@ func (inode *Inode) patchPart(partNum uint64, bufs []*FileBuffer) {
 	}()
 }
 
-func (inode *Inode) patchFromBuffers(bufs []*FileBuffer) {
+func (inode *Inode) patchFromBuffers(bufs []*FileBuffer, partSize uint64) {
 	if len(bufs) == 0 {
 		return
 	}
@@ -1837,7 +1847,7 @@ func (inode *Inode) patchFromBuffers(bufs []*FileBuffer) {
 		reader, _ = inode.GetMultiReader(offset, size)
 	}
 
-	if ok := inode.sendPatch(offset, size, reader); !ok {
+	if ok := inode.sendPatch(offset, size, reader, partSize); !ok {
 		return
 	}
 
@@ -1849,8 +1859,7 @@ func (inode *Inode) patchFromBuffers(bufs []*FileBuffer) {
 	}
 }
 
-func (inode *Inode) sendPatch(offset, size uint64, r io.ReadSeeker) bool {
-	_, partSize := inode.fs.partRange(inode.fs.partNum(offset))
+func (inode *Inode) sendPatch(offset, size uint64, r io.ReadSeeker, partSize uint64) bool {
 	cloud, key := inode.cloud()
 	if inode.oldParent != nil {
 		_, key = inode.oldParent.cloud()
