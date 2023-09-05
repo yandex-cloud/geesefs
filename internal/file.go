@@ -1701,30 +1701,38 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 		return true
 	}
 
-	tailPart := inode.fs.partNum(inode.knownSize)
-	updatedPart := inode.fs.partNum(inode.lastWriteEnd)
+	updatedPartID := inode.fs.partNum(inode.lastWriteEnd)
+	endPartID := inode.fs.partNum(inode.Attributes.Size - 1)
 
-	prevSize := inode.fs.flags.PartSizes[0].PartSize
-	// In its current implementation PATCH doesn't support ranges with start offset larger than object size.
-	for part := uint64(0); part <= tailPart; part++ {
+	var prevSize uint64
+	for part := uint64(0); part <= endPartID; part++ {
 		if inode.flushLimitsExceeded() {
-			return
+			break
 		}
-		partStart, partSize := inode.fs.partRange(part)
 
-		if part == tailPart && partStart == inode.knownSize && partSize != prevSize {
-			partSize = prevSize
+		partStart, partSize := inode.fs.partRange(part)
+		// In its current implementation PATCH doesn't support ranges with start offset larger than object size.
+		if partStart > inode.knownSize {
+			break
+		}
+
+		partEnd, rangeBorder := partStart+partSize, partSize != prevSize
+		appendPatch, newPart := partEnd > inode.knownSize, partStart == inode.knownSize
+
+		// When entering a new part range, we can't immediately switch to the new part size,
+		// because we need to init a new part first.
+		if newPart && rangeBorder && prevSize > 0 {
+			partEnd, partSize = partStart+prevSize, prevSize
 		}
 		prevSize = partSize
 
-		smallTail := part == tailPart && inode.Attributes.Size-partStart < partSize
+		smallTail := appendPatch && inode.Attributes.Size-partStart < partSize
 		if smallTail && !wantFlush {
-			return
+			break
 		}
 
-		partEnd := partStart + partSize
 		partLocked := inode.IsRangeLocked(partStart, partEnd, true)
-		if !wantFlush && part == updatedPart || partLocked {
+		if !wantFlush && part == updatedPartID || partLocked {
 			continue
 		}
 
@@ -1734,7 +1742,7 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 			if buf.offset >= partEnd {
 				break
 			}
-			if buf.state != BUF_DIRTY || buf.zero && !wantFlush && part != tailPart {
+			if buf.state != BUF_DIRTY || buf.zero && !wantFlush && !appendPatch {
 				continue
 			}
 
