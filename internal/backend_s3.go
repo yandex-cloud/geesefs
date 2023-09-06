@@ -660,9 +660,9 @@ func (s *S3Backend) mpuCopyPart(from string, to string, mpuId string, bytes stri
 	return resp.CopyPartResult.ETag, nil
 }
 
-func (s *S3Backend) partsRequired(size int64) int {
+func (s *S3Backend) partsRequired(partSizes []cfg.PartSizeConfig, size int64) int {
 	var partsRequired int
-	for _, cfg := range s.flags.PartSizes {
+	for _, cfg := range partSizes {
 		totalSize := int64(cfg.PartCount * cfg.PartSize)
 		if totalSize >= size {
 			partsRequired += int((size + int64(cfg.PartSize) - 1) / int64(cfg.PartSize))
@@ -674,8 +674,8 @@ func (s *S3Backend) partsRequired(size int64) int {
 	return partsRequired
 }
 
-func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId string, srcEtag *string) ([]*s3.CompletedPart, error) {
-	parts := make([]*s3.CompletedPart, s.partsRequired(size))
+func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId string, srcEtag *string, partSizes []cfg.PartSizeConfig) ([]*s3.CompletedPart, error) {
+	parts := make([]*s3.CompletedPart, s.partsRequired(partSizes, size))
 
 	wg := errgroup.Group{}
 	wg.SetLimit(MinInt(128, len(parts)))
@@ -685,7 +685,7 @@ func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId strin
 		partIdx     int
 	)
 
-	for _, cfg := range s.flags.PartSizes {
+	for _, cfg := range partSizes {
 		for i := 0; i < int(cfg.PartCount) && startOffset < size; i++ {
 			endOffset := MinInt64(startOffset+int64(cfg.PartSize), size)
 			bytes := fmt.Sprintf("bytes=%v-%v", startOffset, endOffset-1)
@@ -708,6 +708,16 @@ func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId strin
 		}
 	}
 	return parts, wg.Wait()
+}
+
+func (s *S3Backend) defaultCopyPartSizes(size int64) []cfg.PartSizeConfig {
+	const MAX_PARTS = 10000
+	const MIN_PART_SIZE = 50 * 1024 * 1024
+
+	partSize := MaxInt64(size/(MAX_PARTS-1), MIN_PART_SIZE)
+	return []cfg.PartSizeConfig{
+		{PartSize: uint64(partSize), PartCount: MAX_PARTS},
+	}
 }
 
 func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuId string,
@@ -750,7 +760,13 @@ func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuI
 		mpuId = *resp.UploadId
 	}
 
-	parts, err := s.mpuCopyParts(size, from, to, mpuId, srcEtag)
+	partSizes := s.defaultCopyPartSizes(size)
+	// Preserve original part sizes if patch is enabled.
+	if s.flags.UsePatch {
+		partSizes = s.flags.PartSizes
+	}
+
+	parts, err := s.mpuCopyParts(size, from, to, mpuId, srcEtag, partSizes)
 	if err != nil {
 		return
 	}
