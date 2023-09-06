@@ -1277,9 +1277,10 @@ func (s *S3Backend) MakeBucket(param *MakeBucketInput) (*MakeBucketOutput, error
 		for i := 0; i < 10; i++ {
 			_, err = s.PutBucketTagging(&param)
 			code := mapAwsError(err)
-			switch code {
-			case nil:
+			if code == nil {
 				break
+			}
+			switch code {
 			case syscall.ENXIO, syscall.EINTR:
 				s3Log.Infof("waiting for bucket")
 				time.Sleep((time.Duration(i) + 1) * 2 * time.Second)
