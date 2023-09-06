@@ -16,6 +16,7 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/url"
@@ -478,11 +479,21 @@ func (inode *Inode) fillXattrFromHead(resp *HeadBlobOutput) {
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) setUserMeta(key string, value []byte) {
 	if inode.userMetadata == nil {
+		if value == nil {
+			return
+		}
 		inode.userMetadata = make(map[string][]byte)
 	}
+	oldValue, exists := inode.userMetadata[key]
 	if value == nil {
+		if !exists {
+			return
+		}
 		delete(inode.userMetadata, key)
 	} else {
+		if exists && bytes.Compare(oldValue, value) == 0 {
+			return
+		}
 		inode.userMetadata[key] = value
 	}
 	inode.userMetadataDirty = 2

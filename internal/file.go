@@ -2048,7 +2048,7 @@ func (inode *Inode) completeMultipart() {
 				}
 			} else {
 				log.Debugf("Finalized multi-part upload of object %v: etag=%v, size=%v", key, NilStr(resp.ETag), finalSize)
-				if inode.mpu.Metadata != nil && inode.userMetadataDirty == 1 {
+				if inode.userMetadataDirty == 1 {
 					inode.userMetadataDirty = 0
 				}
 				inode.mpu = nil
