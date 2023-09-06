@@ -27,12 +27,12 @@ import (
 )
 
 type PartSizeConfig struct {
-	PartSize uint64
+	PartSize  uint64
 	PartCount uint64
 }
 
 type NodeConfig struct {
-	Id uint64
+	Id      uint64
 	Address string
 }
 
@@ -114,10 +114,10 @@ type FlagStorage struct {
 	StatsInterval time.Duration
 
 	// Cluster Mode
-	ClusterMode    bool
+	ClusterMode           bool
 	ClusterGrpcReflection bool
-	ClusterMe      *NodeConfig
-	ClusterPeers   []*NodeConfig
+	ClusterMe             *NodeConfig
+	ClusterPeers          []*NodeConfig
 }
 
 func (flags *FlagStorage) GetMimeType(fileName string) (retMime *string) {

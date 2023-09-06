@@ -75,7 +75,7 @@ S3 OPTIONS:
 MISC OPTIONS:
    {{range category .Flags "misc"}}{{.}}
    {{end}}{{end}}
-`+FuseOptions+`{{if .Copyright }}COPYRIGHT:
+` + FuseOptions + `{{if .Copyright }}COPYRIGHT:
    {{.Copyright}}
    {{end}}
 `
@@ -95,7 +95,7 @@ MISC OPTIONS:
 		},
 
 		cli.StringFlag{
-			Name: "cache",
+			Name:  "cache",
 			Usage: "Directory to use for data cache. (default: off)",
 		},
 
@@ -315,20 +315,20 @@ MISC OPTIONS:
 		cli.IntFlag{
 			Name:  "max-parallel-parts",
 			Value: 8,
-			Usage: "How much parallel requests out of the total number can be used for large part uploads."+
+			Usage: "How much parallel requests out of the total number can be used for large part uploads." +
 				" Large parts take more bandwidth so they usually require less parallelism",
 		},
 
 		cli.IntFlag{
 			Name:  "max-parallel-copy",
 			Value: 16,
-			Usage: "How much parallel unmodified part copy requests should be used."+
+			Usage: "How much parallel unmodified part copy requests should be used." +
 				" This limit is separate from max-flushers",
 		},
 
 		cli.IntFlag{
 			Name:  "read-ahead",
-			Value: 5*1024,
+			Value: 5 * 1024,
 			Usage: "How much data in KB should be pre-loaded with every read by default",
 		},
 
@@ -352,19 +352,19 @@ MISC OPTIONS:
 
 		cli.IntFlag{
 			Name:  "large-read-cutoff",
-			Value: 20*1024,
+			Value: 20 * 1024,
 			Usage: "Amount of linear read in KB after which the \"large\" readahead should be triggered",
 		},
 
 		cli.IntFlag{
 			Name:  "read-ahead-large",
-			Value: 100*1024,
+			Value: 100 * 1024,
 			Usage: "Larger readahead size in KB to be used when long linear reads are detected",
 		},
 
 		cli.IntFlag{
 			Name:  "read-ahead-parallel",
-			Value: 20*1024,
+			Value: 20 * 1024,
 			Usage: "Larger readahead will be triggered in parallel chunks of this size in KB",
 		},
 
@@ -385,7 +385,7 @@ MISC OPTIONS:
 		cli.StringFlag{
 			Name:  "part-sizes",
 			Value: "5:1000,25:1000,125",
-			Usage: "Part sizes in MB. Total part count is always 10000 in S3."+
+			Usage: "Part sizes in MB. Total part count is always 10000 in S3." +
 				" Default is 1000 5 MB parts, then 1000 25 MB parts" +
 				" and then 125 MB for the rest of parts",
 		},
@@ -394,7 +394,7 @@ MISC OPTIONS:
 			Name:  "max-merge-copy",
 			Value: 0,
 			Usage: "If non-zero, allow to compose larger parts up to this number of megabytes" +
-				" in size from existing unchanged parts when doing server-side part copy."+
+				" in size from existing unchanged parts when doing server-side part copy." +
 				" Must be left at 0 for Yandex S3",
 		},
 
@@ -404,13 +404,13 @@ MISC OPTIONS:
 		},
 
 		cli.BoolFlag{
-			Name:  "enable-perms",
+			Name: "enable-perms",
 			Usage: "Enable permissions, user and group ID." +
 				" Only works correctly if your S3 returns UserMetadata in listings (default: off)",
 		},
 
 		cli.BoolFlag{
-			Name:  "enable-specials",
+			Name: "enable-specials",
 			Usage: "Enable special file support (sockets, devices, named pipes)." +
 				" Only works correctly if your S3 returns UserMetadata in listings (default: on for Yandex, off for others)",
 		},
@@ -421,7 +421,7 @@ MISC OPTIONS:
 		},
 
 		cli.BoolFlag{
-			Name:  "enable-mtime",
+			Name: "enable-mtime",
 			Usage: "Enable modification time preservation." +
 				" Only works correctly if your S3 returns UserMetadata in listings (default: off)",
 		},
@@ -594,22 +594,22 @@ MISC OPTIONS:
 
 	clusterFlags := []cli.Flag{
 		cli.BoolFlag{
-			Name: "cluster",
+			Name:  "cluster",
 			Usage: "Enable cluster mode.",
 		},
 
 		cli.BoolFlag{
-			Name: "grpc-reflection",
+			Name:  "grpc-reflection",
 			Usage: "Enable grpc reflection (--cluster flag required).",
 		},
 
 		cli.StringFlag{
-			Name: "cluster-me",
+			Name:  "cluster-me",
 			Usage: "<node-id>:<address> to communicate with this node (--cluster flag required).",
 		},
 
 		cli.StringSliceFlag{
-			Name: "cluster-peer",
+			Name:  "cluster-peer",
 			Usage: "List of all cluster nodes in format <node-id>:<address> (--cluster flag required).",
 		},
 	}
@@ -620,7 +620,7 @@ MISC OPTIONS:
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
 		Writer:   os.Stderr,
-		Flags:    append(append(append(append(append([]cli.Flag{
+		Flags: append(append(append(append(append([]cli.Flag{
 			cli.BoolFlag{
 				Name:  "help, h",
 				Usage: "Print this help text and exit successfully.",
@@ -682,7 +682,7 @@ func parsePartSizes(s string) (result []PartSizeConfig) {
 			if pi < len(partSizes)-1 {
 				panic("Part count may be omitted only for the last interval")
 			}
-			count = 10000-totalCount
+			count = 10000 - totalCount
 		}
 		totalCount += count
 		if totalCount > 10000 {
@@ -695,7 +695,7 @@ func parsePartSizes(s string) (result []PartSizeConfig) {
 			panic("Maximum part size is 5 GB")
 		}
 		result = append(result, PartSizeConfig{
-			PartSize: size*1024*1024,
+			PartSize:  size * 1024 * 1024,
 			PartCount: count,
 		})
 	}
@@ -712,7 +712,7 @@ func parseNode(s string) *NodeConfig {
 		panic("Incorrect syntax for node config, <node-id> shoud be uint64")
 	}
 	return &NodeConfig{
-		Id: nodeId,
+		Id:      nodeId,
 		Address: parts[1],
 	}
 }
@@ -727,75 +727,75 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 	flags := &FlagStorage{
 		// File system
-		MountOptions:           c.StringSlice("o"),
-		DirMode:                os.FileMode(c.Int("dir-mode")),
-		FileMode:               os.FileMode(c.Int("file-mode")),
-		Uid:                    uint32(c.Int("uid")),
-		Gid:                    uint32(c.Int("gid")),
-		Setuid:                 c.Int("setuid"),
-		Setgid:                 c.Int("setgid"),
+		MountOptions: c.StringSlice("o"),
+		DirMode:      os.FileMode(c.Int("dir-mode")),
+		FileMode:     os.FileMode(c.Int("file-mode")),
+		Uid:          uint32(c.Int("uid")),
+		Gid:          uint32(c.Int("gid")),
+		Setuid:       c.Int("setuid"),
+		Setgid:       c.Int("setgid"),
 
 		// Tuning,
-		MemoryLimit:            uint64(1024*1024*c.Int("memory-limit")),
-		EntryLimit:             c.Int("entry-limit"),
-		GCInterval:             uint64(1024*1024*c.Int("gc-interval")),
-		Cheap:                  c.Bool("cheap"),
-		ExplicitDir:            c.Bool("no-implicit-dir"),
-		NoDirObject:            c.Bool("no-dir-object"),
-		MaxFlushers:            int64(c.Int("max-flushers")),
-		MaxParallelParts:       c.Int("max-parallel-parts"),
-		MaxParallelCopy:        c.Int("max-parallel-copy"),
-		StatCacheTTL:           c.Duration("stat-cache-ttl"),
-		HTTPTimeout:            c.Duration("http-timeout"),
-		RetryInterval:          c.Duration("retry-interval"),
-		ReadAheadKB:            uint64(c.Int("read-ahead")),
-		SmallReadCount:         uint64(c.Int("small-read-count")),
-		SmallReadCutoffKB:      uint64(c.Int("small-read-cutoff")),
-		ReadAheadSmallKB:       uint64(c.Int("read-ahead-small")),
-		LargeReadCutoffKB:      uint64(c.Int("large-read-cutoff")),
-		ReadAheadLargeKB:       uint64(c.Int("read-ahead-large")),
-		ReadAheadParallelKB:    uint64(c.Int("read-ahead-parallel")),
-		ReadMergeKB:            uint64(c.Int("read-merge")),
-		SinglePartMB:           uint64(singlePart),
-		MaxMergeCopyMB:         uint64(c.Int("max-merge-copy")),
-		IgnoreFsync:            c.Bool("ignore-fsync"),
-		EnablePerms:            c.Bool("enable-perms"),
-		EnableSpecials:         c.Bool("enable-specials"),
-		EnableMtime:            c.Bool("enable-mtime"),
-		DisableXattr:           c.Bool("disable-xattr"),
-		UidAttr:                c.String("uid-attr"),
-		GidAttr:                c.String("gid-attr"),
-		FileModeAttr:           c.String("mode-attr"),
-		RdevAttr:               c.String("rdev-attr"),
-		MtimeAttr:              c.String("mtime-attr"),
-		SymlinkAttr:            c.String("symlink-attr"),
-		RefreshAttr:            c.String("refresh-attr"),
-		CachePopularThreshold:  int64(c.Int("cache-popular-threshold")),
-		CacheMaxHits:           int64(c.Int("cache-max-hits")),
-		CacheAgeInterval:       int64(c.Int("cache-age-interval")),
-		CacheAgeDecrement:      int64(c.Int("cache-age-decrement")),
-		CacheToDiskHits:        int64(c.Int("cache-to-disk-hits")),
-		CachePath:              c.String("cache"),
-		MaxDiskCacheFD:         int64(c.Int("max-disk-cache-fd")),
-		CacheFileMode:          os.FileMode(c.Int("cache-file-mode")),
+		MemoryLimit:           uint64(1024 * 1024 * c.Int("memory-limit")),
+		EntryLimit:            c.Int("entry-limit"),
+		GCInterval:            uint64(1024 * 1024 * c.Int("gc-interval")),
+		Cheap:                 c.Bool("cheap"),
+		ExplicitDir:           c.Bool("no-implicit-dir"),
+		NoDirObject:           c.Bool("no-dir-object"),
+		MaxFlushers:           int64(c.Int("max-flushers")),
+		MaxParallelParts:      c.Int("max-parallel-parts"),
+		MaxParallelCopy:       c.Int("max-parallel-copy"),
+		StatCacheTTL:          c.Duration("stat-cache-ttl"),
+		HTTPTimeout:           c.Duration("http-timeout"),
+		RetryInterval:         c.Duration("retry-interval"),
+		ReadAheadKB:           uint64(c.Int("read-ahead")),
+		SmallReadCount:        uint64(c.Int("small-read-count")),
+		SmallReadCutoffKB:     uint64(c.Int("small-read-cutoff")),
+		ReadAheadSmallKB:      uint64(c.Int("read-ahead-small")),
+		LargeReadCutoffKB:     uint64(c.Int("large-read-cutoff")),
+		ReadAheadLargeKB:      uint64(c.Int("read-ahead-large")),
+		ReadAheadParallelKB:   uint64(c.Int("read-ahead-parallel")),
+		ReadMergeKB:           uint64(c.Int("read-merge")),
+		SinglePartMB:          uint64(singlePart),
+		MaxMergeCopyMB:        uint64(c.Int("max-merge-copy")),
+		IgnoreFsync:           c.Bool("ignore-fsync"),
+		EnablePerms:           c.Bool("enable-perms"),
+		EnableSpecials:        c.Bool("enable-specials"),
+		EnableMtime:           c.Bool("enable-mtime"),
+		DisableXattr:          c.Bool("disable-xattr"),
+		UidAttr:               c.String("uid-attr"),
+		GidAttr:               c.String("gid-attr"),
+		FileModeAttr:          c.String("mode-attr"),
+		RdevAttr:              c.String("rdev-attr"),
+		MtimeAttr:             c.String("mtime-attr"),
+		SymlinkAttr:           c.String("symlink-attr"),
+		RefreshAttr:           c.String("refresh-attr"),
+		CachePopularThreshold: int64(c.Int("cache-popular-threshold")),
+		CacheMaxHits:          int64(c.Int("cache-max-hits")),
+		CacheAgeInterval:      int64(c.Int("cache-age-interval")),
+		CacheAgeDecrement:     int64(c.Int("cache-age-decrement")),
+		CacheToDiskHits:       int64(c.Int("cache-to-disk-hits")),
+		CachePath:             c.String("cache"),
+		MaxDiskCacheFD:        int64(c.Int("max-disk-cache-fd")),
+		CacheFileMode:         os.FileMode(c.Int("cache-file-mode")),
 
 		// Common Backend Config
-		Endpoint:               c.String("endpoint"),
-		UseContentType:         c.Bool("use-content-type"),
+		Endpoint:       c.String("endpoint"),
+		UseContentType: c.Bool("use-content-type"),
 
 		// Debugging,
-		DebugMain:              c.Bool("debug"),
-		DebugFuse:              c.Bool("debug_fuse"),
-		DebugS3:                c.Bool("debug_s3"),
-		Foreground:             c.Bool("f"),
-		LogFile:                c.String("log-file"),
-		StatsInterval:          c.Duration("print-stats"),
-		PProf:                  c.String("pprof"),
-		DebugGrpc:              c.Bool("debug_grpc"),
+		DebugMain:     c.Bool("debug"),
+		DebugFuse:     c.Bool("debug_fuse"),
+		DebugS3:       c.Bool("debug_s3"),
+		Foreground:    c.Bool("f"),
+		LogFile:       c.String("log-file"),
+		StatsInterval: c.Duration("print-stats"),
+		PProf:         c.String("pprof"),
+		DebugGrpc:     c.Bool("debug_grpc"),
 
 		// Cluster Mode
-		ClusterMode:            c.Bool("cluster"),
-		ClusterGrpcReflection:  c.Bool("grpc-reflection"),
+		ClusterMode:           c.Bool("cluster"),
+		ClusterGrpcReflection: c.Bool("grpc-reflection"),
 	}
 
 	if runtime.GOOS == "windows" {
@@ -817,26 +817,26 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 	if flags.Backend == nil {
 		flags.Backend = (&S3Config{}).Init()
 		config, _ := flags.Backend.(*S3Config)
-		config.Region        = c.String("region")
-		config.RegionSet     = c.IsSet("region")
+		config.Region = c.String("region")
+		config.RegionSet = c.IsSet("region")
 		config.RequesterPays = c.Bool("requester-pays")
-		config.StorageClass  = c.String("storage-class")
-		config.Profile       = c.String("profile")
-		config.SharedConfig  = c.StringSlice("shared-config")
-		config.UseSSE        = c.Bool("sse")
-		config.UseKMS        = c.IsSet("sse-kms")
-		config.KMSKeyID      = c.String("sse-kms")
-		config.SseC          = c.String("sse-c")
-		config.ACL           = c.String("acl")
-		config.Subdomain     = c.Bool("subdomain")
-		config.NoChecksum    = c.Bool("no-checksum")
-		config.UseIAM        = c.Bool("iam")
-		config.IAMHeader     = c.String("iam-header")
-		config.IAMFlavor     = c.String("iam-flavor")
-		config.IAMUrl        = c.String("iam-url")
-		config.MultipartAge  = c.Duration("multipart-age")
+		config.StorageClass = c.String("storage-class")
+		config.Profile = c.String("profile")
+		config.SharedConfig = c.StringSlice("shared-config")
+		config.UseSSE = c.Bool("sse")
+		config.UseKMS = c.IsSet("sse-kms")
+		config.KMSKeyID = c.String("sse-kms")
+		config.SseC = c.String("sse-c")
+		config.ACL = c.String("acl")
+		config.Subdomain = c.Bool("subdomain")
+		config.NoChecksum = c.Bool("no-checksum")
+		config.UseIAM = c.Bool("iam")
+		config.IAMHeader = c.String("iam-header")
+		config.IAMFlavor = c.String("iam-flavor")
+		config.IAMUrl = c.String("iam-url")
+		config.MultipartAge = c.Duration("multipart-age")
 		if config.IAMFlavor != "gcp" && config.IAMFlavor != "imdsv1" {
-			panic("Unknown --iam-flavor: "+config.IAMFlavor)
+			panic("Unknown --iam-flavor: " + config.IAMFlavor)
 		}
 		listType := c.String("list-type")
 		isYandex := strings.Index(flags.Endpoint, "yandex") != -1
@@ -850,8 +850,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 				listType = "1"
 			}
 		}
-		config.ListV1Ext     = listType == "ext-v1"
-		config.ListV2        = listType == "2"
+		config.ListV1Ext = listType == "ext-v1"
+		config.ListV2 = listType == "2"
 
 		config.MultipartCopyThreshold = uint64(c.Int("multipart-copy-threshold")) * 1024 * 1024
 
