@@ -404,6 +404,11 @@ MISC OPTIONS:
 		},
 
 		cli.BoolFlag{
+			Name:  "fsync-on-close",
+			Usage: "Wait until changes are persisted to the server when closing file (default: off)",
+		},
+
+		cli.BoolFlag{
 			Name:  "enable-perms",
 			Usage: "Enable permissions, user and group ID." +
 				" Only works correctly if your S3 returns UserMetadata in listings (default: off)",
@@ -759,6 +764,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		SinglePartMB:           uint64(singlePart),
 		MaxMergeCopyMB:         uint64(c.Int("max-merge-copy")),
 		IgnoreFsync:            c.Bool("ignore-fsync"),
+		FsyncOnClose:           c.Bool("fsync-on-close"),
 		EnablePerms:            c.Bool("enable-perms"),
 		EnableSpecials:         c.Bool("enable-specials"),
 		EnableMtime:            c.Bool("enable-mtime"),

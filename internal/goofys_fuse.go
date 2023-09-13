@@ -523,19 +523,19 @@ func (fs *GoofysFuse) FlushFile(
 func (fs *GoofysFuse) ReleaseFileHandle(
 	ctx context.Context,
 	op *fuseops.ReleaseFileHandleOp) (err error) {
+
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
 	fh := fs.fileHandles[op.Handle]
 	fh.Release()
-
 	atomic.AddInt64(&fs.stats.noops, 1)
-
 	fuseLog.Debugln("ReleaseFileHandle", fh.inode.FullName(), op.Handle, fh.inode.Id)
-
 	delete(fs.fileHandles, op.Handle)
+	fs.mu.Unlock()
 
-	// try to compact heap
-	//fs.bufferPool.MaybeGC()
+	if fh.inode.fs.flags.FsyncOnClose {
+		return fh.inode.SyncFile()
+	}
+
 	return
 }
 
@@ -598,14 +598,13 @@ func (fs *GoofysFuse) MkNode(
 	if (op.Mode & os.ModeDir) != 0 {
 		inode, err = parent.MkDir(op.Name)
 		if err != nil {
-			err = mapAwsError(err)
-			return err
+			return mapAwsError(err)
 		}
 	} else {
 		var fh *FileHandle
 		inode, fh, err = parent.Create(op.Name)
 		if err != nil {
-			return err
+			return mapAwsError(err)
 		}
 		fh.Release()
 	}
@@ -617,6 +616,13 @@ func (fs *GoofysFuse) MkNode(
 	op.Entry.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 	op.Entry.EntryExpiration = op.Entry.AttributesExpiration
 	inode.SetExpireLocked(op.Entry.AttributesExpiration)
+
+	if fs.flags.FsyncOnClose {
+		err = inode.SyncFile()
+		if err != nil {
+			return mapAwsError(err)
+		}
+	}
 
 	return
 }

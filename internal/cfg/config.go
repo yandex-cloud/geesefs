@@ -79,6 +79,7 @@ type FlagStorage struct {
 	SinglePartMB          uint64
 	MaxMergeCopyMB        uint64
 	IgnoreFsync           bool
+	FsyncOnClose          bool
 	EnablePerms           bool
 	EnableSpecials        bool
 	EnableMtime           bool

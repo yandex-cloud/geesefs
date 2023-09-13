@@ -184,6 +184,13 @@ func (fs *GoofysWin) Mknod(path string, mode uint32, dev uint64) (ret int) {
 	inode.Attributes.Rdev = uint32(dev)
 	inode.setFileMode(fuseops.ConvertFileMode(mode))
 
+	if fs.flags.FsyncOnClose {
+		err = inode.SyncFile()
+		if err != nil {
+			return mapWinError(err)
+		}
+	}
+
 	return 0
 }
 
@@ -646,6 +653,13 @@ func (fs *GoofysWin) Release(path string, fhId uint64) (ret int) {
 	fs.mu.Lock()
 	delete(fs.fileHandles, fuseops.HandleID(fhId))
 	fs.mu.Unlock()
+
+	if fs.flags.FsyncOnClose {
+		err := fh.inode.SyncFile()
+		if err != nil {
+			return mapWinError(err)
+		}
+	}
 
 	return 0
 }
