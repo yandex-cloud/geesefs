@@ -1,3 +1,9 @@
+geesefs (0.37.5) unstable; urgency=medium
+
+  * Add --fsync-on-close option for close-to-open consistency mode, like in goofys/s3fs
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Wed, 13 Sep 2023 18:36:56 +0300
+
 geesefs (0.37.4) unstable; urgency=medium
 
   * Fix potential BUG: ModifiedChildren of xxx < 0
