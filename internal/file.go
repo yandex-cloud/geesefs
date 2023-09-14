@@ -1824,10 +1824,15 @@ func (inode *Inode) patchFromBuffers(bufs []*FileBuffer, partSize uint64) {
 
 	// If bufs is a contiguous range of buffers then we can send them as PATCH immediately,
 	// otherwise we need to read missing ranges first.
-	var reader io.ReadSeeker
+	var (
+		reader    io.ReadSeeker
+		dirtyBufs map[uint64]bool
+	)
 	if contiguous {
+		dirtyBufs = make(map[uint64]bool)
 		r := NewMultiReader()
 		for _, buf := range bufs {
+			dirtyBufs[buf.dirtyID] = true
 			if !buf.zero {
 				r.AddBuffer(buf.data)
 			} else {
@@ -1854,17 +1859,21 @@ func (inode *Inode) patchFromBuffers(bufs []*FileBuffer, partSize uint64) {
 			log.Warnf("Local state of file %s (inode %d) changed, aborting patch", key, inode.Id)
 			return
 		}
-		reader, _ = inode.GetMultiReader(offset, size)
+		reader, dirtyBufs = inode.GetMultiReader(offset, size)
 	}
 
 	if ok := inode.sendPatch(offset, size, reader, partSize); !ok {
 		return
 	}
 
-	for _, b := range bufs {
-		b.state, b.dirtyID = BUF_CLEAN, 0
+	inodeClean := inode.userMetadataDirty == 0 && inode.oldParent == nil
+	for _, buf := range inode.buffers {
+		if dirtyBufs[buf.dirtyID] {
+			buf.dirtyID, buf.state = 0, BUF_CLEAN
+		}
+		inodeClean = inodeClean && buf.state == BUF_CLEAN
 	}
-	if !inode.isStillDirty() {
+	if inodeClean {
 		inode.SetCacheState(ST_CACHED)
 	}
 }
