@@ -44,6 +44,7 @@ type S3Config struct {
 	RegionSet     bool
 
 	StorageClass string
+	SmartTiering bool
 	MultipartAge time.Duration
 
 	MultipartCopyThreshold uint64

@@ -198,6 +198,11 @@ MISC OPTIONS:
 				" Possible values: REDUCED_REDUNDANCY, STANDARD, STANDARD_IA.",
 		},
 
+		cli.BoolFlag{
+			Name:  "smart-tiering",
+			Usage: "If enabled, geesefs will attempt to optimize costs by using appropriate storage classes for different objects. (default: off)",
+		},
+
 		cli.StringFlag{
 			Name:  "profile",
 			Usage: "Use a named profile from $HOME/.aws/credentials instead of \"default\"",
@@ -827,6 +832,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.RegionSet     = c.IsSet("region")
 		config.RequesterPays = c.Bool("requester-pays")
 		config.StorageClass  = c.String("storage-class")
+		config.SmartTiering  = c.Bool("smart-tiering")
 		config.Profile       = c.String("profile")
 		config.SharedConfig  = c.StringSlice("shared-config")
 		config.UseSSE        = c.Bool("sse")
