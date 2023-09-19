@@ -112,7 +112,7 @@ func (fs *GoofysFuse) GetInodeAttributes(
 func (fs *GoofysFuse) GetXattr(ctx context.Context,
 	op *fuseops.GetXattrOp) (err error) {
 	if fs.flags.DisableXattr {
-		return syscall.EOPNOTSUPP
+		return syscall.ENOSYS
 	}
 
 	inode := fs.getInodeOrDie(op.Inode)
@@ -145,7 +145,7 @@ func (fs *GoofysFuse) GetXattr(ctx context.Context,
 func (fs *GoofysFuse) ListXattr(ctx context.Context,
 	op *fuseops.ListXattrOp) (err error) {
 	if fs.flags.DisableXattr {
-		return syscall.EOPNOTSUPP
+		return syscall.ENOSYS
 	}
 
 	inode := fs.getInodeOrDie(op.Inode)
@@ -185,7 +185,7 @@ func (fs *GoofysFuse) ListXattr(ctx context.Context,
 func (fs *GoofysFuse) RemoveXattr(ctx context.Context,
 	op *fuseops.RemoveXattrOp) (err error) {
 	if fs.flags.DisableXattr {
-		return syscall.EOPNOTSUPP
+		return syscall.ENOSYS
 	}
 
 	inode := fs.getInodeOrDie(op.Inode)
@@ -204,7 +204,7 @@ func (fs *GoofysFuse) RemoveXattr(ctx context.Context,
 func (fs *GoofysFuse) SetXattr(ctx context.Context,
 	op *fuseops.SetXattrOp) (err error) {
 	if fs.flags.DisableXattr {
-		return syscall.EOPNOTSUPP
+		return syscall.ENOSYS
 	}
 
 	inode := fs.getInodeOrDie(op.Inode)
