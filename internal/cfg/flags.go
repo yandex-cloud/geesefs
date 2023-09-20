@@ -198,6 +198,11 @@ MISC OPTIONS:
 				" Possible values: REDUCED_REDUNDANCY, STANDARD, STANDARD_IA.",
 		},
 
+		cli.Uint64Flag{
+			Name:  "cold-storage-min-size",
+			Usage: "Minimum size of an object required to store it in cold storage if the latter is chosen. Objects smaller than this value are stored in standard storage",
+		},
+
 		cli.StringFlag{
 			Name:  "profile",
 			Usage: "Use a named profile from $HOME/.aws/credentials instead of \"default\"",
@@ -827,6 +832,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.RegionSet     = c.IsSet("region")
 		config.RequesterPays = c.Bool("requester-pays")
 		config.StorageClass  = c.String("storage-class")
+		config.ColdMinSize   = c.Uint64("cold-storage-min-size")
 		config.Profile       = c.String("profile")
 		config.SharedConfig  = c.StringSlice("shared-config")
 		config.UseSSE        = c.Bool("sse")

@@ -809,11 +809,7 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 	}
 
 	if param.StorageClass == nil {
-		if *param.Size < 128*1024 && s.config.StorageClass == "STANDARD_IA" {
-			param.StorageClass = PString("STANDARD")
-		} else {
-			param.StorageClass = &s.config.StorageClass
-		}
+		param.StorageClass = s.selectStorageClass(param.Size)
 	}
 
 	from := s.bucket + "/" + param.Source
@@ -932,17 +928,14 @@ func getDate(resp *http.Response) *time.Time {
 }
 
 func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
-	storageClass := s.config.StorageClass
-	if param.Size != nil && *param.Size < 128*1024 && storageClass == "STANDARD_IA" {
-		storageClass = "STANDARD"
-	}
+	storageClass := s.selectStorageClass(param.Size)
 
 	put := &s3.PutObjectInput{
 		Bucket:       &s.bucket,
 		Key:          &param.Key,
 		Metadata:     metadataToLower(param.Metadata),
 		Body:         param.Body,
-		StorageClass: &storageClass,
+		StorageClass: storageClass,
 		ContentType:  param.ContentType,
 	}
 
@@ -970,9 +963,17 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	return &PutBlobOutput{
 		ETag:         resp.ETag,
 		LastModified: getDate(req.HTTPResponse),
-		StorageClass: &storageClass,
+		StorageClass: storageClass,
 		RequestId:    s.getRequestId(req),
 	}, nil
+}
+
+func (s *S3Backend) selectStorageClass(size *uint64) *string {
+	storageClass := s.config.StorageClass
+	if size != nil && *size < s.config.ColdMinSize && storageClass == "STANDARD_IA" {
+		storageClass = "STANDARD"
+	}
+	return &storageClass
 }
 
 func (s *S3Backend) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlobCommitInput, error) {
