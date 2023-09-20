@@ -970,7 +970,7 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 
 func (s *S3Backend) selectStorageClass(size *uint64) *string {
 	storageClass := s.config.StorageClass
-	if s.config.SmartTiering && size != nil && *size < 128*1024 && storageClass == "STANDARD_IA" {
+	if size != nil && *size < s.config.ColdMinSize && storageClass == "STANDARD_IA" {
 		storageClass = "STANDARD"
 	}
 	return &storageClass
