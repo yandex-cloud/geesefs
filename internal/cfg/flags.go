@@ -199,8 +199,8 @@ MISC OPTIONS:
 		},
 
 		cli.Uint64Flag{
-			Name:  "cold-storage-min-size",
-			Usage: "Minimum size of an object required to store it in cold storage if the latter is chosen. Objects smaller than this value are stored in standard storage",
+			Name:  "cold-min-size",
+			Usage: "Objects smaller than this size will be stored in STANDARD if STANDARD_IA (cold storage) is selected as default.",
 		},
 
 		cli.StringFlag{
@@ -832,7 +832,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.RegionSet     = c.IsSet("region")
 		config.RequesterPays = c.Bool("requester-pays")
 		config.StorageClass  = c.String("storage-class")
-		config.ColdMinSize   = c.Uint64("cold-storage-min-size")
+		config.ColdMinSize   = c.Uint64("cold-min-size")
 		config.Profile       = c.String("profile")
 		config.SharedConfig  = c.StringSlice("shared-config")
 		config.UseSSE        = c.Bool("sse")
