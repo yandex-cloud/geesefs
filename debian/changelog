@@ -1,8 +1,15 @@
+geesefs (0.37.6) unstable; urgency=medium
+
+  * Change error code with disable-xattr to ENOSYS to prevent error spam
+  * Disable automatic switching to STANDARD storage class for objects under 128 KB
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 20 Sep 2023 12:59:58 +0300
+
 geesefs (0.37.5) unstable; urgency=medium
 
   * Add --fsync-on-close option for close-to-open consistency mode, like in goofys/s3fs
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Wed, 13 Sep 2023 18:36:56 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 13 Sep 2023 18:36:56 +0300
 
 geesefs (0.37.4) unstable; urgency=medium
 
@@ -21,19 +28,19 @@ geesefs (0.37.3) unstable; urgency=medium
     into account
   * Allow to disable xattrs for faster listings
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Fri, 11 Aug 2023 18:35:36 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 11 Aug 2023 18:35:36 +0300
 
 geesefs (0.37.2) unstable; urgency=medium
 
   * Fix files not showing up in MacOS Finder (apart from directories and `ls` in terminal)
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Fri, 11 Aug 2023 14:40:19 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 11 Aug 2023 14:40:19 +0300
 
 geesefs (0.37.1) unstable; urgency=medium
 
   * Windows bug fixes
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Fri, 11 Aug 2023 00:27:56 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 11 Aug 2023 00:27:56 +0300
 
 geesefs (0.37.0) unstable; urgency=medium
 
@@ -42,7 +49,7 @@ geesefs (0.37.0) unstable; urgency=medium
   * Fix a crash when being unable to request token from IAM
   * Some refactoring
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Mon, 07 Aug 2023 13:35:21 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 07 Aug 2023 13:35:21 +0300
 
 geesefs (0.36.2) unstable; urgency=medium
 
