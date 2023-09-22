@@ -1,3 +1,9 @@
+geesefs (0.37.7) unstable; urgency=medium
+
+  * Do not evict inodes from open directories (to prevent incorrect listings)
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 22 Sep 2023 18:30:20 +0300
+
 geesefs (0.37.6) unstable; urgency=medium
 
   * Change error code with disable-xattr to ENOSYS to prevent error spam
