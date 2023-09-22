@@ -770,7 +770,8 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 		tmpParent.mu.Unlock()
 		return false
 	}
-	if childTmp.Parent != tmpParent {
+	if childTmp.Parent != tmpParent ||
+		atomic.LoadInt32(&tmpParent.fileHandles) > 0 {
 		childTmp.mu.Unlock()
 		tmpParent.mu.Unlock()
 		return false
