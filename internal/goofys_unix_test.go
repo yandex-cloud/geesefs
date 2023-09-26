@@ -556,6 +556,7 @@ func (s *GoofysTest) testNotifyRefresh(t *C, testInSubdir bool, testRefreshDir b
 	// Force-refresh
 	err = xattr.Set(refreshFile, ".invalidate", []byte(""))
 	t.Assert(err, IsNil)
+	time.Sleep(500 * time.Millisecond)
 
 	buf, err = ioutil.ReadFile(testdir+"/testnotify")
 	t.Assert(err, IsNil)
