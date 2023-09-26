@@ -18,6 +18,7 @@ package internal
 
 type TestBackend struct {
 	StorageBackend
+	ListBlobsFunc func(param *ListBlobsInput) (*ListBlobsOutput, error)
 	err error
 }
 
@@ -31,6 +32,9 @@ func (s *TestBackend) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
 func (s *TestBackend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 	if s.err != nil {
 		return nil, s.err
+	}
+	if s.ListBlobsFunc != nil {
+		return s.ListBlobsFunc(param)
 	}
 	return s.StorageBackend.ListBlobs(param)
 }

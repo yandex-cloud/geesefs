@@ -8,85 +8,127 @@ type DirTest struct{}
 
 var _ = Suite(&DirTest{})
 
-func (s *DirTest) TestHasCharLtSlash(t *C) {
-	t.Assert(hasCharLtSlash("wow"), Equals, false)
+func (s *DirTest) TestLocateLtSlash(t *C) {
+	t.Assert(locateLtSlash("wow", 0), Equals, -1)
 	// '-', ' ' are less than '/'
-	t.Assert(hasCharLtSlash("w-o-w"), Equals, true)
-	t.Assert(hasCharLtSlash("w o w"), Equals, true)
+	t.Assert(locateLtSlash("w-o-w", 0), Equals, 1)
+	t.Assert(locateLtSlash("w o w", 0), Equals, 1)
 	// All unicode chars have multi-byte values and are > '/'
-	t.Assert(hasCharLtSlash("wøw"), Equals, false)
+	t.Assert(locateLtSlash("wøw", 0), Equals, -1)
+	// Prefix is handled correctly
+	t.Assert(locateLtSlash("w-o-w/w-o-w", 6), Equals, 7)
+	t.Assert(locateLtSlash("w-o-w///w.jpg", 6), Equals, 9)
+	t.Assert(locateLtSlash("w-o-w//.hidden", 6), Equals, -1)
 }
 
-func (s *DirTest) TestCloudPathToName(t *C) {
-	t.Assert(cloudPathToName(""), Equals, "")
-	t.Assert(cloudPathToName("/"), Equals, "")
-	t.Assert(cloudPathToName("/a/b/c"), Equals, "c")
-	t.Assert(cloudPathToName("a/b/c"), Equals, "c")
-	t.Assert(cloudPathToName("/a/b/c/"), Equals, "c")
-}
-
-func (s *DirTest) TestShouldFetchNextListBlobsPage(t *C) {
-	// Output is not truncated => No more pages fetch => ***FALSE***
+func (s *DirTest) TestIntelligentListCut(t *C) {
+	// Output is not truncated
+	// => Paging marker should be empty
 	// (No matter what Items and Prefixes are present)
-	t.Assert(shouldFetchNextListBlobsPage(
-		&ListBlobsOutput{IsTruncated: false}), Equals, false)
-	t.Assert(shouldFetchNextListBlobsPage(
-		&ListBlobsOutput{
-			IsTruncated: false,
-			Prefixes:    []BlobPrefixOutput{{Prefix: PString("prefix-has-dash/")}},
-		}),
-		Equals, false)
-	t.Assert(shouldFetchNextListBlobsPage(
-		&ListBlobsOutput{
-			IsTruncated: false,
-			Items:       []BlobItemOutput{{Key: PString("item-has-dash")}},
-		}),
-		Equals, false)
+	lastName, err := intelligentListCut(&ListBlobsOutput{
+		IsTruncated: false,
+		Items:       []BlobItemOutput{{Key: PString("item.jpg")}},
+		Prefixes:    []BlobPrefixOutput{{Prefix: PString("prefix-has-dash/")}},
+	}, nil, "")
+	t.Assert(lastName, Equals, "")
+	t.Assert(err, IsNil)
 
-	// Last Item and last Prefix are both "normal". All chars in their
-	// name (not path) are > '/' => ***FALSE***
-	t.Assert(shouldFetchNextListBlobsPage(
-		&ListBlobsOutput{
-			IsTruncated: true,
-			Items: []BlobItemOutput{
-				{Key: PString("w-o-w/item-has-dash")},
-				{Key: PString("w-o-w/item")}},
-			Prefixes: []BlobPrefixOutput{
-				{Prefix: PString("w-o-w/prefix-has-dash/")},
-				{Prefix: PString("w-o-w/prefix/")}},
-		}),
-		Equals, false)
+	// Last prefix is larger than last item and it's "normal".
+	// All chars in its name are > '/'
+	// => Paging marker is the last item, list is not cut
+	lastName, err = intelligentListCut(&ListBlobsOutput{
+		IsTruncated: true,
+		Items: []BlobItemOutput{
+			{Key: PString("w-o-w/item-has-dash")},
+			{Key: PString("w-o-w/item.jpg")}},
+		Prefixes: []BlobPrefixOutput{
+			{Prefix: PString("w-o-w/prefix-has-dash/")},
+			{Prefix: PString("w-o-w/prefix/")}},
+	}, nil, "w-o-w/")
+	t.Assert(lastName, Equals, "w-o-w/prefix/")
+	t.Assert(err, IsNil)
 
-	// Last Item's name has '-' ('-' < '/'); No prefixes => ***TRUE***
-	t.Assert(shouldFetchNextListBlobsPage(
-		&ListBlobsOutput{
-			IsTruncated: true,
-			Items:       []BlobItemOutput{{Key: PString("wow/item-has-dash")}},
-		}),
-		Equals, true)
-	// Last Item's name has '-' ('-' < '/'); Has normal prefixes  => ***TRUE***
-	t.Assert(shouldFetchNextListBlobsPage(
-		&ListBlobsOutput{
-			IsTruncated: true,
-			Prefixes:    []BlobPrefixOutput{{Prefix: PString("wow/prefix")}},
-			Items:       []BlobItemOutput{{Key: PString("wow/item-has-dash")}},
-		}),
-		Equals, true)
+	// Same, but prefix is larger than item
+	lastName, err = intelligentListCut(&ListBlobsOutput{
+		IsTruncated: true,
+		Items: []BlobItemOutput{
+			{Key: PString("w-o-w/item-has-dash")},
+			{Key: PString("w-o-w/item")}},
+		Prefixes: []BlobPrefixOutput{
+			{Prefix: PString("w-o-w/dir/")}},
+	}, nil, "w-o-w/")
+	t.Assert(lastName, Equals, "w-o-w/item")
+	t.Assert(err, IsNil)
 
-	// Last Prefix's name has '-' ('-' < '/'); No Items => ***TRUE***
-	t.Assert(shouldFetchNextListBlobsPage(
-		&ListBlobsOutput{
-			IsTruncated: true,
-			Prefixes:    []BlobPrefixOutput{{Prefix: PString("wow/prefix-has-dash/")}},
-		}),
-		Equals, true)
-	// Last Prefix's name has '-' ('-' < '/'); Has normal items => ***TRUE***
-	t.Assert(shouldFetchNextListBlobsPage(
-		&ListBlobsOutput{
-			IsTruncated: true,
-			Items:       []BlobItemOutput{{Key: PString("wow/item")}},
-			Prefixes:    []BlobPrefixOutput{{Prefix: PString("wow/prefix-has-dash/")}},
-		}),
-		Equals, true)
+	// There are items with different prefixes before '.' ('.' < '/')
+	// => List should be cut
+	resp := &ListBlobsOutput{
+		IsTruncated: true,
+		Items: []BlobItemOutput{
+			{Key: PString("w-o-w/l180404688.req")},
+			{Key: PString("w-o-w/l180404690.req")},
+			{Key: PString("w-o-w/l180404692.req")},
+		},
+		Prefixes: []BlobPrefixOutput{
+			{Prefix: PString("w-o-w/l180404687.req/")},
+			{Prefix: PString("w-o-w/l180404689.req/")},
+			{Prefix: PString("w-o-w/l180404691.req/")},
+		},
+	}
+	lastName, err = intelligentListCut(resp, nil, "w-o-w/")
+	t.Assert(lastName, Equals, "w-o-w/l180404691.req/")
+	t.Assert(len(resp.Items), Equals, 2)
+	t.Assert(len(resp.Prefixes), Equals, 3)
+	t.Assert(err, IsNil)
 
+	// All items have the same prefix
+	// => List can't be cut
+	// => It should make an additional request to cloud
+	resp = &ListBlobsOutput{
+		IsTruncated: true,
+		Items: []BlobItemOutput{
+			{Key: PString("w-o-w/2019-0000")},
+			{Key: PString("w-o-w/2019-0002")},
+			{Key: PString("w-o-w/2019-0004")},
+		},
+		Prefixes: []BlobPrefixOutput{
+			{Prefix: PString("w-o-w/2019-0001")},
+			{Prefix: PString("w-o-w/2019-0003")},
+			{Prefix: PString("w-o-w/2019-0005")},
+		},
+	}
+	listCalled := 0
+	checkedPrefix := "w-o-w/2019/"
+	cloud := &TestBackend{
+		ListBlobsFunc: func(param *ListBlobsInput) (*ListBlobsOutput, error) {
+			t.Assert(NilStr(param.StartAfter), Equals, "w-o-w/2019.\xEF\xBF\xBD")
+			t.Assert(param.MaxKeys, NotNil)
+			t.Assert(*param.MaxKeys, Equals, uint32(1))
+			listCalled++
+			return &ListBlobsOutput{
+				IsTruncated: true,
+				Items: []BlobItemOutput{
+					{Key: PString(checkedPrefix)},
+				},
+			}, nil
+		},
+	}
+	lastName, err = intelligentListCut(resp, cloud, "w-o-w/")
+	t.Assert(lastName, Equals, "w-o-w/2019-0005")
+	t.Assert(len(resp.Items), Equals, 3)
+	t.Assert(len(resp.Prefixes), Equals, 4)
+	t.Assert(*resp.Prefixes[3].Prefix, Equals, "w-o-w/2019/")
+	t.Assert(err, IsNil)
+	t.Assert(listCalled, Equals, 1)
+
+	// Same, but list request doesn't return 2019/
+	listCalled = 0
+	checkedPrefix = "w-o-w/2020-0000"
+	resp.Prefixes = resp.Prefixes[0:3]
+	lastName, err = intelligentListCut(resp, cloud, "w-o-w/")
+	t.Assert(lastName, Equals, "w-o-w/2019-0005")
+	t.Assert(len(resp.Items), Equals, 3)
+	t.Assert(len(resp.Prefixes), Equals, 3)
+	t.Assert(err, IsNil)
+	t.Assert(listCalled, Equals, 1)
 }

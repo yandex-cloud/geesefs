@@ -44,7 +44,7 @@ type DirInodeData struct {
 	DirTime         time.Time
 	ImplicitDir     bool
 
-	listMarker *string
+	listMarker string
 	lastFromCloud *string
 	listDone bool
 	forgetDuringList bool
@@ -60,44 +60,22 @@ type DirInodeData struct {
 	handles []*DirHandle
 }
 
-// Returns true if any char in `inp` has a value < '/'.
+// Returns the position of first char < '/' in `inp` after prefixLen + any continued '/' characters.
 // This should work for unicode also: unicode chars are all greater than 128.
 // See TestHasCharLtSlash for examples.
-func hasCharLtSlash(inp string) bool {
-	for _, c := range inp {
-		if c < '/' {
-			return true
+func locateLtSlash(inp string, prefixLen int) int {
+	i := prefixLen
+	for i < len(inp) && inp[i] == '/' {
+		i++
+	}
+	// first character < / doesn't matter, because directory names can't start with /
+	i++
+	for ; i < len(inp); i++ {
+		if inp[i] < '/' {
+			return i
 		}
 	}
-	return false
-}
-
-// Gets the name of the blob/prefix from a full cloud path.
-// See TestCloudPathToName for examples.
-func cloudPathToName(inp string) string {
-	inp = strings.TrimRight(inp, "/")
-	split := strings.Split(inp, "/")
-	return split[len(split)-1]
-}
-
-// Returns true if the last prefix's name or last item's name from the given
-// ListBlobsOutput has a character less than '/'
-// See TestShouldFetchNextListBlobsPage for examples.
-func shouldFetchNextListBlobsPage(resp *ListBlobsOutput) bool {
-	if !resp.IsTruncated {
-		// There is no next page.
-		return false
-	}
-	numPrefixes := len(resp.Prefixes)
-	numItems := len(resp.Items)
-	if numPrefixes > 0 &&
-		hasCharLtSlash(cloudPathToName(*resp.Prefixes[numPrefixes-1].Prefix)) {
-		return true
-	} else if numItems > 0 &&
-		hasCharLtSlash(cloudPathToName(*resp.Items[numItems-1].Key)) {
-		return true
-	}
-	return false
+	return -1
 }
 
 type DirHandle struct {
@@ -395,7 +373,7 @@ func (dir *DirInodeData) checkGapLoaded(key string, newerThan time.Time) bool {
 
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) sealDir() {
-	inode.dir.listMarker = nil
+	inode.dir.listMarker = ""
 	inode.dir.listDone = true
 	inode.dir.lastFromCloud = nil
 	inode.dir.DirTime = time.Now()
@@ -478,6 +456,97 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, skip
 	}
 }
 
+func maxName(resp *ListBlobsOutput, itemPos, prefixPos int) (string, int) {
+	if itemPos > 0 && (prefixPos == 0 || *resp.Prefixes[prefixPos-1].Prefix < *resp.Items[itemPos-1].Key) {
+		return *resp.Items[itemPos-1].Key, 0
+	}
+	if prefixPos == 0 {
+		return "", 0
+	}
+	return *resp.Prefixes[prefixPos-1].Prefix, 1
+}
+
+func prefixLarger(s1, s2 string, pos int) bool {
+	if len(s2) <= pos {
+		return s1[0:pos] < s2
+	}
+	return s1[0:pos] < s2[0:pos]
+}
+
+// In s3 & azblob, prefixes are returned with '/' => the prefix "2019" is
+// returned as "2019/". So the list api for these backends returns "2019/" after
+// "2019-0001/" because ascii("/") > ascii("-"). This is problematic for us if
+// "2019/" is returned in x+1'th batch and "2019-0001/" is returned in x'th
+// because GeeseFS returns results to the client in the sorted order.
+//
+// To overcome this issue, previously we continued to next listing pages
+// until the last item of the listing didn't contain characters less than '/'
+// anymore. But it was bad because '.' also precedes '/' and this made GeeseFS
+// fully load almost all directories, because most directories contain files
+// with extensions.
+//
+// So now we intelligently cut the result array so that the last item
+// either doesn't contain characters before '/' or is followed by another item
+// with a larger prefix (i.e. 'abc-def', then 'abd-' or 'abca-'). And if it's
+// impossible, i.e. if the whole listing contains items with the same prefix,
+// we issues an additional HEAD request and check for the presence of an item
+// with slash ('abc-def' is in listing, then we check 'abc/').
+//
+// Relevant test case: TestReadDirDash
+func intelligentListCut(resp *ListBlobsOutput, cloud StorageBackend, prefix string) (lastName string, err error) {
+	if !resp.IsTruncated {
+		return
+	}
+	isPrefix := 0
+	itemPos, prefixPos := len(resp.Items), len(resp.Prefixes)
+	count := itemPos+prefixPos
+	lastName, isPrefix = maxName(resp, itemPos, prefixPos)
+	lastLtPos := locateLtSlash(lastName, len(prefix))
+	if lastLtPos >= 0 {
+		prev, name := "", lastName
+		ok := false
+		for itemPos+prefixPos > count/2 {
+			prefixPos -= isPrefix
+			itemPos -= (1-isPrefix)
+			prev, isPrefix = maxName(resp, itemPos, prefixPos)
+			ltPos := locateLtSlash(prev, len(prefix))
+			if ltPos < 0 || prefixLarger(prev, name, ltPos+1) {
+				// No characters less than '/' => OK, stop
+				ok = true
+				break
+			}
+			name = prev
+		}
+		if ok {
+			resp.Items = resp.Items[0:itemPos]
+			resp.Prefixes = resp.Prefixes[0:prefixPos]
+			lastName = prev
+		} else {
+			// Can't intelligently cut the list as more than 50% of it has the same prefix
+			// So, check for existence of the offending directory separately
+			// Simulate '>=' operator with start-after
+			// '.' = '/'-1
+			// \xF4\x8F\xBF\xBF = 0x10FFFF in UTF-8 = largest code point of 3-byte UTF-8
+			// \xEF\xBF\xBD = 0xFFFD in UTF-8 = largest valid symbol of 2-byte UTF-8
+			// So, > xxx.\xEF\xBF\xBF is the same as >= xxx/
+			dirobj, err := cloud.ListBlobs(&ListBlobsInput{
+				StartAfter: PString(lastName[0:lastLtPos]+".\xEF\xBF\xBD"),
+				MaxKeys:    PUInt32(1),
+			})
+			if err != nil {
+				return "", err
+			}
+			if len(dirobj.Items) > 0 {
+				checkedName := *dirobj.Items[0].Key
+				if len(checkedName) >= lastLtPos+1 && checkedName[0:lastLtPos+1] == lastName[0:lastLtPos]+"/" {
+					resp.Prefixes = append(resp.Prefixes, BlobPrefixOutput{Prefix: PString(checkedName[0:lastLtPos+1])})
+				}
+			}
+		}
+	}
+	return
+}
+
 func (dh *DirHandle) listObjectsFlat() (err error) {
 	cloud, prefix := dh.inode.cloud()
 	if cloud == nil {
@@ -495,9 +564,9 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	myList := dh.inode.fs.addInflightListing()
 
 	params := &ListBlobsInput{
-		Delimiter:         PString("/"),
-		ContinuationToken: dh.inode.dir.listMarker,
-		Prefix:            &prefix,
+		Delimiter:  PString("/"),
+		StartAfter: PString(dh.inode.dir.listMarker),
+		Prefix:     &prefix,
 	}
 
 	dh.mu.Unlock()
@@ -511,36 +580,19 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 
 	s3Log.Debug(resp)
 
+	// See comment to intelligentListCut above
+	lastName, err := intelligentListCut(resp, cloud, prefix)
+	if err != nil {
+		dh.inode.fs.completeInflightListing(myList)
+	}
+
 	dh.inode.mu.Lock()
 	dh.handleListResult(resp, prefix, dh.inode.fs.completeInflightListing(myList))
 
-	if resp.IsTruncated && resp.NextContinuationToken != nil {
-		// :-X idiotic aws-sdk with string pointers was leading to a huge memory leak here
-		next := *resp.NextContinuationToken
-		dh.inode.dir.listMarker = &next
-		// In s3 & azblob, prefixes are returned with '/' => the prefix "2019" is
-		// returned as "2019/". So the list api for these backends returns "2019/" after
-		// "2019-0001/" because ascii("/") > ascii("-"). This is problematic for us if
-		// "2019/" is returned in x+1'th batch and "2019-0001/" is returned in x'th
-		// because GeeseFS returns results to the client in the sorted order.
-		//
-		// We could always use ordering of s3/azblob but other cloud providers may have
-		// different sorting strategies. For example, in ADLv2 "a/" is < "a-b/".
-		//
-		// We also could intelligently cut the result array so that the last item
-		// either doesn't contain characters before '/' or is followed by another item
-		// with a larger prefix (i.e. 'abc-def', then 'abd-' or 'abca-') in the removed
-		// portion, but it's probably rarely worth it because `readdir` listings are
-		// usually anyway full. Also it would require using StartAfter instead of
-		// ContinuationToken. Nevertheless, it may be a FIXME for the future :-)
-		//
-		// So, currently we just proceed to next pages in this case.
-		//
-		// Relevant test case: TestReadDirDash
-		if shouldFetchNextListBlobsPage(resp) {
-			// Tell loadListing() that we want more pages :)
-			dh.inode.dir.lastFromCloud = nil
-		}
+	if resp.IsTruncated {
+		// :-X for history: aws-sdk with its idiotic string pointers was leading
+		// to a huge memory leak when we were saving NextContinuationToken as is
+		dh.inode.dir.listMarker = lastName
 	} else {
 		dh.inode.sealDir()
 	}
@@ -576,7 +628,7 @@ func (dh *DirHandle) checkDirPosition() {
 func (dh *DirHandle) loadListing() error {
 	parent := dh.inode
 
-	if !parent.dir.listDone && parent.dir.listMarker == nil {
+	if !parent.dir.listDone && parent.dir.listMarker == "" {
 		// listMarker is nil => We just started refreshing this directory
 		parent.dir.listDone = false
 		parent.dir.lastFromCloud = nil
@@ -592,7 +644,7 @@ func (dh *DirHandle) loadListing() error {
 	// we immediately switch to regular listings.
 	// Original implementation in Goofys in fact was similar in this aspect
 	// but it was ugly in several places, so ... sorry, it's reworked. O:-)
-	useSlurp := parent.dir.listMarker == nil && parent.fs.flags.StatCacheTTL != 0
+	useSlurp := parent.dir.listMarker == "" && parent.fs.flags.StatCacheTTL != 0
 
 	// the dir expired, so we need to fetch from the cloud. there
 	// may be static directories that we want to keep, so cloud

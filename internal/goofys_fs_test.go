@@ -491,7 +491,7 @@ func (s *GoofysTest) testReadMyOwnWriteFuse(t *C, externalUpdate bool) {
 	time.Sleep(s.fs.flags.StatCacheTTL)
 
 	root := s.getRoot(t)
-	cloud := &TestBackend{root.dir.cloud, nil}
+	cloud := &TestBackend{StorageBackend: root.dir.cloud}
 	root.dir.cloud = cloud
 
 	fh, err = os.Open(filePath)
