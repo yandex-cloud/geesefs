@@ -467,10 +467,12 @@ func maxName(resp *ListBlobsOutput, itemPos, prefixPos int) (string, int) {
 }
 
 func prefixLarger(s1, s2 string, pos int) bool {
-	if len(s2) <= pos {
-		return s1[0:pos] < s2
+	if len(s2) > pos && s1[0:pos] < s2[0:pos] || len(s2) <= pos && s1[0:pos] < s2 {
+		return true
+	} else if len(s2) >= pos+1 && s1[0:pos] == s2[0:pos] && s2[pos] > '/' {
+		return true
 	}
-	return s1[0:pos] < s2[0:pos]
+	return false
 }
 
 // In s3 & azblob, prefixes are returned with '/' => the prefix "2019" is
@@ -510,7 +512,7 @@ func intelligentListCut(resp *ListBlobsOutput, cloud StorageBackend, prefix stri
 			itemPos -= (1-isPrefix)
 			prev, isPrefix = maxName(resp, itemPos, prefixPos)
 			ltPos := locateLtSlash(prev, len(prefix))
-			if ltPos < 0 || prefixLarger(prev, name, ltPos+1) {
+			if ltPos < 0 || prefixLarger(prev, name, ltPos) {
 				// No characters less than '/' => OK, stop
 				ok = true
 				break

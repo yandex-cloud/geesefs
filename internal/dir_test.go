@@ -60,8 +60,8 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 	t.Assert(lastName, Equals, "w-o-w/item")
 	t.Assert(err, IsNil)
 
-	// There are items with different prefixes before '.' ('.' < '/')
-	// => List should be cut
+	// 6th item has larger prefix before 5th position of '.' ('.' < '/')
+	// => List should be cut at 5 items
 	resp := &ListBlobsOutput{
 		IsTruncated: true,
 		Items: []BlobItemOutput{
@@ -79,6 +79,60 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 	t.Assert(lastName, Equals, "w-o-w/l180404691.req/")
 	t.Assert(len(resp.Items), Equals, 2)
 	t.Assert(len(resp.Prefixes), Equals, 3)
+	t.Assert(err, IsNil)
+
+	// 6th item has the same prefix as 5th before '.', but the next character is larger than '>'
+	// => List should be cut at 5 items
+	resp = &ListBlobsOutput{
+		IsTruncated: true,
+		Items: []BlobItemOutput{
+			{Key: PString("w-o-w/l180404687.req")},
+			{Key: PString("w-o-w/l180404688.req")},
+			{Key: PString("w-o-w/l180404689.req")},
+			{Key: PString("w-o-w/l180404690.req")},
+			{Key: PString("w-o-w/l180404691.req")},
+			{Key: PString("w-o-w/l1804046910.req")},
+		},
+	}
+	lastName, err = intelligentListCut(resp, nil, "w-o-w/")
+	t.Assert(lastName, Equals, "w-o-w/l180404691.req")
+	t.Assert(len(resp.Items), Equals, 5)
+	t.Assert(err, IsNil)
+
+	// 6th item has the same prefix as 5th before '.', and the next character is still smaller than '/'
+	// => List can't be cut at 5th item, it should be cut at 4th one
+	resp = &ListBlobsOutput{
+		IsTruncated: true,
+		Items: []BlobItemOutput{
+			{Key: PString("w-o-w/l180404687.req")},
+			{Key: PString("w-o-w/l180404688.req")},
+			{Key: PString("w-o-w/l180404689.req")},
+			{Key: PString("w-o-w/l180404690.req")},
+			{Key: PString("w-o-w/l180404691-1.req")},
+			{Key: PString("w-o-w/l180404691.req")},
+		},
+	}
+	lastName, err = intelligentListCut(resp, nil, "w-o-w/")
+	t.Assert(lastName, Equals, "w-o-w/l180404690.req")
+	t.Assert(len(resp.Items), Equals, 4)
+	t.Assert(err, IsNil)
+
+	// 6th item has larger prefix than 5th before '.', but it's shorter
+	// => List should be cut at 5 items
+	resp = &ListBlobsOutput{
+		IsTruncated: true,
+		Items: []BlobItemOutput{
+			{Key: PString("w-o-w/l180404687.req")},
+			{Key: PString("w-o-w/l180404688.req")},
+			{Key: PString("w-o-w/l180404689.req")},
+			{Key: PString("w-o-w/l180404690.req")},
+			{Key: PString("w-o-w/l180404691.req")},
+			{Key: PString("w-o-w/l1805.req")},
+		},
+	}
+	lastName, err = intelligentListCut(resp, nil, "w-o-w/")
+	t.Assert(lastName, Equals, "w-o-w/l180404691.req")
+	t.Assert(len(resp.Items), Equals, 5)
 	t.Assert(err, IsNil)
 
 	// All items have the same prefix
