@@ -1,3 +1,9 @@
+geesefs (0.38.1) unstable; urgency=medium
+
+  * Small fix to the new "intelligent list cutting"
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 26 Sep 2023 21:05:55 +0300
+
 geesefs (0.38.0) unstable; urgency=medium
 
   * Implement intelligent list cutting to not fully load long directories with
