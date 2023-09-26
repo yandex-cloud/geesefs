@@ -1,3 +1,12 @@
+geesefs (0.38.0) unstable; urgency=medium
+
+  * Implement intelligent list cutting to not fully load long directories with
+    a lot of files with characters less than '/' in names (like '.' or '-')
+  * Fix "panic: unable to daemonize: open /dev/stderr: no such device or address"
+    when starting from fstab on boot
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 26 Sep 2023 16:25:23 +0300
+
 geesefs (0.37.7) unstable; urgency=medium
 
   * Do not evict inodes from open directories (to prevent incorrect listings)
