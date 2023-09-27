@@ -687,6 +687,8 @@ func (dh *DirHandle) loadListing() error {
 		}
 	}
 
+	parent.removeExpired(dh.lastInternalOffset)
+
 	return nil
 }
 
@@ -730,12 +732,45 @@ func (dh *DirHandle) Next(name string) {
 	dh.lastName = name
 }
 
+func (parent *Inode) removeExpired(from int) {
+	// Skip stale inodes
+	var notifications []interface{}
+	for i := from-2; i < len(parent.dir.Children); i++ {
+		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
+		childTmp := parent.dir.Children[i]
+		if parent.dir.lastFromCloud != nil && childTmp.Name >= *parent.dir.lastFromCloud {
+			break
+		}
+		if childTmp.AttrTime.Before(parent.dir.refreshStartTime) &&
+			atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
+			atomic.LoadInt32(&childTmp.CacheState) <= ST_DEAD &&
+			(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
+			childTmp.mu.Lock()
+			childTmp.resetCache()
+			childTmp.SetCacheState(ST_DEAD)
+			notifications = append(notifications, &fuseops.NotifyDelete{
+				Parent: parent.Id,
+				Child: childTmp.Id,
+				Name: childTmp.Name,
+			})
+			if childTmp.isDir() {
+				childTmp.removeAllChildrenUnlocked()
+			}
+			parent.removeChildUnlocked(childTmp)
+			childTmp.mu.Unlock()
+			i--
+		}
+	}
+	if len(notifications) > 0 && parent.fs.NotifyCallback != nil {
+		parent.fs.NotifyCallback(notifications)
+	}
+}
+
 // LOCKS_REQUIRED(dh.mu)
 // LOCKS_EXCLUDED(dh.inode.mu)
 // LOCKS_EXCLUDED(dh.inode.fs)
 func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 	parent := dh.inode
-	fs := parent.fs
 	if parent.dir == nil {
 		panic("ReadDir non-directory "+parent.FullName())
 	}
@@ -761,36 +796,6 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 			return nil, err
 		}
 		dh.checkDirPosition()
-	}
-
-	// Skip stale inodes
-	var notifications []interface{}
-	for i := dh.lastInternalOffset-2; i < len(parent.dir.Children); i++ {
-		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
-		childTmp := parent.dir.Children[i]
-		if childTmp.AttrTime.Before(parent.dir.refreshStartTime) &&
-			atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
-			atomic.LoadInt32(&childTmp.CacheState) <= ST_DEAD &&
-			(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
-			childTmp.mu.Lock()
-			childTmp.resetCache()
-			childTmp.SetCacheState(ST_DEAD)
-			notifications = append(notifications, &fuseops.NotifyDelete{
-				Parent: parent.Id,
-				Child: childTmp.Id,
-				Name: childTmp.Name,
-			})
-			if childTmp.isDir() {
-				childTmp.removeAllChildrenUnlocked()
-			}
-			parent.removeChildUnlocked(childTmp)
-			childTmp.mu.Unlock()
-			i--
-		}
-	}
-
-	if len(notifications) > 0 && fs.NotifyCallback != nil {
-		fs.NotifyCallback(notifications)
 	}
 
 	// May be -1 if we remove inodes above
