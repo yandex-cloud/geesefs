@@ -549,11 +549,13 @@ func intelligentListCut(resp *ListBlobsOutput, cloud StorageBackend, prefix stri
 	return
 }
 
-func (dh *DirHandle) listObjectsFlat() (err error) {
+func (dh *DirHandle) listObjectsFlat() (start string, err error) {
+	dh.inode.mu.Lock()
 	cloud, prefix := dh.inode.cloud()
 	if cloud == nil {
 		// Stale inode
-		return syscall.ESTALE
+		dh.inode.mu.Unlock()
+		return "", syscall.ESTALE
 	}
 	if dh.inode.oldParent != nil {
 		_, prefix = dh.inode.oldParent.cloud()
@@ -562,14 +564,17 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	if len(prefix) != 0 {
 		prefix += "/"
 	}
-
-	myList := dh.inode.fs.addInflightListing()
-
+	if len(dh.inode.dir.listMarker) >= len(prefix) && dh.inode.dir.listMarker[0:len(prefix)] == prefix {
+		start = dh.inode.dir.listMarker[len(prefix):]
+	}
 	params := &ListBlobsInput{
 		Delimiter:  PString("/"),
 		StartAfter: PString(dh.inode.dir.listMarker),
 		Prefix:     &prefix,
 	}
+	dh.inode.mu.Unlock()
+
+	myList := dh.inode.fs.addInflightListing()
 
 	dh.mu.Unlock()
 	resp, err := cloud.ListBlobs(params)
@@ -586,6 +591,7 @@ func (dh *DirHandle) listObjectsFlat() (err error) {
 	lastName, err := intelligentListCut(resp, cloud, prefix)
 	if err != nil {
 		dh.inode.fs.completeInflightListing(myList)
+		return
 	}
 
 	dh.inode.mu.Lock()
@@ -678,16 +684,22 @@ func (dh *DirHandle) loadListing() error {
 		}
 	}
 
+	loaded, startMarker := false, ""
 	for parent.dir.lastFromCloud == nil && !parent.dir.listDone {
 		parent.mu.Unlock()
-		err := dh.listObjectsFlat()
+		start, err := dh.listObjectsFlat()
+		if !loaded {
+			loaded, startMarker = true, start
+		}
 		parent.mu.Lock()
 		if err != nil {
 			return err
 		}
 	}
 
-	parent.removeExpired(dh.lastInternalOffset)
+	if loaded {
+		parent.removeExpired(startMarker)
+	}
 
 	return nil
 }
@@ -732,10 +744,14 @@ func (dh *DirHandle) Next(name string) {
 	dh.lastName = name
 }
 
-func (parent *Inode) removeExpired(from int) {
+func (parent *Inode) removeExpired(from string) {
 	// Skip stale inodes
 	var notifications []interface{}
-	for i := from-2; i < len(parent.dir.Children); i++ {
+	var pos int
+	if from != "" && from != "." && from != ".." {
+		pos = sort.Search(len(parent.dir.Children), parent.findInodeFunc(from))
+	}
+	for i := pos; i < len(parent.dir.Children); i++ {
 		// Note on locking: See comments at Inode::AttrTime, Inode::Parent.
 		childTmp := parent.dir.Children[i]
 		if parent.dir.lastFromCloud != nil && childTmp.Name >= *parent.dir.lastFromCloud {

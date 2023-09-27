@@ -788,7 +788,7 @@ func (fs *ClusterFs) StatPrinter() {
 func (dh *DirHandle) loadChildren() error {
 	inode := dh.inode
 	for inode.dir.lastFromCloud == nil && !inode.dir.listDone {
-		err := dh.listObjectsFlat()
+		_, err := dh.listObjectsFlat()
 		if err != nil {
 			return err
 		}
