@@ -1,3 +1,9 @@
+geesefs (0.38.2) unstable; urgency=medium
+
+  * Fix listings and make them faster again by removing O(N^2)
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 27 Sep 2023 14:13:32 +0300
+
 geesefs (0.38.1) unstable; urgency=medium
 
   * Small fix to the new "intelligent list cutting"
