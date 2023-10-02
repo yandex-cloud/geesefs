@@ -779,6 +779,8 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 	found := tmpParent.findChildUnlocked(childTmp.Name)
 	if found == childTmp {
 		tmpParent.removeChildUnlocked(childTmp)
+		// Mark directory listing as unfinished
+		tmpParent.dir.DirTime = time.Time{}
 		tmpParent.dir.forgetDuringList = true
 	}
 	childTmp.resetCache()
