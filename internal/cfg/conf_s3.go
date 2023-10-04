@@ -81,6 +81,15 @@ func (c *S3Config) Init() *S3Config {
 	if c.StorageClass == "" {
 		c.StorageClass = "STANDARD"
 	}
+	if c.IAMHeader == "" {
+		c.IAMHeader = "X-YaCloud-SubjectToken"
+	}
+	if c.IAMFlavor == "" {
+		c.IAMFlavor = "gcp"
+	}
+	if c.MultipartCopyThreshold == 0 {
+		c.MultipartCopyThreshold = 128
+	}
 	return c
 }
 

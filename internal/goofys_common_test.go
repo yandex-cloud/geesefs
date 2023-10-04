@@ -339,6 +339,10 @@ func (s *GoofysTest) TearDownTest(t *C) {
 	close(s.timeout)
 	s.timeout = nil
 
+	if strings.Index(t.TestName(), "NoCloud") >= 0 {
+		return
+	}
+
 	if s.fs != nil {
 		s.fs.SyncFS(nil)
 	}
@@ -479,6 +483,10 @@ func (s *GoofysTest) SetUpTest(t *C) {
 
 	s.setUpTestTimeout(t, PerTestTimeout)
 
+	if strings.Index(t.TestName(), "NoCloud") >= 0 {
+		return
+	}
+
 	var createBucket bool
 	bucket := os.Getenv("BUCKET")
 	if bucket == "" {
@@ -486,43 +494,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		createBucket = true
 	}
 
-	uid, gid := cfg.MyUserAndGroup()
-	flags := &cfg.FlagStorage{
-		DirMode:     0700,
-		FileMode:    0700,
-		Uid:         uint32(uid),
-		Gid:         uint32(gid),
-		MemoryLimit: 1024*1024*1024,
-		Cheap:       false,
-		ExplicitDir: false,
-		NoDirObject: false,
-		MaxFlushers: 16,
-		MaxParallelParts: 8,
-		MaxParallelCopy: 16,
-		StatCacheTTL: 30 * time.Second,
-		HTTPTimeout: 30 * time.Second,
-		RetryInterval: 30 * time.Second,
-		ReadAheadKB:         5*1024,
-		SmallReadCount:      4,
-		SmallReadCutoffKB:   128,
-		ReadAheadSmallKB:    128,
-		LargeReadCutoffKB:   20*1024,
-		ReadAheadLargeKB:    100*1024,
-		ReadAheadParallelKB: 20*1024,
-		ReadMergeKB: 512,
-		SinglePartMB: 5,
-		MaxMergeCopyMB: 0,
-		IgnoreFsync: false,
-		SymlinkAttr: "--symlink-target",
-		RefreshAttr: ".invalidate",
-		RefreshFilename: ".invalidate",
-		FlushFilename: ".fsyncdir",
-		PartSizes: []cfg.PartSizeConfig{
-			{ PartSize: 5*1024*1024, PartCount: 1000 },
-			{ PartSize: 25*1024*1024, PartCount: 1000 },
-			{ PartSize: 125*1024*1024, PartCount: 8000 },
-		},
-	}
+	flags := cfg.DefaultFlags()
 	if hasEnv("DEBUG") {
 		flags.DebugS3 = true
 		flags.DebugFuse = true

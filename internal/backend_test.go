@@ -19,10 +19,39 @@ package internal
 type TestBackend struct {
 	StorageBackend
 	ListBlobsFunc func(param *ListBlobsInput) (*ListBlobsOutput, error)
+	HeadBlobFunc func(param *HeadBlobInput) (*HeadBlobOutput, error)
+	capabilities *Capabilities
 	err error
 }
 
+func (s *TestBackend) Init(bucket string) error {
+	if s.StorageBackend == nil {
+		return nil
+	}
+	return s.StorageBackend.Init(bucket)
+}
+
+func (s *TestBackend) Capabilities() *Capabilities {
+	if s.StorageBackend == nil {
+		if s.capabilities == nil {
+			s.capabilities = &Capabilities{
+				Name:             "s3",
+				MaxMultipartSize: 5 * 1024 * 1024 * 1024,
+			}
+		}
+		return s.capabilities
+	}
+	return s.StorageBackend.Capabilities()
+}
+
+func (s *TestBackend) Delegate() interface{} {
+	return s
+}
+
 func (s *TestBackend) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
+	if s.HeadBlobFunc != nil {
+		return s.HeadBlobFunc(param)
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -30,11 +59,11 @@ func (s *TestBackend) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
 }
 
 func (s *TestBackend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
 	if s.ListBlobsFunc != nil {
 		return s.ListBlobsFunc(param)
+	}
+	if s.err != nil {
+		return nil, s.err
 	}
 	return s.StorageBackend.ListBlobs(param)
 }

@@ -360,6 +360,8 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 
 	fs.fileHandles = make(map[fuseops.HandleID]*FileHandle)
 
+	// FIXME: Add Shutdown() method to cleanup these goroutines
+
 	fs.flusherCond = sync.NewCond(&fs.flusherMu)
 	go fs.Flusher()
 	if fs.flags.StatsInterval > 0 {

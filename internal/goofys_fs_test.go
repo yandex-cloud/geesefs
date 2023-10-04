@@ -19,9 +19,11 @@ package internal
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/fs"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,6 +31,8 @@ import (
 	"time"
 
 	. "gopkg.in/check.v1"
+
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 )
 
 func (s *GoofysTest) mount(t *C, mountPoint string) {
@@ -546,4 +550,133 @@ func (s *GoofysTest) TestReadMyOwnNewFileFuse(t *C) {
 	//buf, err := ioutil.ReadFile(filePath)
 	//t.Assert(err, IsNil)
 	//t.Assert(string(buf), Equals, "filex")
+}
+
+func (s *GoofysTest) TestSlurpLookupNoCloud(t *C) {
+	var err error
+
+	flags := cfg.DefaultFlags()
+
+	// Use mocked backend
+	backend := &TestBackend{
+		err: syscall.ENOSYS,
+		ListBlobsFunc: func(param *ListBlobsInput) (*ListBlobsOutput, error) {
+			p, d, a := NilStr(param.Prefix), NilStr(param.Delimiter), NilStr(param.StartAfter)
+			fmt.Printf("ListBlobs: Prefix=%v, Delimiter=%v, StartAfter=%v\n", p, d, a)
+			if p == "" && d == "" && a == "testdir" {
+				return &ListBlobsOutput{
+					IsTruncated: true,
+					// No testdir/ or testdir in result - suppose testdir/ comes in next pages
+					Items: []BlobItemOutput{
+						{Key: PString("testdir-1")},
+						{Key: PString("testdir-2")},
+					},
+				}, nil
+			} else if p == "testdir/" && d == "/" && a == "" {
+				return &ListBlobsOutput{
+					IsTruncated: false,
+					Items: []BlobItemOutput{
+						{Key: PString("testdir/")},
+						{Key: PString("testdir/abc")},
+					},
+				}, nil
+			}
+			return nil, syscall.ENOSYS
+		},
+	}
+	s.cloud = backend
+	s.fs, err = newGoofys(context.Background(), "test", flags, func(string, *cfg.FlagStorage) (StorageBackend, error) {
+		return backend, nil
+	})
+	t.Assert(err, IsNil)
+
+	_, err = s.fs.LookupPath("testdir")
+	t.Assert(err, IsNil)
+}
+
+// Case # 1 - check that a directory longer than eviction limit is listed correctly
+// Case # 2 - check that it is listed correctly in 2 parallel threads
+func (s *GoofysTest) TestListParallelExpireNoCloud(t *C) {
+	var err error
+
+	flags := cfg.DefaultFlags()
+
+	// Set low eviction limits
+	flags.StatCacheTTL = 1 * time.Second
+	flags.EntryLimit = 100
+
+	// Use mocked backend
+	testCount := 9800
+	backend := &TestBackend{
+		err: syscall.ENOSYS,
+		ListBlobsFunc: func(param *ListBlobsInput) (*ListBlobsOutput, error) {
+			p, d, a := NilStr(param.Prefix), NilStr(param.Delimiter), NilStr(param.StartAfter)
+			fmt.Printf("ListBlobs: Prefix=%v, Delimiter=%v, StartAfter=%v\n", p, d, a)
+			if p == "" && d == "" && a == "testdir" {
+				return &ListBlobsOutput{
+					IsTruncated: true,
+					Items: []BlobItemOutput{
+						{Key: PString("testdir/")},
+					},
+				}, nil
+			} else if p == "" && d == "" && a == "testdir/" {
+				var o []BlobItemOutput
+				for i := 0; i < 100; i++ {
+					o = append(o, BlobItemOutput{Key: PString("testdir/f"+fmt.Sprintf("%04d", i))})
+				}
+				return &ListBlobsOutput{
+					IsTruncated: true,
+					Items: o,
+				}, nil
+			} else if p == "testdir/" && d == "/" {
+				pos := 0
+				if a != "" {
+					n, err := fmt.Sscanf(a, "testdir/f%d\n", &pos)
+					pos++
+					t.Assert(err, IsNil)
+					t.Assert(n, Equals, 1)
+					t.Assert((pos % 100) == 0 && pos <= testCount-100, Equals, true)
+				}
+				var o []BlobItemOutput
+				for i := 0; i < 100; i++ {
+					o = append(o, BlobItemOutput{Key: PString("testdir/f"+fmt.Sprintf("%04d", i + pos))})
+				}
+				if (rand.Int() % 30) == 0 {
+					// Add some pauses to trigger eviction
+					time.Sleep(1 * time.Second)
+				}
+				return &ListBlobsOutput{
+					IsTruncated: pos < testCount-100,
+					Items: o,
+				}, nil
+			}
+			return nil, syscall.ENOSYS
+		},
+	}
+	s.cloud = backend
+	s.fs, err = newGoofys(context.Background(), "test", flags, func(string, *cfg.FlagStorage) (StorageBackend, error) {
+		return backend, nil
+	})
+	t.Assert(err, IsNil)
+
+	var names []string
+	for i := 0; i < testCount; i++ {
+		names = append(names, "f"+fmt.Sprintf("%04d", i))
+	}
+	checkDir := func(ch chan int) {
+		defer func() {
+			// So that it gets called on panic
+			ch <- 1
+		}()
+		in, err := s.fs.LookupPath("testdir")
+		t.Assert(err, IsNil)
+		dh := in.OpenDir()
+		t.Assert(namesOf(s.readDirFully(t, dh)), DeepEquals, names)
+		dh.CloseDir()
+	}
+	ch := make(chan int)
+	go checkDir(ch)
+	go checkDir(ch)
+	<-ch
+	<-ch
 }

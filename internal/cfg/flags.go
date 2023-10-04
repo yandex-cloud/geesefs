@@ -939,3 +939,57 @@ func MessageMountFlags(args []string) (ret []string) {
 
 	return
 }
+
+func DefaultFlags() *FlagStorage {
+	uid, gid := MyUserAndGroup()
+	return &FlagStorage{
+		DirMode:                0755,
+		FileMode:               0644,
+		CacheFileMode:          0644,
+		Uid:                    uint32(uid),
+		Gid:                    uint32(gid),
+		Setuid:                 uid,
+		Setgid:                 gid,
+		Endpoint:               "https://storage.yandexcloud.net",
+		Backend:                (&S3Config{}).Init(),
+		MemoryLimit:            1000 * 1024 * 1024,
+		EntryLimit:             100000,
+		GCInterval:             250 * 1024 * 1024,
+		MaxFlushers:            16,
+		MaxParallelParts:       8,
+		MaxParallelCopy:        16,
+		ReadAheadKB:            5 * 1024,
+		SmallReadCount:         4,
+		SmallReadCutoffKB:      128,
+		ReadAheadSmallKB:       128,
+		LargeReadCutoffKB:      20 * 1024,
+		ReadAheadLargeKB:       100 * 1024,
+		ReadAheadParallelKB:    20 * 1024,
+		ReadMergeKB:            512,
+		SinglePartMB:           5,
+		MaxMergeCopyMB:         0,
+		UidAttr:                "uid",
+		GidAttr:                "gid",
+		FileModeAttr:           "mode",
+		RdevAttr:               "rdev",
+		MtimeAttr:              "mtime",
+		SymlinkAttr:            "--symlink-target",
+		RefreshAttr:            ".invalidate",
+		StatCacheTTL:           30 * time.Second,
+		HTTPTimeout:            30 * time.Second,
+		RetryInterval:          30 * time.Second,
+		CachePopularThreshold:  3,
+		CacheMaxHits:           6,
+		CacheAgeInterval:       4096,
+		CacheAgeDecrement:      1,
+		CacheToDiskHits:        2,
+		MaxDiskCacheFD:         512,
+		RefreshFilename:        ".invalidate",
+		FlushFilename:          ".fsyncdir",
+		PartSizes: []PartSizeConfig{
+			{PartSize: 5 * 1024 * 1024, PartCount: 1000},
+			{PartSize: 25 * 1024 * 1024, PartCount: 1000},
+			{PartSize: 125 * 1024 * 1024, PartCount: 8000},
+		},
+	}
+}
