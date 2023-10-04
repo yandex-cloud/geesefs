@@ -549,10 +549,10 @@ func (s *GoofysTest) TestWriteLargeTruncateMem20M(t *C) {
 	err = in.SetAttributes(PUInt64(100*1024*1024), nil, nil, nil, nil)
 	t.Assert(err, IsNil)
 
-	//// Modify the beginning of the file - will work after adding "header hack"
-	//buf[4095] = 1
-	//err = fh.WriteFile(0, buf[0:4096], true)
-	//t.Assert(err, IsNil)
+	// Modify the beginning of the file - will work after adding "header hack"
+	buf[4095] = 1
+	err = fh.WriteFile(0, buf[0:4096], true)
+	t.Assert(err, IsNil)
 
 	// Close
 	fh.Release()

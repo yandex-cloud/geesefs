@@ -563,7 +563,9 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED_FULL {
 				if buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) &&
 					// Skip recent buffers when possible
-					(skipRecent == 0 || buf.recency <= skipRecent) {
+					(skipRecent == 0 || buf.recency <= skipRecent) &&
+					// Do not evict modified header
+					(buf.state != BUF_FLUSHED_FULL || buf.offset >= fs.flags.PartSizes[0].PartSize) {
 					if fs.flags.CachePath != "" && !buf.onDisk {
 						if toFs == -1 {
 							toFs = 0
@@ -605,6 +607,8 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 						// A flushed buffer can be removed at a cost of finalizing multipart upload
 						// to read it back later. However it's likely not a problem if we're uploading
 						// a large file because we may never need to read it back.
+						// One exception is that we don't do it with the header because various
+						// software commonly modifies header after writing the whole large file
 						prev := del-1
 						if prev < 0 {
 							prev = i-1
