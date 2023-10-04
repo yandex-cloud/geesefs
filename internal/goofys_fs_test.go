@@ -680,3 +680,135 @@ func (s *GoofysTest) TestListParallelExpireNoCloud(t *C) {
 	<-ch
 	<-ch
 }
+
+// Case # 3 - start listing, trigger slurp for other directories, verify that eviction didn't affect correctness of listings
+func (s *GoofysTest) TestListSlurpExpireNoCloud(t *C) {
+	var err error
+
+	flags := cfg.DefaultFlags()
+
+	// Set low eviction limits
+	flags.StatCacheTTL = 1 * time.Second
+	flags.EntryLimit = 100
+
+	// Use mocked backend
+	backend := &TestBackend{
+		err: syscall.ENOSYS,
+		ListBlobsFunc: func(param *ListBlobsInput) (*ListBlobsOutput, error) {
+			p, d, a := NilStr(param.Prefix), NilStr(param.Delimiter), NilStr(param.StartAfter)
+			time.Sleep(1 * time.Second)
+			fmt.Printf("ListBlobs: Prefix=%v, Delimiter=%v, StartAfter=%v\n", p, d, a)
+			if p == "" && d == "" && (a == "testdir" || a == "testdir/g" || a == "testdir/h" || a == "testdir/i") {
+				return &ListBlobsOutput{
+					IsTruncated: true,
+					Items: []BlobItemOutput{
+						{Key: PString(a+"/")},
+					},
+				}, nil
+			} else if p == "" && d == "" && (a == "testdir/" || a == "testdir/g/" || a == "testdir/h/" || a == "testdir/i/") {
+				var o []BlobItemOutput
+				if a <= "testdir/" {
+					for i := 0; i < 100; i++ {
+						o = append(o, BlobItemOutput{Key: PString("testdir/f"+fmt.Sprintf("%04d", i))})
+					}
+					o = append(o, BlobItemOutput{Key: PString("testdir/g/")})
+				}
+				if a <= "testdir/g/" {
+					for i := 0; i < 100; i++ {
+						o = append(o, BlobItemOutput{Key: PString("testdir/g/gf"+fmt.Sprintf("%04d", i))})
+					}
+					o = append(o, BlobItemOutput{Key: PString("testdir/h/")})
+				}
+				if a <= "testdir/h/" {
+					for i := 0; i < 100; i++ {
+						o = append(o, BlobItemOutput{Key: PString("testdir/h/hf"+fmt.Sprintf("%04d", i))})
+					}
+					o = append(o, BlobItemOutput{Key: PString("testdir/i/")})
+				}
+				for i := 0; i < 100; i++ {
+					o = append(o, BlobItemOutput{Key: PString("testdir/i/if"+fmt.Sprintf("%04d", i))})
+				}
+				return &ListBlobsOutput{
+					IsTruncated: a < "testdir/i/",
+					Items: o,
+				}, nil
+			} else if p == "testdir/" && d == "/" && a == "" {
+				var o []BlobItemOutput
+				for i := 0; i < 100; i++ {
+					o = append(o, BlobItemOutput{Key: PString("testdir/f"+fmt.Sprintf("%04d", i))})
+				}
+				return &ListBlobsOutput{
+					IsTruncated: true,
+					Items: o,
+					Prefixes: []BlobPrefixOutput{
+						{Prefix: PString("testdir/g/")},
+						{Prefix: PString("testdir/h/")},
+						{Prefix: PString("testdir/i/")},
+					},
+				}, nil
+			} else if p == "testdir/" && d == "/" && a == "testdir/i/" {
+				var o []BlobItemOutput
+				for i := 0; i < 100; i++ {
+					o = append(o, BlobItemOutput{Key: PString("testdir/j"+fmt.Sprintf("%04d", i))})
+				}
+				return &ListBlobsOutput{
+					IsTruncated: false,
+					Items: o,
+				}, nil
+			}
+			return nil, syscall.ENOSYS
+		},
+	}
+	s.cloud = backend
+	s.fs, err = newGoofys(context.Background(), "test", flags, func(string, *cfg.FlagStorage) (StorageBackend, error) {
+		return backend, nil
+	})
+	t.Assert(err, IsNil)
+
+	var names []string
+	for i := 0; i < 100; i++ {
+		names = append(names, "f"+fmt.Sprintf("%04d", i))
+	}
+	names = append(names, "g", "h", "i")
+	for i := 0; i < 100; i++ {
+		names = append(names, "j"+fmt.Sprintf("%04d", i))
+	}
+	in, err := s.fs.LookupPath("testdir")
+	t.Assert(err, IsNil)
+	dh := in.OpenDir()
+	t.Assert(namesOf(s.readDirFully(t, dh)), DeepEquals, names)
+	dh.CloseDir()
+
+	// Sleep a bit to trigger eviction
+	time.Sleep(1 * time.Second)
+
+	names = nil
+	for i := 0; i < 100; i++ {
+		names = append(names, "gf"+fmt.Sprintf("%04d", i))
+	}
+	in, err = s.fs.LookupPath("testdir/g")
+	t.Assert(err, IsNil)
+	dh = in.OpenDir()
+	t.Assert(namesOf(s.readDirFully(t, dh)), DeepEquals, names)
+	dh.CloseDir()
+
+	names = nil
+	for i := 0; i < 100; i++ {
+		names = append(names, "hf"+fmt.Sprintf("%04d", i))
+	}
+	in, err = s.fs.LookupPath("testdir/h")
+	t.Assert(err, IsNil)
+	dh = in.OpenDir()
+	t.Assert(namesOf(s.readDirFully(t, dh)), DeepEquals, names)
+	dh.CloseDir()
+
+	names = nil
+	for i := 0; i < 100; i++ {
+		names = append(names, "if"+fmt.Sprintf("%04d", i))
+	}
+	in, err = s.fs.LookupPath("testdir/i")
+	t.Assert(err, IsNil)
+	dh = in.OpenDir()
+	t.Assert(namesOf(s.readDirFully(t, dh)), DeepEquals, names)
+	dh.CloseDir()
+}
