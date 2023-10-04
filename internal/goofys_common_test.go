@@ -495,6 +495,10 @@ func (s *GoofysTest) SetUpTest(t *C) {
 	}
 
 	flags := cfg.DefaultFlags()
+	if strings.Index(t.TestName(), "Mem20M") >= 0 {
+		// has to be set before create FS
+		flags.MemoryLimit = 20*1024*1024
+	}
 	if hasEnv("DEBUG") {
 		flags.DebugS3 = true
 		flags.DebugFuse = true

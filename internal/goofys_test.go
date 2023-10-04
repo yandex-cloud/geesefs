@@ -502,6 +502,71 @@ func (s *GoofysTest) TestWriteLargeFile(t *C) {
 	s.testWriteFile(t, "testLargeFile3", 4*1024*1024+1, 128*1024)
 }
 
+func (s *GoofysTest) TestWriteLargeMem20M(t *C) {
+	s.testWriteFile(t, "testLargeFile", 5*1024*1024, 128*1024)
+}
+
+func (s *GoofysTest) TestWriteLargeTruncateMem20M(t *C) {
+	fileName := "testLargeTruncate"
+
+	root := s.getRoot(t)
+	s3 := root.dir.cloud
+	cloud := &TestBackend{StorageBackend: s3}
+	cloud.MultipartBlobAddFunc = func(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error) {
+		if param.PartNumber > 20 {
+			return nil, syscall.ENOSYS
+		}
+		return s3.MultipartBlobAdd(param)
+	}
+	cloud.MultipartBlobCopyFunc = func(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
+		// MultipartBlobCopyFunc returning error makes sure it doesn't get called
+		return nil, syscall.ENOSYS
+	}
+	root.dir.cloud = cloud
+
+	err := root.Unlink(fileName)
+	t.Assert(err == nil || err == syscall.ENOENT, Equals, true)
+
+	in, fh, err := root.Create(fileName)
+	t.Assert(err, IsNil)
+
+	// Allocate 50 GB
+	err = in.SetAttributes(PUInt64(50*1024*1024*1024), nil, nil, nil, nil)
+	t.Assert(err, IsNil)
+
+	// But only write 100 MB
+	buf := make([]byte, 1048576)
+	for i := 0; i < len(buf); i++ {
+		buf[i] = byte(i)
+	}
+	for i := 0; i < 100; i++ {
+		err := fh.WriteFile(int64(i*len(buf)), buf, true)
+		t.Assert(err, IsNil)
+	}
+
+	// Truncate again
+	// Zeroed areas shouldn't get flushed - it would require calling MultipartBlobCopy
+	err = in.SetAttributes(PUInt64(100*1024*1024), nil, nil, nil, nil)
+	t.Assert(err, IsNil)
+
+	//// Modify the beginning of the file - will work after adding "header hack"
+	//buf[4095] = 1
+	//err = fh.WriteFile(0, buf[0:4096], true)
+	//t.Assert(err, IsNil)
+
+	// Close
+	fh.Release()
+
+	// And sync
+	err = in.SyncFile()
+	t.Assert(err, IsNil)
+
+	// Check size
+	resp, err := s.cloud.HeadBlob(&HeadBlobInput{Key: fileName})
+	t.Assert(err, IsNil)
+	t.Assert(resp.Size, Equals, uint64(100*1024*1024))
+}
+
 func (s *GoofysTest) TestMultipartOverwrite(t *C) {
 	s.testWriteFile(t, "test%d0%b0", 20*1024*1024, 128*1024)
 	// Test overwrite
