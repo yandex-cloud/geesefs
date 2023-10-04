@@ -1310,7 +1310,10 @@ func (s *GoofysTest) TestPutMimeType(t *C) {
 }
 
 func (s *GoofysTest) TestBucketPrefixSlash(t *C) {
+	s.fs.Shutdown()
+
 	s.fs, _ = NewGoofys(context.Background(), s.fs.bucket+":dir2", s.fs.flags)
+	defer s.fs.Shutdown()
 	t.Assert(s.getRoot(t).dir.mountPrefix, Equals, "dir2/")
 
 	s.fs, _ = NewGoofys(context.Background(), s.fs.bucket+":dir2///", s.fs.flags)
@@ -1363,6 +1366,7 @@ func (s *GoofysTest) anonymous(t *C) {
 		t.Skip("cloud does not support canned ACL")
 	}
 
+	s.fs.Shutdown()
 	s.fs, _ = NewGoofys(context.Background(), bucket, s.fs.flags)
 	t.Assert(s.fs, NotNil)
 

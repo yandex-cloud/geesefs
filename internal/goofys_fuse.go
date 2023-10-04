@@ -857,11 +857,14 @@ func (fs *GoofysFuse) SetConnection(conn *fuse.Connection) {
 
 type FuseMfsWrapper struct {
 	*fuse.MountedFileSystem
+	fs *Goofys
 	mountPoint string
 }
 
 func (m *FuseMfsWrapper) Unmount() error {
-	return TryUnmount(m.mountPoint)
+	err := TryUnmount(m.mountPoint)
+	m.fs.Shutdown()
+	return err
 }
 
 func convertFuseOptions(flags *cfg.FlagStorage) map[string]string {
@@ -933,6 +936,7 @@ func mountFuseFS(fs *Goofys) (mfs MountedFS, err error) {
 
 	mfs = &FuseMfsWrapper{
 		MountedFileSystem: fuseMfs,
+		fs: fs,
 		mountPoint: fs.flags.MountPoint,
 	}
 

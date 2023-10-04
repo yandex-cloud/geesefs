@@ -59,6 +59,9 @@ type Goofys struct {
 	bufferPool *BufferPool
 	wantFree   int32
 
+	shutdown   int32
+	shutdownCh chan struct{}
+
 	// A lock protecting the state of the file system struct itself (distinct
 	// from per-inode locks). Should be always taken after any inode locks.
 	mu sync.RWMutex
@@ -286,6 +289,7 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 		flags:  flags,
 		umask:  0122,
 		lfru:   NewLFRU(flags.CachePopularThreshold, flags.CacheMaxHits, flags.CacheAgeInterval, flags.CacheAgeDecrement),
+		shutdownCh: make(chan struct{}),
 		zeroBuf: make([]byte, 1048576),
 		inflightChanges: make(map[string]int),
 		inflightListings: make(map[int]map[string]bool),
@@ -360,8 +364,6 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 
 	fs.fileHandles = make(map[fuseops.HandleID]*FileHandle)
 
-	// FIXME: Add Shutdown() method to cleanup these goroutines
-
 	fs.flusherCond = sync.NewCond(&fs.flusherMu)
 	go fs.Flusher()
 	if fs.flags.StatsInterval > 0 {
@@ -376,6 +378,15 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 	go fs.MetaEvictor()
 
 	return fs, nil
+}
+
+func (fs *Goofys) Shutdown() {
+	atomic.StoreInt32(&fs.shutdown, 1)
+	close(fs.shutdownCh)
+	fs.WakeupFlusher()
+	if fs.diskFdCond != nil {
+		fs.diskFdCond.Broadcast()
+	}
 }
 
 // from https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-golang
@@ -446,8 +457,12 @@ func (fs *Goofys) AddFileHandle(fh *FileHandle) fuseops.HandleID {
 }
 
 func (fs *Goofys) StatPrinter() {
-	for {
-		time.Sleep(fs.flags.StatsInterval)
+	for atomic.LoadInt32(&fs.shutdown) == 0 {
+		select {
+		case <-time.After(fs.flags.StatsInterval):
+		case <-fs.shutdownCh:
+			return
+		}
 		now := time.Now()
 		d := now.Sub(fs.stats.ts).Seconds()
 		reads := atomic.SwapInt64(&fs.stats.reads, 0)
@@ -484,7 +499,7 @@ func (fs *Goofys) StatPrinter() {
 // Close unneeded cache FDs
 func (fs *Goofys) FDCloser() {
 	fs.diskFdMu.Lock()
-	for {
+	for atomic.LoadInt32(&fs.shutdown) == 0 {
 		rmFdItem := fs.lfru.Pick(nil)
 		for fs.flags.MaxDiskCacheFD > 0 && fs.diskFdCount > fs.flags.MaxDiskCacheFD && rmFdItem != nil {
 			fs.diskFdMu.Unlock()
@@ -702,7 +717,7 @@ func (fs *Goofys) ScheduleRetryFlush() {
 func (fs *Goofys) Flusher() {
 	var inodes []fuseops.InodeID
 	again := false
-	for {
+	for atomic.LoadInt32(&fs.shutdown) == 0 {
 		if !again {
 			fs.flusherMu.Lock()
 			if fs.flushPending == 0 {
@@ -805,9 +820,13 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 func (fs *Goofys) MetaEvictor() {
 	retry := false
 	var seen map[fuseops.InodeID]bool
-	for {
+	for atomic.LoadInt32(&fs.shutdown) == 0 {
 		if !retry {
-			time.Sleep(1 * time.Second)
+			select {
+			case <-time.After(1 * time.Second):
+			case <-fs.shutdownCh:
+				return
+			}
 			seen = make(map[fuseops.InodeID]bool)
 		}
 		// Try to keep the number of cached inodes under control %)

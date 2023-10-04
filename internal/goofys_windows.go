@@ -1028,5 +1028,6 @@ func (fs *GoofysWin) Unmount() error {
 	if !r {
 		return fmt.Errorf("unmounting failed")
 	}
+	fs.Shutdown()
 	return nil
 }

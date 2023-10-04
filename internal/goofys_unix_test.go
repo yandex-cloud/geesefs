@@ -216,6 +216,7 @@ func (s *GoofysTest) TestIssue231(t *C) {
 func (s *GoofysTest) TestFuseWithPrefix(t *C) {
 	mountPoint := s.tmp + "/mnt" + s.fs.bucket
 
+	s.fs.Shutdown()
 	s.fs, _ = NewGoofys(context.Background(), s.fs.bucket+":testprefix", s.fs.flags)
 
 	s.runFuseTest(t, mountPoint, true, s.tmp+"/fuse-test.sh", mountPoint)
