@@ -1564,7 +1564,7 @@ func (inode *Inode) SendUpload() bool {
 	// Pick part(s) to flush
 	initiated := false
 	lastPart := uint64(0)
-	flushInode := inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0
+	flushInode := inode.fileHandles == 0 || inode.forceFlush
 	partDirty := false
 	partLocked := false
 	partEvicted := false
@@ -1641,8 +1641,7 @@ func (inode *Inode) SendUpload() bool {
 			return true
 		}
 	}
-	if canComplete && (inode.fileHandles == 0 || inode.forceFlush ||
-		atomic.LoadInt32(&inode.fs.wantFree) > 0) {
+	if canComplete && flushInode {
 		// Complete the multipart upload
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
