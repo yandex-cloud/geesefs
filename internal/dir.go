@@ -417,7 +417,10 @@ func (dh *DirHandle) handleListResult(resp *ListBlobsOutput, prefix string, skip
 			fs.insertInode(parent, inode)
 		}
 
-		dh.inode.dir.lastFromCloud = &dirName
+		if dh.inode.dir.lastFromCloud == nil ||
+			strings.Compare(*dh.inode.dir.lastFromCloud, dirName) < 0 {
+			dh.inode.dir.lastFromCloud = &dirName
+		}
 	}
 
 	for _, obj := range resp.Items {
@@ -600,7 +603,9 @@ func (dh *DirHandle) listObjectsFlat() (start string, err error) {
 	if resp.IsTruncated {
 		// :-X for history: aws-sdk with its idiotic string pointers was leading
 		// to a huge memory leak when we were saving NextContinuationToken as is
-		dh.inode.dir.listMarker = lastName
+		if dh.inode.dir.listMarker == "" || dh.inode.dir.listMarker < lastName {
+			dh.inode.dir.listMarker = lastName
+		}
 	} else {
 		dh.inode.sealDir()
 	}
@@ -811,11 +816,9 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 		if err != nil {
 			return nil, err
 		}
+		// May be -1 if we remove inodes in loadListing
 		dh.checkDirPosition()
 	}
-
-	// May be -1 if we remove inodes above
-	dh.checkDirPosition()
 
 	if dh.lastInternalOffset-2 >= len(dh.inode.dir.Children) {
 		// we've reached the end
