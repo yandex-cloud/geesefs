@@ -1,3 +1,14 @@
+geesefs (0.38.4) unstable; urgency=medium
+
+  * Optimise extend->write->truncate case - make GeeseFS not send zeroes to the server
+  * Optimise write large file -> update header case - keep modified first part in
+    memory to prevent finalisation of multipart uploads and extra copying of the
+    whole file into self
+  * Fix the last bug in parallel listings, add tests for listings & eviction
+    to prevent future regressions
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Thu, 05 Oct 2023 15:04:44 +0300
+
 geesefs (0.38.3) unstable; urgency=medium
 
   * And one more listing fix :)
