@@ -411,7 +411,7 @@ func (s *GoofysTest) TestReadExternalChangesFuse(t *C) {
 	})
 	t.Assert(err, IsNil)
 
-	time.Sleep(s.fs.flags.StatCacheTTL+1)
+	time.Sleep(s.fs.flags.StatCacheTTL + 1*time.Second)
 
 	buf, err = ioutil.ReadFile(filePath)
 	t.Assert(err, IsNil)
