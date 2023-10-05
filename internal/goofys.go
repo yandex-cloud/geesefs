@@ -529,10 +529,11 @@ func (fs *Goofys) FDCloser() {
 }
 
 // Try to reclaim some clean buffers
-func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
+func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 	freed := int64(0)
 	haveDirty := false
 	// Free at least 5 MB
+	size := origSize
 	if size < 5*1024*1024 {
 		size = 5*1024*1024
 	}
@@ -640,7 +641,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 						}
 					}
 				}
-			} else {
+			} else if inode.fs.partNum(buf.offset+buf.length-1) != inode.fs.partNum(inode.lastWriteEnd) {
 				haveDirty = true
 			}
 			if del >= 0 {
@@ -658,7 +659,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(size int64) (int64, bool) {
 			break
 		}
 	}
-	if haveDirty {
+	if freed < origSize && haveDirty {
 		fs.bufferPool.mu.Unlock()
 		atomic.AddInt32(&fs.wantFree, 1)
 		fs.WakeupFlusherAndWait(true)

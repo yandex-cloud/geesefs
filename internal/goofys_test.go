@@ -628,11 +628,8 @@ func (s *GoofysTest) TestMultipartWriteAndTruncate(t *C) {
 }
 
 func (s *GoofysTest) TestReadWriteMinimumMemory(t *C) {
-	if _, ok := s.cloud.(*ADLv1); ok {
-		s.fs.bufferPool.max = 20*1024*1024
-	} else {
-		s.fs.bufferPool.max = 10*1024*1024
-	}
+	// First part is fixed for "header hack", last part is "still written to"
+	s.fs.bufferPool.max = 20*1024*1024
 	s.testWriteFile(t, "testLargeFile", 21*1024*1024, 128*1024)
 }
 
