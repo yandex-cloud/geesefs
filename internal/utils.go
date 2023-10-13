@@ -115,6 +115,14 @@ func PTime(v time.Time) *time.Time {
 	return &v
 }
 
+func NilUInt32(v *uint32) uint32 {
+	if v == nil {
+		return 0
+	} else {
+		return *v
+	}
+}
+
 func NilInt64(v *int64) int64 {
 	if v == nil {
 		return 0

@@ -500,7 +500,31 @@ MISC OPTIONS:
 		cli.DurationFlag{
 			Name:  "retry-interval",
 			Value: 30 * time.Second,
-			Usage: "Retry unsuccessful flushes after this amount of time",
+			Usage: "Retry unsuccessful writes after this time",
+		},
+
+		cli.DurationFlag{
+			Name:  "read-retry-interval",
+			Value: 1 * time.Second,
+			Usage: "Initial interval for retrying unsuccessful reads",
+		},
+
+		cli.Float64Flag{
+			Name:  "read-retry-mul",
+			Value: 2,
+			Usage: "Increase read retry interval this number of times on each unsuccessful attempt",
+		},
+
+		cli.DurationFlag{
+			Name:  "read-retry-max-interval",
+			Value: 60 * time.Second,
+			Usage: "Maximum interval for retrying unsuccessful reads",
+		},
+
+		cli.DurationFlag{
+			Name:  "read-retry-attempts",
+			Value: 0,
+			Usage: "Maximum read retry attempts (0 means unlimited)",
 		},
 
 		cli.IntFlag{
@@ -758,6 +782,10 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		StatCacheTTL:           c.Duration("stat-cache-ttl"),
 		HTTPTimeout:            c.Duration("http-timeout"),
 		RetryInterval:          c.Duration("retry-interval"),
+		ReadRetryInterval:      c.Duration("read-retry-interval"),
+		ReadRetryMultiplier:    c.Float64("read-retry-mul"),
+		ReadRetryMax:           c.Duration("read-retry-max-interval"),
+		ReadRetryAttempts:      c.Int("read-retry-attempts"),
 		ReadAheadKB:            uint64(c.Int("read-ahead")),
 		SmallReadCount:         uint64(c.Int("small-read-count")),
 		SmallReadCutoffKB:      uint64(c.Int("small-read-cutoff")),

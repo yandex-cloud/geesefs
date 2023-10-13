@@ -512,7 +512,19 @@ func (s *S3Backend) getRequestId(r *request.Request) string {
 		r.HTTPResponse.Header.Get("x-amz-id-2")
 }
 
-func (s *S3Backend) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
+// FIXME: Move retries to common code from S3
+func (s *S3Backend) HeadBlob(req *HeadBlobInput) (resp *HeadBlobOutput, err error) {
+	s.readBackoff(func(attempt int) error {
+		resp, err = s.tryHeadBlob(req)
+		if err != nil && shouldRetry(err) {
+			s3Log.Errorf("Error getting metadata of %v (attempt %v): %v\n", req.Key, attempt, err)
+		}
+		return err
+	})
+	return
+}
+
+func (s *S3Backend) tryHeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
 	head := s3.HeadObjectInput{Bucket: &s.bucket,
 		Key: &param.Key,
 	}
@@ -542,7 +554,20 @@ func (s *S3Backend) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
 	}, nil
 }
 
-func (s *S3Backend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
+// FIXME: Move retries to common code from S3
+func (s *S3Backend) ListBlobs(req *ListBlobsInput) (resp *ListBlobsOutput, err error) {
+	s.readBackoff(func(attempt int) error {
+		resp, err = s.tryListBlobs(req)
+		if err != nil && shouldRetry(err) {
+			s3Log.Errorf("Error listing objects with prefix=%v delimiter=%v start-after=%v max-keys=%v (attempt %v): %v\n",
+				NilStr(req.Prefix), NilStr(req.Delimiter), NilStr(req.StartAfter), NilUInt32(req.MaxKeys), attempt, err)
+		}
+		return err
+	})
+	return
+}
+
+func (s *S3Backend) tryListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 	var maxKeys *int64
 
 	if param.MaxKeys != nil {
@@ -868,7 +893,49 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 	return &CopyBlobOutput{s.getRequestId(req)}, nil
 }
 
-func (s *S3Backend) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
+func shouldRetry(err error) bool {
+	err = mapAwsError(err)
+	return err != syscall.ENOENT && err != syscall.EINVAL &&
+		err != syscall.EACCES && err != syscall.ENOTSUP && err != syscall.ERANGE
+}
+
+// FIXME: Add similar write backoff (now it's handled by file/dir code)
+func (s *S3Backend) readBackoff(try func(attempt int) error) (err error) {
+	interval := s.flags.ReadRetryInterval
+	attempt := 1
+	for {
+		err = try(attempt)
+		if err != nil {
+			if shouldRetry(err) && (s.flags.ReadRetryAttempts < 1 || attempt < s.flags.ReadRetryAttempts) {
+				attempt++
+				time.Sleep(interval)
+				interval = time.Duration(s.flags.ReadRetryMultiplier * float64(interval))
+				if interval > s.flags.ReadRetryMax {
+					interval = s.flags.ReadRetryMax
+				}
+			} else {
+				break
+			}
+		} else {
+			break
+		}
+	}
+	return
+}
+
+// FIXME: Move retries to common code from S3
+func (s *S3Backend) GetBlob(req *GetBlobInput) (resp *GetBlobOutput, err error) {
+	s.readBackoff(func(attempt int) error {
+		resp, err = s.tryGetBlob(req)
+		if err != nil && shouldRetry(err) {
+			log.Errorf("Error reading %v +%v of %v (attempt %v): %v", req.Start, req.Count, req.Key, attempt, err)
+		}
+		return err
+	})
+	return
+}
+
+func (s *S3Backend) tryGetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
 	get := s3.GetObjectInput{
 		Bucket: &s.bucket,
 		Key:    &param.Key,
