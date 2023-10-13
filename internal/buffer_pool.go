@@ -235,7 +235,7 @@ func (pool *BufferPool) UseUnlocked(size int64, ignoreMemoryLimit bool) error {
 				// free memory AND correct our limits, yet we still can't allocate.
 				// it's likely that we are simply asking for too much
 				atomic.AddInt64(&pool.cur, -size)
-				log.Errorf("Unable to allocate %d bytes, used %d bytes, limit is %d bytes", size, atomic.LoadInt64(&pool.cur)-size, pool.max)
+				log.Errorf("Unable to allocate %d bytes, used %d bytes, limit is %d bytes", size, atomic.LoadInt64(&pool.cur), pool.max)
 				return syscall.ENOMEM
 			}
 		}

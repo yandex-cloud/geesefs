@@ -946,7 +946,10 @@ func (inode *Inode) LockRange(offset uint64, size uint64, flushing bool) {
 func (inode *Inode) UnlockRange(offset uint64, size uint64, flushing bool) {
 	for i, v := range inode.readRanges {
 		if v.Offset == offset && v.Size == size && v.Flushing == flushing {
-			inode.readRanges = append(inode.readRanges[0 : i], inode.readRanges[i+1 : ]...)
+			// append(inode.readRanges[0 : i], inode.readRanges[i+1 : ]...) was leading to corruption?..
+			// reproduced in TestReadWriteMinimumMemory
+			copy(inode.readRanges[i:], inode.readRanges[i+1:])
+			inode.readRanges = inode.readRanges[0:len(inode.readRanges)-1]
 			break
 		}
 	}
