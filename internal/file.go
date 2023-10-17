@@ -1373,7 +1373,7 @@ func (inode *Inode) SendUpload() bool {
 							oldParent.mu.Unlock()
 						}
 					} else {
-						log.Debugf("Failed to copy %v to %v (rename): %v", from, key, err)
+						log.Warnf("Failed to copy %v to %v (rename): %v", from, key, err)
 						inode.mu.Lock()
 						inode.recordFlushError(err)
 						if inode.Parent == oldParent && inode.Name == oldName {
@@ -1502,7 +1502,7 @@ func (inode *Inode) SendUpload() bool {
 						s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 						inode.resetCache()
 					}
-					log.Errorf("Error flushing metadata using COPY for %v: %v", key, err)
+					log.Warnf("Error flushing metadata using COPY for %v: %v", key, err)
 				} else if inode.CacheState == ST_MODIFIED && !inode.isStillDirty() {
 					inode.SetCacheState(ST_CACHED)
 					inode.SetAttrTime(time.Now())
@@ -1551,7 +1551,7 @@ func (inode *Inode) SendUpload() bool {
 			inode.mu.Lock()
 			inode.recordFlushError(err)
 			if err != nil {
-				log.Errorf("Failed to initiate multipart upload for %v: %v", key, err)
+				log.Warnf("Failed to initiate multipart upload for %v: %v", key, err)
 			} else {
 				log.Debugf("Started multi-part upload of object %v", key)
 				inode.mpu = resp
@@ -1709,7 +1709,7 @@ func (inode *Inode) resetCache() {
 		go func(mpu *MultipartBlobCommitInput) {
 			_, abortErr := cloud.MultipartBlobAbort(mpu)
 			if abortErr != nil {
-				log.Errorf("Failed to abort multi-part upload of object %v: %v", key, abortErr)
+				log.Warnf("Failed to abort multi-part upload of object %v: %v", key, abortErr)
 			}
 		}(inode.mpu)
 		inode.mpu = nil
@@ -1776,7 +1776,7 @@ func (inode *Inode) FlushSmallObject() {
 		go func(mpu *MultipartBlobCommitInput) {
 			_, abortErr := cloud.MultipartBlobAbort(mpu)
 			if abortErr != nil {
-				log.Errorf("Failed to abort multi-part upload of object %v: %v", key, abortErr)
+				log.Warnf("Failed to abort multi-part upload of object %v: %v", key, abortErr)
 			}
 		}(inode.mpu)
 		inode.mpu = nil
@@ -1789,7 +1789,7 @@ func (inode *Inode) FlushSmallObject() {
 
 	inode.recordFlushError(err)
 	if err != nil {
-		log.Errorf("Failed to flush small file %v: %v", key, err)
+		log.Warnf("Failed to flush small file %v: %v", key, err)
 		if params.Metadata != nil {
 			inode.userMetadataDirty = 2
 		}
@@ -1890,7 +1890,7 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 						Size:       size,
 					})
 					if requestErr != nil {
-						log.Errorf("Failed to copy unmodified range %v-%v MB of object %v: %v",
+						log.Warnf("Failed to copy unmodified range %v-%v MB of object %v: %v",
 							offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key, requestErr)
 						err = requestErr
 					} else {
@@ -1943,7 +1943,7 @@ func (inode *Inode) FlushPart(part uint64) {
 			return
 		}
 		if err != nil {
-			log.Errorf("Failed to load part %v of object %v to flush it: %v", part, key, err)
+			log.Warnf("Failed to load part %v of object %v to flush it: %v", part, key, err)
 			return
 		}
 		// File size may have been changed again
@@ -1981,7 +1981,7 @@ func (inode *Inode) FlushPart(part uint64) {
 	}
 	inode.recordFlushError(err)
 	if err != nil {
-		log.Errorf("Failed to flush part %v of object %v: %v", part, key, err)
+		log.Warnf("Failed to flush part %v of object %v: %v", part, key, err)
 	} else {
 		if inode.mpu != nil {
 			// It could become nil if the file was deleted remotely in the meantime
@@ -2044,7 +2044,7 @@ func (inode *Inode) completeMultipart() {
 		if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
 			inode.recordFlushError(err)
 			if err != nil {
-				log.Errorf("Failed to finalize multi-part upload of object %v: %v", key, err)
+				log.Warnf("Failed to finalize multi-part upload of object %v: %v", key, err)
 				if inode.mpu.Metadata != nil {
 					inode.userMetadataDirty = 2
 				}

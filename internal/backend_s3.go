@@ -517,7 +517,7 @@ func (s *S3Backend) HeadBlob(req *HeadBlobInput) (resp *HeadBlobOutput, err erro
 	s.readBackoff(func(attempt int) error {
 		resp, err = s.tryHeadBlob(req)
 		if err != nil && shouldRetry(err) {
-			s3Log.Errorf("Error getting metadata of %v (attempt %v): %v\n", req.Key, attempt, err)
+			s3Log.Warnf("Error getting metadata of %v (attempt %v): %v\n", req.Key, attempt, err)
 		}
 		return err
 	})
@@ -559,7 +559,7 @@ func (s *S3Backend) ListBlobs(req *ListBlobsInput) (resp *ListBlobsOutput, err e
 	s.readBackoff(func(attempt int) error {
 		resp, err = s.tryListBlobs(req)
 		if err != nil && shouldRetry(err) {
-			s3Log.Errorf("Error listing objects with prefix=%v delimiter=%v start-after=%v max-keys=%v (attempt %v): %v\n",
+			s3Log.Warnf("Error listing objects with prefix=%v delimiter=%v start-after=%v max-keys=%v (attempt %v): %v\n",
 				NilStr(req.Prefix), NilStr(req.Delimiter), NilStr(req.StartAfter), NilUInt32(req.MaxKeys), attempt, err)
 		}
 		return err
@@ -682,7 +682,7 @@ func (s *S3Backend) mpuCopyPart(from string, to string, mpuId string, bytes stri
 
 	resp, err := s.UploadPartCopy(params)
 	if err != nil {
-		s3Log.Errorf("UploadPartCopy %v = %v", params, err)
+		s3Log.Warnf("UploadPartCopy %v = %v", params, err)
 		*errout = err
 		return
 	}
@@ -799,7 +799,7 @@ func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuI
 		req, _ := s.CompleteMultipartUploadRequest(params)
 		err = req.Send()
 		if err != nil {
-			s3Log.Errorf("Complete MPU %v = %v", params, err)
+			s3Log.Warnf("Complete MPU %v = %v", params, err)
 		} else {
 			requestId = s.getRequestId(req)
 		}
@@ -886,7 +886,7 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 	req.Config.HTTPClient.Timeout = 15 * time.Minute
 	err := req.Send()
 	if err != nil {
-		s3Log.Errorf("CopyObject %v = %v", params, err)
+		s3Log.Warnf("CopyObject %v = %v", params, err)
 		return nil, err
 	}
 
@@ -928,7 +928,7 @@ func (s *S3Backend) GetBlob(req *GetBlobInput) (resp *GetBlobOutput, err error) 
 	s.readBackoff(func(attempt int) error {
 		resp, err = s.tryGetBlob(req)
 		if err != nil && shouldRetry(err) {
-			log.Errorf("Error reading %v +%v of %v (attempt %v): %v", req.Start, req.Count, req.Key, attempt, err)
+			s3Log.Warnf("Error reading %v +%v of %v (attempt %v): %v", req.Start, req.Count, req.Key, attempt, err)
 		}
 		return err
 	})
@@ -1070,7 +1070,7 @@ func (s *S3Backend) MultipartBlobBegin(param *MultipartBlobBeginInput) (*Multipa
 
 	resp, err := s.CreateMultipartUpload(&mpu)
 	if err != nil {
-		s3Log.Errorf("CreateMultipartUpload %v = %v", param.Key, err)
+		s3Log.Warnf("CreateMultipartUpload %v = %v", param.Key, err)
 		return nil, err
 	}
 
