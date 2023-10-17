@@ -248,7 +248,6 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, sealEnd b
 	resp, err := cloud.ListBlobs(params)
 	if err != nil {
 		parent.fs.completeInflightListing(myList)
-		s3Log.Errorf("ListObjects %v = %v", params, err)
 		return
 	}
 	s3Log.Debug(resp)
@@ -1152,7 +1151,7 @@ func (inode *Inode) SendDelete() {
 		}
 		inode.recordFlushError(err)
 		if err != nil {
-			log.Errorf("Failed to delete object %v: %v", key, err)
+			log.Warnf("Failed to delete object %v: %v", key, err)
 			inode.mu.Unlock()
 			inode.fs.WakeupFlusher()
 			return
@@ -1414,7 +1413,7 @@ func (dir *Inode) SendMkDir() {
 		dir.IsFlushing -= dir.fs.flags.MaxParallelParts
 		dir.recordFlushError(err)
 		if err != nil {
-			log.Errorf("Failed to create directory object %v: %v", key, err)
+			log.Warnf("Failed to create directory object %v: %v", key, err)
 			dir.fs.WakeupFlusher()
 			return
 		}
@@ -1729,7 +1728,7 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 			err = os.Rename(oldFileName, newFileName)
 		}
 		if err != nil {
-			log.Errorf("Error renaming %v to %v: %v", oldFileName, newFileName, err)
+			log.Warnf("Error renaming %v to %v: %v", oldFileName, newFileName, err)
 			if fromInode.DiskCacheFD != nil {
 				fromInode.DiskCacheFD.Close()
 				fromInode.DiskCacheFD = nil

@@ -1134,14 +1134,14 @@ func mapAwsError(err error) error {
 			if err != nil {
 				return err
 			} else {
-				s3Log.Errorf("http=%v %v s3=%v request=%v\n",
+				s3Log.Warnf("http=%v %v s3=%v request=%v\n",
 					reqErr.StatusCode(), reqErr.Message(),
 					awsErr.Code(), reqErr.RequestID())
 				return reqErr
 			}
 		} else {
 			// Generic AWS Error with Code, Message, and original error (if any)
-			s3Log.Errorf("code=%v msg=%v, err=%v\n", awsErr.Code(), awsErr.Message(), awsErr.OrigErr())
+			s3Log.Warnf("code=%v msg=%v, err=%v\n", awsErr.Code(), awsErr.Message(), awsErr.OrigErr())
 			return awsErr
 		}
 	} else {
