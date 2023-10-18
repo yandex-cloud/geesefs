@@ -58,6 +58,7 @@ require (
 	github.com/smartystreets/assertions v0.0.0-20160201214316-443d812296a8 // indirect
 	github.com/smartystreets/goconvey v1.6.1-0.20160119221636-995f5b2e021c // indirect
 	github.com/stretchr/testify v1.7.0 // indirect
+	github.com/tidwall/btree v1.7.0 // indirect
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/crypto v0.0.0-20220525230936-793ad666bf5e // indirect
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect

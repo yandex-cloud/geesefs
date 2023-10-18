@@ -242,6 +242,8 @@ github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5
 github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.7.0 h1:nwc3DEeHmmLAfoZucVR881uASk0Mfjw8xYJ99tb5CcY=
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
+github.com/tidwall/btree v1.7.0 h1:L1fkJH/AuEh5zBnnBbmTwQ5Lt+bRJ5A8EWecslvo9iI=
+github.com/tidwall/btree v1.7.0/go.mod h1:twD9XRA5jj9VUQGELzDO4HPQTNJsoWWfYEL+EUQ2cKY=
 github.com/urfave/cli v1.21.1-0.20190807111034-521735b7608a h1:Q372CokLjPoo4bx4qmpjaxZ0yEJR05rZkeEyXcEvSTY=
 github.com/urfave/cli v1.21.1-0.20190807111034-521735b7608a/go.mod h1:pLnliFgEwGWwRKy8217bLxXBDmG6pBQeZcIzf+m7U+k=
 github.com/vitalif/cgofuse v0.0.0-20230609211427-22e8fa44f6b8 h1:oskCaIGAfveNfZlA21J+oLxTyhF+dqWXPNtqQkIBuUs=

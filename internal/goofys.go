@@ -529,6 +529,10 @@ func (fs *Goofys) FDCloser() {
 	fs.diskFdMu.Unlock()
 }
 
+func (fs *Goofys) addMemRecency(mem uint64) uint64 {
+	return atomic.AddUint64(&fs.memRecency, mem)
+}
+
 // Try to reclaim some clean buffers
 func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 	freed := int64(0)
@@ -569,9 +573,9 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 		}
 		inode.mu.Lock()
 		toFs := -1
-		inode.buffers = filterBuffers(inode.buffers, func(buf, prev *FileBuffer) FilterAction {
+		inode.buffers.Filter(func(buf, prev *FileBuffer) (cont bool, del bool) {
 			if freed >= size {
-				return FA_STOP
+				return false, false
 			}
 			// Never evict buffers flushed in an incomplete (last) part
 			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED_FULL {
@@ -590,7 +594,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 					buf.ptr = nil
 					buf.data = nil
 					if buf.dirtyID == 0 && !buf.onDisk {
-						return FA_DEL
+						return true, true
 					} else if buf.state == BUF_FLUSHED_FULL {
 						// A flushed buffer can be removed at a cost of finalizing multipart upload
 						// to read it back later. However it's likely not a problem if we're uploading
@@ -600,7 +604,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 						if prev != nil && prev.state == BUF_FL_CLEARED &&
 							buf.offset == (prev.offset + prev.length) {
 							prev.length += buf.length
-							return FA_DEL
+							return true, true
 						} else {
 							buf.state = BUF_FL_CLEARED
 						}
@@ -609,7 +613,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 			} else if inode.fs.partNum(buf.offset+buf.length-1) != inode.fs.partNum(inode.lastWriteEnd) {
 				haveDirty = true
 			}
-			return FA_LEAVE
+			return true, false
 		})
 		inode.mu.Unlock()
 		if freed >= size {
@@ -651,47 +655,6 @@ func (fs *Goofys) tryEvictToDisk(inode *Inode, buf *FileBuffer, toFs *int) {
 			}
 		}
 	}
-}
-
-type FilterAction uint8
-
-const (
-	FA_LEAVE FilterAction = 1
-	FA_DEL   FilterAction = 2
-	FA_STOP  FilterAction = 3
-)
-
-func filterBuffers(buffers []*FileBuffer, cb func(buf, prev *FileBuffer) FilterAction) []*FileBuffer {
-	del := -1
-	i := 0
-	var prev *FileBuffer
-	for ; i < len(buffers); i++ {
-		buf := buffers[i]
-		action := cb(buf, prev)
-		if action == FA_DEL {
-			if del == -1 {
-				if i > 0 {
-					prev = buffers[i-1]
-				}
-				del = i
-			}
-		} else {
-			if del >= 0 {
-				buffers = append(buffers[0 : del], buffers[i : ]...)
-				i = del
-				del = -1
-			}
-			prev = buf
-		}
-		if action == FA_STOP {
-			break
-		}
-	}
-	if del >= 0 {
-		buffers = append(buffers[0 : del], buffers[i : ]...)
-		del = -1
-	}
-	return buffers
 }
 
 func (fs *Goofys) WakeupFlusherAndWait(wait bool) {

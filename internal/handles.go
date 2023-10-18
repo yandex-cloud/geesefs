@@ -76,46 +76,6 @@ type MPUPart struct {
 	ETag string
 }
 
-const (
-	// Buffer is clean
-	BUF_CLEAN int16 = 1
-	// Buffer is modified locally
-	BUF_DIRTY int16 = 2
-	// Buffer is flushed to the server as a full part, but multipart upload is not finalized yet
-	BUF_FLUSHED_FULL int16 = 3
-	// Buffer is flushed to the server as an undersized part
-	// (and multipart upload is not finalized yet)
-	BUF_FLUSHED_CUT int16 = 4
-	// Buffer is flushed to the server and then removed from memory
-	// (which is only possible for BUF_FLUSHED_FULL buffers)
-	// (and multipart upload is not finalized yet)
-	BUF_FL_CLEARED int16 = 5
-)
-
-type FileBuffer struct {
-	offset uint64
-	length uint64
-	// Chunk state: 1 = clean. 2 = dirty. 3 = part flushed, but not finalized
-	// 4 = flushed, not finalized, but removed from memory
-	state int16
-	// Loading from server or from disk
-	loading bool
-	// Latest chunk data is written to the disk cache
-	onDisk bool
-	// Chunk only contains zeroes, data and ptr are nil
-	zero bool
-	// Memory allocation recency counter
-	recency uint64
-	// Unmodified chunks (equal to the current server-side object state) have dirtyID = 0.
-	// Every write or split assigns a new unique chunk ID.
-	// Flusher tracks IDs that are currently being flushed to the server,
-	// which allows to do flush and write in parallel.
-	dirtyID uint64
-	// Data
-	data []byte
-	ptr *BufferPointer
-}
-
 type Inode struct {
 	Id         fuseops.InodeID
 	Name       string
@@ -148,7 +108,7 @@ type Inode struct {
 
 	// cached/buffered data
 	CacheState int32
-	buffers []*FileBuffer
+	buffers BufferList
 	readRanges []ReadRange
 	DiskCacheFD *os.File
 	OnDisk bool
@@ -205,6 +165,8 @@ func NewInode(fs *Goofys, parent *Inode, name string) (inode *Inode) {
 		refcnt:     0,
 	}
 
+	inode.buffers.helpers = inode.fs
+
 	return
 }
 
@@ -227,7 +189,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
 		}
 		inode.resetCache()
-		inode.ResizeUnlocked(item.Size, false, false)
+		inode.Attributes.Size = item.Size
 		inode.knownSize = item.Size
 		if item.LastModified != nil {
 			inode.Attributes.Mtime = *item.LastModified

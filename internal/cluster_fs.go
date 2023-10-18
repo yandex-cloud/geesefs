@@ -534,7 +534,7 @@ func (fs *ClusterFs) setInodeAttributes(inode *Inode, size *uint64, mtime *time.
 		if *size > fs.Goofys.getMaxFileSize() {
 			return syscall.EFBIG
 		}
-		inode.ResizeUnlocked(*size, true, true)
+		inode.ResizeUnlocked(*size, true)
 		modified = true
 	}
 

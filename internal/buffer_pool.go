@@ -17,7 +17,6 @@ package internal
 
 import (
 	"github.com/yandex-cloud/geesefs/internal/cfg"
-	"io"
 	"runtime"
 	"runtime/debug"
 	"sync"
@@ -44,118 +43,6 @@ type BufferPool struct {
 	gcInterval uint64
 
 	FreeSomeCleanBuffers func(size int64) (int64, bool)
-}
-
-// Several FileBuffers may be slices of the same array,
-// but we want to track memory usage, so we have to refcount them... O_o
-type BufferPointer struct {
-	mem []byte
-	refs int
-}
-
-type BufferOrZero struct {
-	data []byte
-	zero bool
-	size uint64
-}
-
-type MultiReader struct {
-	buffers []BufferOrZero
-	idx int
-	pos uint64
-	bufPos uint64
-	size uint64
-}
-
-func NewMultiReader() *MultiReader {
-	return &MultiReader{
-	}
-}
-
-func (r *MultiReader) AddBuffer(buf []byte) {
-	r.buffers = append(r.buffers, BufferOrZero{
-		data: buf,
-		size: uint64(len(buf)),
-	})
-	r.size += uint64(len(buf))
-}
-
-func (r *MultiReader) AddZero(size uint64) {
-	r.buffers = append(r.buffers, BufferOrZero{
-		zero: true,
-		size: size,
-	})
-	r.size += size
-}
-
-func memzero(buf []byte) {
-	for j := 0; j < len(buf); j++ {
-		buf[j] = 0
-	}
-}
-
-func (r *MultiReader) Read(buf []byte) (n int, err error) {
-	n = 0
-	if r.idx >= len(r.buffers) {
-		err = io.EOF
-		return
-	}
-	remaining := uint64(len(buf))
-	outPos := uint64(0)
-	for r.idx < len(r.buffers) && remaining > 0 {
-		l := r.buffers[r.idx].size - r.bufPos
-		if l > remaining {
-			l = remaining
-		}
-		if r.buffers[r.idx].zero {
-			memzero(buf[outPos : outPos+l])
-		} else {
-			copy(buf[outPos : outPos+l], r.buffers[r.idx].data[r.bufPos : r.bufPos+l])
-		}
-		outPos += l
-		remaining -= l
-		r.pos += l
-		r.bufPos += l
-		if r.bufPos >= r.buffers[r.idx].size {
-			r.idx++
-			r.bufPos = 0
-		}
-	}
-	n = int(outPos)
-	return
-}
-
-func (r *MultiReader) Seek(offset int64, whence int) (newOffset int64, err error) {
-	if whence == io.SeekEnd {
-		offset += int64(r.size)
-	} else if whence == io.SeekCurrent {
-		offset += int64(r.pos)
-	}
-	if offset > int64(r.size) {
-		offset = int64(r.size)
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	uOffset := uint64(offset)
-	r.idx = 0
-	r.pos = 0
-	r.bufPos = 0
-	for r.pos < uOffset {
-		end := r.pos + r.buffers[r.idx].size
-		if end <= uOffset {
-			r.pos = end
-			r.idx++
-		} else {
-			r.bufPos = uOffset-r.pos
-			r.pos = uOffset
-		}
-	}
-	return int64(r.pos), nil
-}
-
-func (r *MultiReader) Len() uint64 {
-	return r.size
 }
 
 func NewBufferPool(limit int64, gcInterval uint64) *BufferPool {

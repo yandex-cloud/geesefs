@@ -601,13 +601,7 @@ func (s *GoofysTest) TestMultipartWriteAndTruncate(t *C) {
 	// Now don't close the FD, but wait until both parts are flushed
 	for {
 		fh.inode.mu.Lock()
-		dirty := false
-		for _, buf := range fh.inode.buffers {
-			if buf.state == BUF_DIRTY {
-				dirty = true
-				break
-			}
-		}
+		dirty := fh.inode.buffers.AnyDirty()
 		fh.inode.mu.Unlock()
 		if !dirty {
 			break
@@ -630,6 +624,7 @@ func (s *GoofysTest) TestMultipartWriteAndTruncate(t *C) {
 func (s *GoofysTest) TestReadWriteMinimumMemory(t *C) {
 	// First part is fixed for "header hack", last part is "still written to"
 	s.fs.bufferPool.max = 20*1024*1024
+	s.fs.flags.ReadAheadLargeKB = s.fs.flags.ReadAheadKB
 	s.testWriteFile(t, "testLargeFile", 21*1024*1024, 128*1024)
 }
 

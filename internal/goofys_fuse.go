@@ -825,7 +825,7 @@ func (fs *GoofysFuse) Fallocate(
 				inode.mu.Unlock()
 				return syscall.EFBIG
 			}
-			inode.ResizeUnlocked(op.Offset+op.Length, true, true)
+			inode.ResizeUnlocked(op.Offset+op.Length, true)
 			modified = true
 		} else {
 			if op.Offset > inode.Attributes.Size {
@@ -837,7 +837,7 @@ func (fs *GoofysFuse) Fallocate(
 
 	if (op.Mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)) != 0 {
 		// Zero fill
-		mod, _ := inode.zeroRange(op.Offset, op.Length)
+		mod, _ := inode.buffers.ZeroRange(op.Offset, op.Length)
 		modified = modified || mod
 	}
 
