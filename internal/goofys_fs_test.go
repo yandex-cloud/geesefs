@@ -27,6 +27,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -810,5 +812,111 @@ func (s *GoofysTest) TestListSlurpExpireNoCloud(t *C) {
 	t.Assert(err, IsNil)
 	dh = in.OpenDir()
 	t.Assert(namesOf(s.readDirFully(t, dh)), DeepEquals, names)
+	dh.CloseDir()
+}
+
+// Case from oracle rman
+func (s *GoofysTest) TestOracleNoCloud(t *C) {
+	var err error
+
+	flags := cfg.DefaultFlags()
+
+	flags.StatCacheTTL = 1 * time.Second
+
+	subdir := "opt/acfs-junk/appl1/APPLCSF/out/"
+	data, _ := os.ReadFile("/home/vitaliff/prod-appl1_APPLCSF_out.txt")
+	lines := strings.Split(string(data), "\n")
+	for lines[len(lines)-1] == "" {
+		lines = lines[0:len(lines)-1]
+	}
+	sort.Strings(lines)
+//	for i := 0; i < len(lines); i++ {
+//		lines[i] = subdir+lines[i]
+//	}
+	data = nil
+
+	// Use mocked backend
+	backend := &TestBackend{
+		err: syscall.ENOSYS,
+		ListBlobsFunc: func(param *ListBlobsInput) (*ListBlobsOutput, error) {
+			if param.ContinuationToken != nil {
+				return nil, syscall.EINVAL
+			}
+			prefix, delim, after := NilStr(param.Prefix), NilStr(param.Delimiter), NilStr(param.StartAfter)
+			limit := int(NilUInt32(param.MaxKeys))
+			if limit == 0 || limit > 1000 {
+				limit = 1000
+			}
+			fmt.Printf("ListBlobs: Prefix=%v, Delimiter=%v, StartAfter=%v\n", prefix, delim, after)
+			if delim != "" && delim != "/" {
+				return nil, syscall.EINVAL
+			}
+			if len(after) < len(subdir) {
+				if after > subdir[0:len(after)] {
+					return &ListBlobsOutput{}, nil
+				}
+				after = ""
+			} else {
+				if after[0:len(subdir)] > subdir {
+					return &ListBlobsOutput{}, nil
+				}
+				if after[0:len(subdir)] < subdir {
+					after = ""
+				}
+				after = after[len(subdir):]
+			}
+			if prefix != "" {
+				if len(prefix) < len(subdir) {
+					if prefix != subdir[0:len(prefix)] {
+						return &ListBlobsOutput{}, nil
+					}
+					if prefix[len(prefix)-1] != '/' || delim == "" {
+						return nil, syscall.EINVAL
+					}
+					return &ListBlobsOutput{
+						Items: []BlobItemOutput{
+							{Key: PString(subdir[0:1+len(prefix)+strings.Index(subdir[len(prefix):], "/")])},
+						},
+						Prefixes: []BlobPrefixOutput{
+							{Prefix: PString(subdir[0:1+len(prefix)+strings.Index(subdir[len(prefix):], "/")])},
+						},
+					}, nil
+				}
+				if len(prefix) > len(subdir) {
+					// no subdirs
+					return &ListBlobsOutput{}, nil
+				}
+				if prefix != subdir {
+					// no other dirs
+					return &ListBlobsOutput{}, nil
+				}
+			}
+			pos := sort.Search(len(lines), func(i int) bool {
+				return lines[i] > after
+			})
+			var items []BlobItemOutput
+			i := 0
+			for ; pos+i < len(lines) && i < limit; i++ {
+				items = append(items, BlobItemOutput{Key: PString(subdir+lines[pos+i])})
+			}
+			truncated := pos+i < len(lines)
+			return &ListBlobsOutput{
+				IsTruncated: truncated,
+				Items: items,
+			}, nil
+		},
+	}
+	s.cloud = backend
+	s.fs, err = newGoofys(context.Background(), "test", flags, func(string, *cfg.FlagStorage) (StorageBackend, error) {
+		return backend, nil
+	})
+	t.Assert(err, IsNil)
+
+	in, err := s.fs.LookupPath(subdir[0:len(subdir)-1])
+	t.Assert(err, IsNil)
+	dh := in.OpenDir()
+	names := namesOf(s.readDirFully(t, dh))
+	t.Assert(len(names), Equals, len(lines))
+	t.Assert(names, DeepEquals, lines)
 	dh.CloseDir()
 }
