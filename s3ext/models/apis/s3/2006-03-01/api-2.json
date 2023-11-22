@@ -5313,11 +5313,17 @@
     },
     "PartsCount":{"type":"integer"},
     "PatchAppendPartSize":{"type": "integer"},
-    "PatchObjectOutput":{
+    "PatchedObjectInfo":{
       "type":"structure",
       "members":{
         "ETag":{"shape":"ETag"},
         "LastModified":{"shape":"LastModified"}
+      }
+    },
+    "PatchObjectOutput":{
+      "type":"structure",
+      "members":{
+        "Object":{"shape":"PatchedObjectInfo"}
       }
     },
     "PatchObjectRequest":{
@@ -5325,7 +5331,7 @@
       "required":[
         "Bucket",
         "Key",
-        "Range"
+        "ContentRange"
       ],
       "members":{
         "Body":{
@@ -5356,16 +5362,6 @@
           "shape":"IfMatch",
           "location":"header",
           "locationName":"If-Match"
-        },
-        "IfModifiedSince":{
-          "shape":"IfModifiedSince",
-          "location":"header",
-          "locationName":"If-Modified-Since"
-        },
-        "IfNoneMatch":{
-          "shape":"IfNoneMatch",
-          "location":"header",
-          "locationName":"If-None-Match"
         },
         "IfUnmodifiedSince":{
           "shape":"IfUnmodifiedSince",

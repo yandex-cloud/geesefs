@@ -1063,7 +1063,7 @@ func (s *S3Backend) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
 	patch := &s3.PatchObjectInput{
 		Bucket:       &s.bucket,
 		Key:          &param.Key,
-		ContentRange: PString(fmt.Sprintf("bytes=%d-%d", param.Offset, param.Offset+param.Size-1)),
+		ContentRange: PString(fmt.Sprintf("bytes %d-%d/*", param.Offset, param.Offset+param.Size-1)),
 		Body:         param.Body,
 	}
 	if param.AppendPartSize > 0 {
@@ -1082,8 +1082,8 @@ func (s *S3Backend) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
 	}
 
 	return &PatchBlobOutput{
-		ETag:         resp.ETag,
-		LastModified: resp.LastModified,
+		ETag:         resp.Object.ETag,
+		LastModified: resp.Object.LastModified,
 		RequestId:    s.getRequestId(req),
 	}, nil
 }

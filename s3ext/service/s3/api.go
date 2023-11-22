@@ -27406,13 +27406,10 @@ type PatchObjectInput struct {
 
 	ContentLength *int64 `location:"header" locationName:"Content-Length" type:"long"`
 
-	ContentRange *string `location:"header" locationName:"Content-Range" type:"string"`
+	// ContentRange is a required field
+	ContentRange *string `location:"header" locationName:"Content-Range" type:"string" required:"true"`
 
 	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
-
-	IfModifiedSince *time.Time `location:"header" locationName:"If-Modified-Since" type:"timestamp"`
-
-	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
 
 	IfUnmodifiedSince *time.Time `location:"header" locationName:"If-Unmodified-Since" type:"timestamp"`
 
@@ -27440,6 +27437,9 @@ func (s *PatchObjectInput) Validate() error {
 	}
 	if s.Bucket != nil && len(*s.Bucket) < 1 {
 		invalidParams.Add(request.NewErrParamMinLen("Bucket", 1))
+	}
+	if s.ContentRange == nil {
+		invalidParams.Add(request.NewErrParamRequired("ContentRange"))
 	}
 	if s.Key == nil {
 		invalidParams.Add(request.NewErrParamRequired("Key"))
@@ -27491,18 +27491,6 @@ func (s *PatchObjectInput) SetIfMatch(v string) *PatchObjectInput {
 	return s
 }
 
-// SetIfModifiedSince sets the IfModifiedSince field's value.
-func (s *PatchObjectInput) SetIfModifiedSince(v time.Time) *PatchObjectInput {
-	s.IfModifiedSince = &v
-	return s
-}
-
-// SetIfNoneMatch sets the IfNoneMatch field's value.
-func (s *PatchObjectInput) SetIfNoneMatch(v string) *PatchObjectInput {
-	s.IfNoneMatch = &v
-	return s
-}
-
 // SetIfUnmodifiedSince sets the IfUnmodifiedSince field's value.
 func (s *PatchObjectInput) SetIfUnmodifiedSince(v time.Time) *PatchObjectInput {
 	s.IfUnmodifiedSince = &v
@@ -27551,9 +27539,7 @@ func (s PatchObjectInput) updateArnableField(v string) (interface{}, error) {
 type PatchObjectOutput struct {
 	_ struct{} `type:"structure"`
 
-	ETag *string `type:"string"`
-
-	LastModified *time.Time `type:"timestamp"`
+	Object *PatchedObjectInfo `type:"structure"`
 }
 
 // String returns the string representation
@@ -27566,14 +27552,38 @@ func (s PatchObjectOutput) GoString() string {
 	return s.String()
 }
 
+// SetObject sets the Object field's value.
+func (s *PatchObjectOutput) SetObject(v *PatchedObjectInfo) *PatchObjectOutput {
+	s.Object = v
+	return s
+}
+
+type PatchedObjectInfo struct {
+	_ struct{} `type:"structure"`
+
+	ETag *string `type:"string"`
+
+	LastModified *time.Time `type:"timestamp"`
+}
+
+// String returns the string representation
+func (s PatchedObjectInfo) String() string {
+	return awsutil.Prettify(s)
+}
+
+// GoString returns the string representation
+func (s PatchedObjectInfo) GoString() string {
+	return s.String()
+}
+
 // SetETag sets the ETag field's value.
-func (s *PatchObjectOutput) SetETag(v string) *PatchObjectOutput {
+func (s *PatchedObjectInfo) SetETag(v string) *PatchedObjectInfo {
 	s.ETag = &v
 	return s
 }
 
 // SetLastModified sets the LastModified field's value.
-func (s *PatchObjectOutput) SetLastModified(v time.Time) *PatchObjectOutput {
+func (s *PatchedObjectInfo) SetLastModified(v time.Time) *PatchedObjectInfo {
 	s.LastModified = &v
 	return s
 }
