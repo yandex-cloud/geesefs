@@ -103,7 +103,7 @@ Currently the feature can be enabled with `--enable-patch` and will be enabled b
 
 Enabling patch uploads has the following benefits:
 - Fast [fsync](#fsync): since nothing needs to be copied, fsync is now much cheaper
-- Support for [concurrent updates](#concurrent-updates)
+- Support for [concurrent updates](#concurrent-patch)
 - Better memory utilization: less intermediate state needs to be cached, so more memory can be used for (meta)data cache
 - Better performance for big files
 
@@ -232,8 +232,6 @@ fio -name=test -ioengine=libaio -direct=1 -bs=4M -iodepth=1 -fallocate=none \
 
 ## Concurrent Updates
 
-### Other clouds
-
 GeeseFS doesn't support concurrent updates of the same file from multiple hosts. If you try to
 do that you should guarantee that one host calls `fsync()` on the modified file and then waits
 for at least `--stat-cache-ttl` (1 minute by default) before allowing other hosts to start
@@ -245,7 +243,7 @@ you may encounter lost updates (conflicts) which are reported in the log in the 
 main.WARNING File xxx/yyy is deleted or resized remotely, discarding local changes
 ```
 
-### PATCH
+### Concurrent PATCH
 
 When using Yandex S3, it is possible to concurrently update a single object/file from multiple hosts
 using PATCH method (`--enable-patch`). However, concurrent changes are not reported back to the clients,
