@@ -1773,7 +1773,9 @@ func (inode *Inode) flushLimitsExceeded() bool {
 }
 
 func (inode *Inode) patchSimpleObj(bufs []*FileBuffer) {
-	inode.LockRange(0, inode.Attributes.Size, true)
+	size := inode.Attributes.Size
+
+	inode.LockRange(0, size, true)
 	inode.IsFlushing += inode.fs.flags.MaxParallelParts
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
 
@@ -1781,7 +1783,7 @@ func (inode *Inode) patchSimpleObj(bufs []*FileBuffer) {
 		inode.mu.Lock()
 		inode.patchFromBuffers(bufs, 0)
 
-		inode.UnlockRange(0, inode.Attributes.Size, true)
+		inode.UnlockRange(0, size, true)
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 		inode.mu.Unlock()
 
