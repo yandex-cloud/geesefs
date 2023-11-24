@@ -1,3 +1,9 @@
+geesefs (0.39.0) unstable; urgency=medium
+
+  * Add PATCH support for Yandex Cloud S3 https://cloud.yandex.ru/docs/storage/s3/api-ref/object/patch
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 24 Nov 2023 18:52:12 +0300
+
 geesefs (0.38.5) unstable; urgency=medium
 
   * Implement read retries
