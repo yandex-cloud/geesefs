@@ -399,6 +399,7 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 	if res == 0 && inode.CacheState <= ST_DEAD {
 		inode.resetCache()
 		inode.fs.mu.Lock()
+		inode.resetExpireTime()
 		delete(inode.fs.inodes, inode.Id)
 		inode.fs.forgotCnt += 1
 		inode.fs.mu.Unlock()
@@ -444,6 +445,20 @@ func (inode *Inode) SetExpireTime(tm time.Time) {
 		newMap[inode.Id] = true
 	}
 	inode.fs.mu.Unlock()
+}
+
+// LOCKS_REQUIRED(inode.mu)
+// LOCKS_REQUIRED(inode.fs.mu)
+func (inode *Inode) resetExpireTime() {
+	oldTime := inode.ExpireTime.Unix()
+	inode.ExpireTime = time.Time{}
+	oldMap := inode.fs.inodesByTime[oldTime]
+	if oldMap != nil {
+		delete(oldMap, inode.Id)
+		if len(oldMap) == 0 {
+			delete(inode.fs.inodesByTime, oldTime)
+		}
+	}
 }
 
 // LOCKS_EXCLUDED(inode.mu)

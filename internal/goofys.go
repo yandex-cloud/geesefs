@@ -834,6 +834,7 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 	childTmp.SetCacheState(ST_DEAD)
 	// Drop inode
 	fs.mu.Lock()
+	childTmp.resetExpireTime()
 	delete(fs.inodes, childTmp.Id)
 	fs.forgotCnt += 1
 	fs.mu.Unlock()
@@ -857,7 +858,8 @@ func (fs *Goofys) MetaEvictor() {
 		}
 		// Try to keep the number of cached inodes under control %)
 		fs.mu.RLock()
-		toEvict := (len(fs.inodes)-fs.flags.EntryLimit)*2
+		totalInodes := len(fs.inodes)
+		toEvict := (totalInodes-fs.flags.EntryLimit)*2
 		if toEvict < 0 {
 			fs.mu.RUnlock()
 			retry = false
@@ -895,10 +897,7 @@ func (fs *Goofys) MetaEvictor() {
 				seen[id] = true
 			}
 		}
-		fs.mu.RLock()
-		totalInodes := len(fs.inodes)
 		retry = len(scan) >= toEvict && totalInodes > fs.flags.EntryLimit
-		fs.mu.RUnlock()
 		atomic.AddInt64(&fs.stats.evicts, int64(evicted))
 		if len(scan) > 0 {
 			log.Debugf("metadata cache: alive %v, scanned %v, evicted %v", totalInodes, len(scan), evicted)

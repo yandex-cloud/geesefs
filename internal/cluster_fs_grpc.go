@@ -464,6 +464,8 @@ func (fs *ClusterFsGrpc) ForgetInode2(ctx context.Context, req *pb.ForgetInode2R
 
 	inode.resetCache()
 	inode.fs.mu.Lock()
+	// FIXME: These lines may have a bug (check). Only expired inodes should be forgotten
+	inode.resetExpireTime()
 	delete(inode.fs.inodes, inode.Id)
 	inode.fs.mu.Unlock()
 	inode.fs.lfru.Forget(inode.Id)
