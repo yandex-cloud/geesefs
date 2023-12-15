@@ -242,6 +242,9 @@ func (l *BufferList) unqueue(b *FileBuffer) {
 }
 
 func (l *BufferList) queue(b *FileBuffer) {
+	if b.length == 0 {
+		panic("buffer length should never be 0")
+	}
 	if b.state == BUF_DIRTY {
 		l.dirtyCount++
 	}

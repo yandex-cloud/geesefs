@@ -108,6 +108,7 @@ type Inode struct {
 
 	// cached/buffered data
 	CacheState int32
+	dirtyQueueId uint64
 	buffers BufferList
 	readRanges []ReadRange
 	DiskFDQueueID uint64

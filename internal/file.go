@@ -834,7 +834,7 @@ func (inode *Inode) SendUpload() bool {
 						tomb.Id = delParent.fs.allocateInodeId()
 						tomb.fs.inodes[tomb.Id] = tomb
 						tomb.userMetadata = make(map[string][]byte)
-						tomb.CacheState = ST_DELETED
+						tomb.SetCacheState(ST_DELETED)
 						tomb.recordFlushError(err)
 						delParent.dir.DeletedChildren[delName] = tomb
 						delParent.fs.mu.Unlock()

@@ -1521,6 +1521,11 @@ func (inode *Inode) SetCacheState(state int32) {
 		inc := int64(1)
 		if wasModified {
 			inc = -1
+			inode.fs.bufferQueue.Unqueue(&FileBuffer{queueId: inode.dirtyQueueId, state: BUF_DIRTY})
+		} else {
+			fb := &FileBuffer{state: BUF_DIRTY}
+			inode.fs.bufferQueue.Queue(inode, fb)
+			inode.dirtyQueueId = fb.queueId
 		}
 		inode.Parent.addModified(inc)
 	}

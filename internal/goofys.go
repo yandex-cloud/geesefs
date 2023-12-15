@@ -613,53 +613,35 @@ func (fs *Goofys) ScheduleRetryFlush() {
 // 3) Fsync triggered => intermediate full flush (same algorithm)
 // 4) Dirty memory limit reached => without on-disk cache we have to flush the whole object.
 //    With on-disk cache we can unload some dirty buffers to disk.
-//
-// FIXME There's still room for optimisations: now flusher scans all inodes
-// and tries to flush any of them and it wastes a lot of time scanning.
-// A queue of "ready to flush" items could be much better.
 func (fs *Goofys) Flusher() {
-	var inodes []fuseops.InodeID
-	again := false
+	var inode *Inode
+	var prevInodeID fuseops.InodeID
+	var nextQueueID uint64
 	for atomic.LoadInt32(&fs.shutdown) == 0 {
-		if !again {
-			fs.flusherMu.Lock()
-			if fs.flushPending == 0 {
-				fs.flusherCond.Wait()
-			}
-			fs.flushPending = 0
-			fs.flusherMu.Unlock()
-			// Repeat one more time after wakeup to scan all inodes
-			again = true
+		fs.flusherMu.Lock()
+		if fs.flushPending == 0 {
+			fs.flusherCond.Wait()
 		}
-		if atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers {
-			if len(inodes) == 0 {
-				again = false
-				fs.mu.RLock()
-				inodes = make([]fuseops.InodeID, 0, len(fs.inodes))
-				for id := range fs.inodes {
-					inodes = append(inodes, id)
-				}
-				fs.mu.RUnlock()
-			}
-			for len(inodes) > 0 {
-				// pop id
-				id := inodes[len(inodes)-1]
-				inodes = inodes[0 : len(inodes)-1]
-				fs.mu.RLock()
-				inode := fs.inodes[id]
-				fs.mu.RUnlock()
-				if inode != nil {
-					sent := inode.TryFlush()
+		fs.flushPending = 0
+		fs.flusherMu.Unlock()
+		prevInodeID = 0
+		attempt := 1
+		if nextQueueID != 0 {
+			attempt = 2
+		}
+		for attempt > 0 && atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers {
+			inode, _, nextQueueID = fs.bufferQueue.NextDirty(nextQueueID)
+			if inode == nil {
+				attempt--
+			} else if inode.Id != prevInodeID {
+				prevInodeID = inode.Id
+				for sent := true; sent && atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers; {
+					sent = inode.TryFlush()
 					if sent {
 						atomic.AddInt64(&fs.stats.flushes, 1)
 					}
-					if atomic.LoadInt64(&fs.activeFlushers) >= fs.flags.MaxFlushers {
-						break
-					}
 				}
 			}
-		} else {
-			again = false
 		}
 	}
 }
