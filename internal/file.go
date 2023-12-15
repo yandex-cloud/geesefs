@@ -1088,12 +1088,7 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 		if inode.flushLimitsExceeded() {
 			return
 		}
-		var flushBufs []*FileBuffer
-		for _, buf := range inode.buffers {
-			if buf.state == BUF_DIRTY {
-				flushBufs = append(flushBufs, buf)
-			}
-		}
+		flushBufs := inode.buffers.Select(0, inode.Attributes.Size, func(buf *FileBuffer) bool { return buf.state == BUF_DIRTY; })
 		inode.patchSimpleObj(flushBufs)
 		return true
 	}
@@ -1133,27 +1128,11 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 			continue
 		}
 
-		var flushBufs []*FileBuffer
-		for pos := locateBuffer(inode.buffers, partStart); pos < len(inode.buffers); pos++ {
-			buf := inode.buffers[pos]
-			if buf.offset >= partEnd {
-				break
-			}
-			if buf.state != BUF_DIRTY || buf.zero && !wantFlush && !appendPatch {
-				continue
-			}
-
-			if buf.offset < partStart {
-				inode.splitBuffer(pos, partStart-buf.offset)
-				continue
-			}
-			if buf.offset+buf.length > partEnd {
-				inode.splitBuffer(pos, partEnd-buf.offset)
-			}
-
-			flushBufs = append(flushBufs, buf)
-		}
-
+		inode.buffers.SplitAt(partStart)
+		inode.buffers.SplitAt(partEnd)
+		flushBufs := inode.buffers.Select(partStart, partEnd, func(buf *FileBuffer) bool {
+			return buf.state == BUF_DIRTY && (!buf.zero || wantFlush || appendPatch)
+		})
 		if len(flushBufs) != 0 {
 			inode.patchPart(partStart, partSize, flushBufs)
 			initiated = true
@@ -1222,7 +1201,7 @@ func (inode *Inode) patchFromBuffers(bufs []*FileBuffer, partSize uint64) {
 	// If bufs is a contiguous range of buffers then we can send them as PATCH immediately,
 	// otherwise we need to read missing ranges first.
 	var (
-		reader    io.ReadSeeker
+		reader io.ReadSeeker
 		dirtyBufs map[uint64]bool
 	)
 	if contiguous {
@@ -1256,21 +1235,19 @@ func (inode *Inode) patchFromBuffers(bufs []*FileBuffer, partSize uint64) {
 			log.Warnf("Local state of file %s (inode %d) changed, aborting patch", key, inode.Id)
 			return
 		}
-		reader, dirtyBufs = inode.GetMultiReader(offset, size)
+		reader, dirtyBufs, err = inode.getMultiReader(offset, size)
+		if err != nil {
+			log.Errorf("File %s data in %v+%v is missing during PATCH attempt: %v", key, offset, size, err)
+			return
+		}
 	}
 
 	if ok := inode.sendPatch(offset, size, reader, partSize); !ok {
 		return
 	}
 
-	inodeClean := inode.userMetadataDirty == 0 && inode.oldParent == nil
-	for _, buf := range inode.buffers {
-		if dirtyBufs[buf.dirtyID] {
-			buf.dirtyID, buf.state = 0, BUF_CLEAN
-		}
-		inodeClean = inodeClean && buf.state == BUF_CLEAN
-	}
-	if inodeClean {
+	inode.buffers.SetState(offset, size, dirtyBufs, BUF_CLEAN)
+	if !inode.isStillDirty() {
 		inode.SetCacheState(ST_CACHED)
 	}
 }
@@ -1323,7 +1300,7 @@ func (inode *Inode) sendPatch(offset, size uint64, r io.ReadSeeker, partSize uin
 }
 
 func (inode *Inode) discardChanges(offset, size uint64) {
-	allocated := inode.removeRange(offset, size, BUF_DIRTY)
+	allocated := inode.buffers.RemoveRange(offset, size, nil)
 	inode.fs.bufferPool.Use(allocated, true)
 }
 

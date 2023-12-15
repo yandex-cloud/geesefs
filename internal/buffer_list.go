@@ -175,6 +175,19 @@ func (l *BufferList) Filter(cb func(buf, prev *FileBuffer) (cont bool, del bool)
 	})
 }
 
+func (l *BufferList) Select(start, end uint64, cb func(buf *FileBuffer) (good bool)) (bufs []*FileBuffer) {
+	l.Ascend(start, func(bufEnd uint64, buf *FileBuffer) (cont bool, chg bool) {
+		if buf.offset >= end {
+			return false, false
+		}
+		if cb(buf) {
+			bufs = append(bufs, buf)
+		}
+		return true, false
+	})
+	return bufs
+}
+
 func (l *BufferList) nextID() uint64 {
 	l.curQueueID = l.curQueueID + 1
 	return l.curQueueID
@@ -525,6 +538,7 @@ func (l *BufferList) SplitAt(offset uint64) {
 	})
 }
 
+// FIXME: Do not scan all buffers
 func (l *BufferList) AnyDirty() (dirty bool) {
 	l.at.Scan(func(end uint64, b *FileBuffer) bool {
 		if b.state == BUF_DIRTY {
