@@ -97,11 +97,6 @@ type FlagStorage struct {
 	RefreshAttr           string
 	RefreshFilename       string
 	FlushFilename         string
-	CachePopularThreshold int64
-	CacheMaxHits          int64
-	CacheAgeInterval      int64
-	CacheAgeDecrement     int64
-	CacheToDiskHits       int64
 	CachePath             string
 	MaxDiskCacheFD        int64
 	CacheFileMode         os.FileMode

@@ -13,7 +13,6 @@ require (
 	github.com/Azure/go-autorest/autorest/azure/cli v0.4.2
 	github.com/aws/aws-sdk-go v1.38.7
 	github.com/golang/protobuf v1.5.2
-	github.com/google/btree v1.0.0
 	github.com/google/uuid v1.1.2
 	github.com/jacobsa/fuse v0.0.0-20230810134708-ab21db1af836
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
@@ -23,6 +22,7 @@ require (
 	github.com/sevlyar/go-daemon v0.1.6
 	github.com/shirou/gopsutil v0.0.0-20190731134726-d80c43f9c984
 	github.com/sirupsen/logrus v1.8.1
+	github.com/tidwall/btree v1.7.0
 	github.com/urfave/cli v1.21.1-0.20190807111034-521735b7608a
 	github.com/winfsp/cgofuse v1.5.0
 	golang.org/x/sync v0.3.0
@@ -58,7 +58,6 @@ require (
 	github.com/smartystreets/assertions v0.0.0-20160201214316-443d812296a8 // indirect
 	github.com/smartystreets/goconvey v1.6.1-0.20160119221636-995f5b2e021c // indirect
 	github.com/stretchr/testify v1.7.0 // indirect
-	github.com/tidwall/btree v1.7.0 // indirect
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/crypto v0.0.0-20220525230936-793ad666bf5e // indirect
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect

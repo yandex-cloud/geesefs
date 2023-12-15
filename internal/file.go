@@ -150,8 +150,6 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 		return err
 	}
 
-	fh.inode.fs.lfru.Hit(fh.inode.Id, 0)
-
 	fh.inode.mu.Lock()
 
 	if fh.inode.CacheState == ST_DELETED || fh.inode.CacheState == ST_DEAD {
@@ -195,8 +193,8 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 }
 
 func (inode *Inode) OpenCacheFD() error {
+	fs := inode.fs
 	if inode.DiskCacheFD == nil {
-		fs := inode.fs
 		cacheFileName := fs.flags.CachePath+"/"+inode.FullName()
 		os.MkdirAll(path.Dir(cacheFileName), fs.flags.CacheFileMode | ((fs.flags.CacheFileMode & 0777) >> 2))
 		var err error
@@ -206,17 +204,11 @@ func (inode *Inode) OpenCacheFD() error {
 			return err
 		} else {
 			inode.OnDisk = true
-			fs.diskFdMu.Lock()
-			fs.diskFdCount++
-			if fs.flags.MaxDiskCacheFD > 0 && fs.diskFdCount >= fs.flags.MaxDiskCacheFD {
-				// Wakeup the coroutine that closes old FDs
-				// This way we don't guarantee that we never exceed MaxDiskCacheFD
-				// But we assume it's not a problem if we leave some safety margin for the limit
-				// The same thing happens with our memory usage anyway :D
-				fs.diskFdCond.Broadcast()
-			}
-			fs.diskFdMu.Unlock()
+			fs.diskFdQueue.InsertFD(inode)
 		}
+	} else {
+		// LRU
+		fs.diskFdQueue.UseFD(inode)
 	}
 	return nil
 }
@@ -532,9 +524,6 @@ func (fh *FileHandle) trackRead(offset, size uint64) {
 		// Just in case if the length is zero
 	} else if offset == fh.lastReadEnd {
 		fh.seqReadSize += size
-		if fh.lastReadCount == 0 && fh.lastReadEnd == 0 {
-			fh.inode.fs.lfru.Hit(fh.inode.Id, 1)
-		}
 	} else {
 		// Track sizes of last N read requests
 		if len(fh.lastReadSizes) > 0 {
@@ -548,7 +537,6 @@ func (fh *FileHandle) trackRead(offset, size uint64) {
 			fh.lastReadIdx = (fh.lastReadIdx+1) % len(fh.lastReadSizes)
 		}
 		fh.seqReadSize = size
-		fh.inode.fs.lfru.Hit(fh.inode.Id, 1)
 	}
 	fh.lastReadEnd = offset+size
 }
@@ -985,6 +973,7 @@ func (inode *Inode) SendUpload() bool {
 	initiated := false
 	lastPart := uint64(0)
 	flushInode := inode.fileHandles == 0 || inode.forceFlush
+	wantFree := atomic.LoadInt32(&inode.fs.wantFree) > 0
 	partDirty := false
 	partLocked := false
 	partEvicted := false
@@ -1002,7 +991,7 @@ func (inode *Inode) SendUpload() bool {
 		} else if partDirty && !partEvicted {
 			canComplete = false
 			// Don't write out the last part which is still written to (if not under memory pressure)
-			if flushInode || lastPart != inode.fs.partNum(inode.lastWriteEnd) {
+			if flushInode || wantFree || lastPart != inode.fs.partNum(inode.lastWriteEnd) {
 				partOffset, partSize := inode.fs.partRange(lastPart)
 				// Guard part against eviction
 				inode.LockRange(partOffset, partSize, true)
@@ -1324,7 +1313,7 @@ func (inode *Inode) resetCache() {
 		if inode.DiskCacheFD != nil {
 			inode.DiskCacheFD.Close()
 			inode.DiskCacheFD = nil
-			atomic.AddInt64(&inode.fs.diskFdCount, -1)
+			inode.fs.diskFdQueue.DeleteFD(inode)
 		}
 		cacheFileName := inode.fs.flags.CachePath+"/"+inode.FullName()
 		err := os.Remove(cacheFileName)

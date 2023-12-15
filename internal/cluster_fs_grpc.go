@@ -468,7 +468,6 @@ func (fs *ClusterFsGrpc) ForgetInode2(ctx context.Context, req *pb.ForgetInode2R
 	inode.resetExpireTime()
 	delete(inode.fs.inodes, inode.Id)
 	inode.fs.mu.Unlock()
-	inode.fs.lfru.Forget(inode.Id)
 
 	return &pb.ForgetInode2Response{}, nil
 }

@@ -1732,7 +1732,7 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 			if fromInode.DiskCacheFD != nil {
 				fromInode.DiskCacheFD.Close()
 				fromInode.DiskCacheFD = nil
-				atomic.AddInt64(&fromInode.fs.diskFdCount, -1)
+				fromInode.fs.diskFdQueue.DeleteFD(fromInode)
 			}
 		}
 	}

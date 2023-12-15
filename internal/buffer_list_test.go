@@ -11,8 +11,14 @@ var _ = Suite(&BufferListTest{})
 type TestBLHelpers struct {
 }
 
-func (t *TestBLHelpers) partNum(offset uint64) uint64 {
+func (t *TestBLHelpers) PartNum(offset uint64) uint64 {
 	return offset / (5 * 1024)
+}
+
+func (t *TestBLHelpers) QueueBuffer(buf *FileBuffer) {
+}
+
+func (t *TestBLHelpers) UnqueueBuffer(buf *FileBuffer) {
 }
 
 func filledBuf(n int, c byte) []byte {
@@ -52,7 +58,7 @@ func (s *BufferListTest) TestGetHoles(t *C) {
 	t.Assert(len(data[1]), Equals, 1024)
 	t.Assert(ids, DeepEquals, map[uint64]bool{
 		1: true,
-		3: true,
+		2: true,
 	})
 	holes, loading, flcl := l.GetHoles(0, 2048)
 	t.Assert(holes, DeepEquals, []Range(nil))

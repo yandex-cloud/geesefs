@@ -110,6 +110,7 @@ type Inode struct {
 	CacheState int32
 	buffers BufferList
 	readRanges []ReadRange
+	DiskFDQueueID uint64
 	DiskCacheFD *os.File
 	OnDisk bool
 	forceFlush bool
@@ -165,9 +166,24 @@ func NewInode(fs *Goofys, parent *Inode, name string) (inode *Inode) {
 		refcnt:     0,
 	}
 
-	inode.buffers.helpers = inode.fs
+	inode.buffers.helpers = inode
 
 	return
+}
+
+// For BufferListHelpers
+func (inode *Inode) PartNum(offset uint64) uint64 {
+	return inode.fs.partNum(offset)
+}
+
+// For BufferListHelpers
+func (inode *Inode) QueueBuffer(buf *FileBuffer) {
+	inode.fs.bufferQueue.Queue(inode, buf)
+}
+
+// For BufferListHelpers
+func (inode *Inode) UnqueueBuffer(buf *FileBuffer) {
+	inode.fs.bufferQueue.Unqueue(buf)
 }
 
 // LOCKS_EXCLUDED(inode.mu)
@@ -365,8 +381,6 @@ func (inode *Inode) DeRef(n int64) (stale bool) {
 		delete(inode.fs.inodes, inode.Id)
 		inode.fs.forgotCnt += 1
 		inode.fs.mu.Unlock()
-		// Remove from LFRU tracker
-		inode.fs.lfru.Forget(inode.Id)
 	}
 	return res == 0
 }

@@ -107,11 +107,11 @@ type Goofys struct {
 
 	forgotCnt uint32
 
+	bufferQueue BufferQueue
+
 	zeroBuf []byte
-	lfru *LFRU
-	diskFdMu sync.Mutex
-	diskFdCond *sync.Cond
-	diskFdCount int64
+
+	diskFdQueue *FDQueue
 
 	stats OpStats
 
@@ -286,9 +286,8 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 	// Set up the basic struct.
 	fs := &Goofys{
 		bucket: bucket,
-		flags:  flags,
-		umask:  0122,
-		lfru:   NewLFRU(flags.CachePopularThreshold, flags.CacheMaxHits, flags.CacheAgeInterval, flags.CacheAgeDecrement),
+		flags: flags,
+		umask: 0122,
 		shutdownCh: make(chan struct{}),
 		zeroBuf: make([]byte, 1048576),
 		inflightChanges: make(map[string]int),
@@ -370,9 +369,11 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 		go fs.StatPrinter()
 	}
 
-	if fs.flags.CachePath != "" && fs.flags.MaxDiskCacheFD > 0 {
-		fs.diskFdCond = sync.NewCond(&fs.diskFdMu)
-		go fs.FDCloser()
+	if fs.flags.CachePath != "" {
+		fs.diskFdQueue = NewFDQueue(int(fs.flags.MaxDiskCacheFD))
+		if fs.flags.MaxDiskCacheFD > 0 {
+			go fs.FDCloser()
+		}
 	}
 
 	go fs.MetaEvictor()
@@ -384,8 +385,8 @@ func (fs *Goofys) Shutdown() {
 	atomic.StoreInt32(&fs.shutdown, 1)
 	close(fs.shutdownCh)
 	fs.WakeupFlusher()
-	if fs.diskFdCond != nil {
-		fs.diskFdCond.Broadcast()
+	if fs.diskFdQueue != nil {
+		fs.diskFdQueue.cond.Broadcast()
 	}
 }
 
@@ -498,85 +499,44 @@ func (fs *Goofys) StatPrinter() {
 
 // Close unneeded cache FDs
 func (fs *Goofys) FDCloser() {
-	fs.diskFdMu.Lock()
 	for atomic.LoadInt32(&fs.shutdown) == 0 {
-		rmFdItem := fs.lfru.Pick(nil)
-		for fs.flags.MaxDiskCacheFD > 0 && fs.diskFdCount > fs.flags.MaxDiskCacheFD && rmFdItem != nil {
-			fs.diskFdMu.Unlock()
-			fs.mu.RLock()
-			rmFdInode := fs.inodes[rmFdItem.Id()]
-			fs.mu.RUnlock()
-			if rmFdInode != nil {
-				rmFdInode.mu.Lock()
-				if rmFdInode.DiskCacheFD != nil {
-					rmFdInode.DiskCacheFD.Close()
-					rmFdInode.DiskCacheFD = nil
-					rmFdInode.mu.Unlock()
-					fs.diskFdMu.Lock()
-					fs.diskFdCount--
-				} else {
-					rmFdInode.mu.Unlock()
-					fs.diskFdMu.Lock()
-				}
-			} else {
-				fs.diskFdMu.Lock()
-			}
-			rmFdItem = fs.lfru.Pick(rmFdItem)
-		}
-		fs.diskFdCond.Wait()
+		fs.diskFdQueue.CloseExtra()
 	}
-	fs.diskFdMu.Unlock()
 }
 
 // Try to reclaim some clean buffers
 func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 	freed := int64(0)
-	haveDirty := false
 	// Free at least 5 MB
 	size := origSize
 	if size < 5*1024*1024 {
 		size = 5*1024*1024
 	}
-	// FIXME: Remove LFRU, add a second queue containing all inodes with non-empty CleanQueues
-	// Or maybe just a global CleanQueue with all inodes intermixed...
-	var cacheItem *LFRUItem
-	for {
-		cacheItem = fs.lfru.Pick(cacheItem)
-		if cacheItem == nil {
+	var inode *Inode
+	var cleanEnd, cleanQueueID uint64
+	for freed < size {
+		inode, cleanEnd, cleanQueueID = fs.bufferQueue.NextClean(cleanQueueID)
+		if cleanQueueID == 0 {
 			break
-		}
-		inodeId := cacheItem.Id()
-		fs.mu.RLock()
-		inode := fs.inodes[inodeId]
-		fs.mu.RUnlock()
-		if inode == nil {
-			continue
 		}
 		inode.mu.Lock()
 		toFs := -1
-		inode.buffers.ScanClean(func(buf *FileBuffer) (cont bool, del bool) {
-			if freed >= size {
-				return false, false
-			}
-			// Never evict buffers flushed in an incomplete (last) part
-			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED_FULL {
-				if buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) &&
-					// Do not evict modified header
-					(buf.state != BUF_FLUSHED_FULL || buf.offset >= fs.flags.PartSizes[0].PartSize) {
-					fs.tryEvictToDisk(inode, buf, &toFs)
-					allocated, deleted := inode.buffers.EvictFromMemory(buf)
-					fs.bufferPool.UseUnlocked(allocated, false)
-					return true, deleted
-				}
-			}
-			return true, false
-		})
-		haveDirty = haveDirty || inode.buffers.AnyDirty()
+		buf := inode.buffers.Get(cleanEnd)
+		// Never evict buffers flushed in an incomplete (last) part
+		if buf != nil && (buf.state == BUF_CLEAN || buf.state == BUF_FLUSHED_FULL) &&
+			buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) &&
+			// Do not evict modified header
+			(buf.state != BUF_FLUSHED_FULL || buf.offset >= fs.flags.PartSizes[0].PartSize) {
+			fs.tryEvictToDisk(inode, buf, &toFs)
+			allocated, _ := inode.buffers.EvictFromMemory(buf)
+			fs.bufferPool.UseUnlocked(allocated, false)
+		}
 		inode.mu.Unlock()
 		if freed >= size {
 			break
 		}
 	}
+	haveDirty := fs.bufferQueue.DirtyCount() > 0
 	if freed < origSize && haveDirty {
 		fs.bufferPool.mu.Unlock()
 		atomic.AddInt32(&fs.wantFree, 1)
@@ -590,10 +550,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 func (fs *Goofys) tryEvictToDisk(inode *Inode, buf *FileBuffer, toFs *int) {
 	if fs.flags.CachePath != "" && !buf.onDisk {
 		if *toFs == -1 {
-			*toFs = 0
-			if fs.lfru.GetHits(inode.Id) >= fs.flags.CacheToDiskHits {
-				*toFs = 1
-			}
+			*toFs = 1
 		}
 		if *toFs > 0 {
 			// Evict to disk
@@ -758,7 +715,6 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 	delete(fs.inodes, childTmp.Id)
 	fs.forgotCnt += 1
 	fs.mu.Unlock()
-	fs.lfru.Forget(childTmp.Id)
 	childTmp.mu.Unlock()
 	tmpParent.mu.Unlock()
 	return true
