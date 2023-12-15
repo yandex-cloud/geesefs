@@ -459,6 +459,9 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 	inode.mu.Unlock()
 }
 
+// FIXME: Move LockRange/UnlockRange into buffer_list.go, but they still have
+// to be stored separately from buffers and can't be a refcount - otherwise
+// an overwrite would reset the reference count and break locking
 func (inode *Inode) LockRange(offset uint64, size uint64, flushing bool) {
 	inode.readRanges = append(inode.readRanges, ReadRange{
 		Offset: offset,
@@ -1023,6 +1026,7 @@ func (inode *Inode) SendUpload() bool {
 		}
 		return false
 	}
+	// FIXME: Use ScanDirty()
 	inode.buffers.Ascend(0, func(end uint64, buf *FileBuffer) (cont bool, changed bool) {
 		startPart := inode.fs.partNum(buf.offset)
 		endPart := inode.fs.partNum(buf.offset + buf.length - 1)

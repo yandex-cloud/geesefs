@@ -47,7 +47,6 @@ const (
 
 type BufferListHelpers interface {
 	partNum(uint64) uint64
-	addMemRecency(uint64) uint64
 }
 
 type BufferList struct {
@@ -55,19 +54,18 @@ type BufferList struct {
 	// end offset => buffer
 	at      btree.Map[uint64, *FileBuffer]
 	helpers BufferListHelpers
-	// FIXME:
 	// dirty buffer queue - buffers eligible for flushing
 	// queue index (arbitrary increasing value) => buffer
-	dirtyQueue *btree.Map[uint64, *FileBuffer]
+	dirtyQueue btree.Map[uint64, *FileBuffer]
 	// clean/flushed buffer queue - buffers eligible for eviction from memory
 	// queue index (arbitrary increasing value) => buffer
-	cleanQueue *btree.Map[uint64, *FileBuffer]
+	cleanQueue btree.Map[uint64, *FileBuffer]
 	// next queue index for new buffers
 	curQueueID uint64
 }
 
 type FileBuffer struct {
-	//	queueId uint64
+	queueId uint64
 	offset uint64
 	length uint64
 	// Chunk state: 1 = clean. 2 = dirty. 3 = part flushed, but not finalized
@@ -79,8 +77,6 @@ type FileBuffer struct {
 	onDisk bool
 	// Chunk only contains zeroes, data and ptr are nil
 	zero bool
-	// Memory allocation recency counter
-	recency uint64
 	// Unmodified chunks (equal to the current server-side object state) have dirtyID = 0.
 	// Every write or split assigns a new unique chunk ID.
 	// Flusher tracks IDs that are currently being flushed to the server,
@@ -161,18 +157,73 @@ func (l *BufferList) Ascend(offset uint64, iter func(end uint64, b *FileBuffer) 
 	ascendChange(&l.at, offset, iter)
 }
 
-// FIXME: Unsafe because does not free buffers itself
-func (l *BufferList) Filter(cb func(buf, prev *FileBuffer) (cont bool, del bool)) {
-	var prev *FileBuffer
-	l.Ascend(0, func(end uint64, buf *FileBuffer) (cont bool, chg bool) {
-		cont, del := cb(buf, prev)
-		if del {
-			l.at.Delete(end)
-		} else {
-			prev = buf
-		}
-		return cont, del
+func (l *BufferList) ScanClean(cb func(b *FileBuffer) (cont bool, changed bool)) {
+	ascendChange(&l.cleanQueue, 0, func(end uint64, b *FileBuffer) (cont bool, changed bool) {
+		return cb(b)
 	})
+}
+
+func (l *BufferList) ScanDirty(cb func(b *FileBuffer) (cont bool, changed bool)) {
+	ascendChange(&l.dirtyQueue, 0, func(end uint64, b *FileBuffer) (cont bool, changed bool) {
+		return cb(b)
+	})
+}
+
+func (l *BufferList) EvictFromMemory(buf *FileBuffer) (allocated int64, deleted bool) {
+	// Release memory
+	buf.ptr.refs--
+	if buf.ptr.refs == 0 {
+		allocated -= int64(len(buf.ptr.mem))
+	}
+	buf.ptr = nil
+	buf.data = nil
+	if buf.onDisk {
+		// Try to merge it with the previous buffer
+		var prev *FileBuffer
+		l.at.Descend(buf.offset, func(end uint64, b *FileBuffer) bool {
+			prev = b
+			return false
+		})
+		if prev != nil && prev.offset+prev.length == buf.offset &&
+			prev.state == buf.state &&
+			prev.ptr == nil &&
+			prev.onDisk == buf.onDisk {
+			l.unqueue(buf)
+			l.unqueue(prev)
+			l.at.Delete(prev.offset+prev.length)
+			buf.length += prev.length
+			buf.offset = prev.offset
+			l.queue(buf)
+			deleted = true
+		}
+	} else if buf.dirtyID == 0 {
+		l.unqueue(buf)
+		l.at.Delete(buf.offset+buf.length)
+		deleted = true
+	} else if buf.state == BUF_FLUSHED_FULL {
+		// A flushed buffer can be removed at a cost of finalizing multipart upload
+		// to read it back later. However it's likely not a problem if we're uploading
+		// a large file because we may never need to read it back.
+		// One exception is that we don't do it with the header because various
+		// software commonly modifies header after writing the whole large file
+		l.unqueue(buf)
+		buf.state = BUF_FL_CLEARED
+		// Try to merge it with the previous buffer
+		var prev *FileBuffer
+		l.at.Descend(buf.offset, func(end uint64, b *FileBuffer) bool {
+			prev = b
+			return false
+		})
+		if prev != nil && prev.offset+prev.length == buf.offset && prev.state == buf.state {
+			l.unqueue(prev)
+			l.at.Delete(prev.offset+prev.length)
+			buf.length += prev.length
+			buf.offset = prev.offset
+			deleted = true
+		}
+		l.queue(buf)
+	}
+	return
 }
 
 func (l *BufferList) Select(start, end uint64, cb func(buf *FileBuffer) (good bool)) (bufs []*FileBuffer) {
@@ -188,51 +239,57 @@ func (l *BufferList) Select(start, end uint64, cb func(buf *FileBuffer) (good bo
 	return bufs
 }
 
+// FIXME: Try to merge dirtyID/queueID
 func (l *BufferList) nextID() uint64 {
 	l.curQueueID = l.curQueueID + 1
 	return l.curQueueID
 }
 
 func (l *BufferList) unqueue(b *FileBuffer) {
-	// FIXME
-	/*if b.state == BUF_DIRTY {
+	if b.state == BUF_DIRTY {
+		// We don't flush zero buffers until file is closed
+		// We don't flush the currently modified part (last part written to)
+		// However this filtering is done outside BufferList
 		l.dirtyQueue.Delete(b.queueId)
-	} else {
+	} else if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
+		// We don't evict used buffers
+		// We don't evict the first part
+		// However, this filtering is also done outside BufferList :)
 		l.cleanQueue.Delete(b.queueId)
-	}*/
+	}
 }
 
 func (l *BufferList) queue(b *FileBuffer) {
-	// FIXME
-	/*b.queueId, l.curQueueID = l.curQueueID, l.curQueueID+1
+	b.queueId, l.curQueueID = l.curQueueID, l.curQueueID+1
 	if b.state == BUF_DIRTY {
-		// FIXME: Do not enqueue zero buffers until file is closed
-		// FIXME: Do not enqueue currently modified part
 		l.dirtyQueue.Set(b.queueId, b)
-	} else if b.state == BUF_CLEAN && !b.used {
+	} else if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
 		l.cleanQueue.Set(b.queueId, b)
-	}*/
+	}
 }
 
 func (l *BufferList) SetState(offset, size uint64, ids map[uint64]bool, state BufferState) {
 	l.at.Ascend(offset+1, func(end uint64, b *FileBuffer) bool {
 		if b.dirtyID != 0 && ids[b.dirtyID] {
+			l.unqueue(b)
 			b.dirtyID = 0
 			b.state = state
+			l.queue(b)
 		}
 		return b.offset < offset+size-1
 	})
 }
 
-// FIXME: Filter() ?
 func (l *BufferList) SetFlushedClean() {
 	ascendChange(&l.at, 0, func(end uint64, b *FileBuffer) (cont bool, chg bool) {
 		if b.state == BUF_FL_CLEARED {
 			l.at.Delete(end)
 			return true, true
 		} else if b.state == BUF_FLUSHED_FULL || b.state == BUF_FLUSHED_CUT {
+			l.unqueue(b)
 			b.dirtyID = 0
 			b.state = BUF_CLEAN
+			l.queue(b)
 		}
 		return true, false
 	})
@@ -263,23 +320,23 @@ func (l *BufferList) RemoveRange(removeOffset, removeSize uint64, filter func(b 
 					return true, true
 				} else {
 					// remove beginning
+					l.unqueue(b)
 					if b.data != nil {
 						b.data = b.data[endOffset-b.offset:]
 					}
 					b.length = bufEnd - endOffset
 					b.offset = endOffset
-					l.unqueue(b)
 					l.queue(b)
 				}
 			} else if endOffset >= bufEnd {
 				// remove end
+				l.unqueue(b)
 				if b.data != nil {
 					b.data = b.data[0 : removeOffset-b.offset]
 				}
 				b.length = removeOffset - b.offset
 				l.at.Delete(bufEnd)
 				l.at.Set(b.offset+b.length, b)
-				l.unqueue(b)
 				l.queue(b)
 				return true, true
 			} else {
@@ -361,8 +418,6 @@ func (l *BufferList) insertOrAppend(offset uint64, data []byte, state BufferStat
 		state:   state,
 		onDisk:  false,
 		zero:    false,
-		// FIXME: Remove it in favor of flush/evict queues
-		recency: l.helpers.addMemRecency(uint64(len(newData))),
 		length:  uint64(len(newData)),
 		data:    newData,
 		ptr:     dataPtr,
@@ -398,7 +453,6 @@ func (l *BufferList) ZeroRange(offset, size uint64) (zeroed bool, allocated int6
 		state:   BUF_DIRTY,
 		onDisk:  false,
 		zero:    true,
-		recency: 0,
 		length:  size,
 		data:    nil,
 		ptr:     nil,
@@ -454,7 +508,7 @@ func (l *BufferList) fill(offset, size uint64, cb func(start, end uint64)) {
 
 func (l *BufferList) AddLoading(offset, size uint64) {
 	l.fill(offset, size, func(curOffset, curEnd uint64) {
-		l.at.Set(curEnd, &FileBuffer{
+		b := &FileBuffer{
 			offset:  curOffset,
 			length:  curEnd - curOffset,
 			dirtyID: 0,
@@ -462,7 +516,9 @@ func (l *BufferList) AddLoading(offset, size uint64) {
 			loading: true,
 			onDisk:  false,
 			zero:    false,
-		})
+		}
+		l.at.Set(curEnd, b)
+		l.queue(b)
 	})
 }
 
@@ -500,7 +556,9 @@ func (l *BufferList) ReviveFromDisk(offset uint64, data []byte) {
 			}
 			b.loading = false
 			if b.state == BUF_FL_CLEARED {
+				l.unqueue(b)
 				b.state = BUF_FLUSHED_FULL
+				l.queue(b)
 			}
 		}
 		return false
@@ -538,16 +596,8 @@ func (l *BufferList) SplitAt(offset uint64) {
 	})
 }
 
-// FIXME: Do not scan all buffers
 func (l *BufferList) AnyDirty() (dirty bool) {
-	l.at.Scan(func(end uint64, b *FileBuffer) bool {
-		if b.state == BUF_DIRTY {
-			dirty = true
-			return false
-		}
-		return true
-	})
-	return
+	return l.dirtyQueue.Len() > 0
 }
 
 func (l *BufferList) AnyFlushed(offset, size uint64) (flushed bool) {

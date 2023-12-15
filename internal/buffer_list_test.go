@@ -15,10 +15,6 @@ func (t *TestBLHelpers) partNum(offset uint64) uint64 {
 	return offset / (5 * 1024)
 }
 
-func (t *TestBLHelpers) addMemRecency(uint64) uint64 {
-	return 0
-}
-
 func filledBuf(n int, c byte) []byte {
 	b := make([]byte, n)
 	for i := 0; i < n; i++ {
@@ -56,7 +52,7 @@ func (s *BufferListTest) TestGetHoles(t *C) {
 	t.Assert(len(data[1]), Equals, 1024)
 	t.Assert(ids, DeepEquals, map[uint64]bool{
 		1: true,
-		2: true,
+		3: true,
 	})
 	holes, loading, flcl := l.GetHoles(0, 2048)
 	t.Assert(holes, DeepEquals, []Range(nil))

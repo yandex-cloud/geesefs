@@ -104,7 +104,6 @@ type Goofys struct {
 
 	activeFlushers int64
 	flushRetrySet int32
-	memRecency uint64
 
 	forgotCnt uint32
 
@@ -529,10 +528,6 @@ func (fs *Goofys) FDCloser() {
 	fs.diskFdMu.Unlock()
 }
 
-func (fs *Goofys) addMemRecency(mem uint64) uint64 {
-	return atomic.AddUint64(&fs.memRecency, mem)
-}
-
 // Try to reclaim some clean buffers
 func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 	freed := int64(0)
@@ -542,27 +537,13 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 	if size < 5*1024*1024 {
 		size = 5*1024*1024
 	}
-	skipRecent := atomic.LoadUint64(&fs.memRecency)
-	// Avoid evicting at least 1/4 of recent memory allocations
-	if skipRecent > fs.flags.MemoryLimit/4 {
-		skipRecent -= fs.flags.MemoryLimit/4
-	} else {
-		skipRecent = 0
-	}
+	// FIXME: Remove LFRU, add a second queue containing all inodes with non-empty CleanQueues
+	// Or maybe just a global CleanQueue with all inodes intermixed...
 	var cacheItem *LFRUItem
 	for {
 		cacheItem = fs.lfru.Pick(cacheItem)
 		if cacheItem == nil {
-			if skipRecent != 0 {
-				// Rescan without "skipRecent"
-				skipRecent = 0
-				cacheItem = fs.lfru.Pick(cacheItem)
-				if cacheItem == nil {
-					break
-				}
-			} else {
-				break
-			}
+			break
 		}
 		inodeId := cacheItem.Id()
 		fs.mu.RLock()
@@ -573,48 +554,24 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 		}
 		inode.mu.Lock()
 		toFs := -1
-		inode.buffers.Filter(func(buf, prev *FileBuffer) (cont bool, del bool) {
+		inode.buffers.ScanClean(func(buf *FileBuffer) (cont bool, del bool) {
 			if freed >= size {
 				return false, false
 			}
 			// Never evict buffers flushed in an incomplete (last) part
 			if buf.dirtyID == 0 || buf.state == BUF_FLUSHED_FULL {
 				if buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) &&
-					// Skip recent buffers when possible
-					(skipRecent == 0 || buf.recency <= skipRecent) &&
 					// Do not evict modified header
 					(buf.state != BUF_FLUSHED_FULL || buf.offset >= fs.flags.PartSizes[0].PartSize) {
 					fs.tryEvictToDisk(inode, buf, &toFs)
-					// Release memory
-					buf.ptr.refs--
-					if buf.ptr.refs == 0 {
-						freed += int64(len(buf.ptr.mem))
-						fs.bufferPool.UseUnlocked(-int64(len(buf.ptr.mem)), false)
-					}
-					buf.ptr = nil
-					buf.data = nil
-					if buf.dirtyID == 0 && !buf.onDisk {
-						return true, true
-					} else if buf.state == BUF_FLUSHED_FULL {
-						// A flushed buffer can be removed at a cost of finalizing multipart upload
-						// to read it back later. However it's likely not a problem if we're uploading
-						// a large file because we may never need to read it back.
-						// One exception is that we don't do it with the header because various
-						// software commonly modifies header after writing the whole large file
-						if prev != nil && prev.state == BUF_FL_CLEARED &&
-							buf.offset == (prev.offset + prev.length) {
-							prev.length += buf.length
-							return true, true
-						} else {
-							buf.state = BUF_FL_CLEARED
-						}
-					}
+					allocated, deleted := inode.buffers.EvictFromMemory(buf)
+					fs.bufferPool.UseUnlocked(allocated, false)
+					return true, deleted
 				}
-			} else if inode.fs.partNum(buf.offset+buf.length-1) != inode.fs.partNum(inode.lastWriteEnd) {
-				haveDirty = true
 			}
 			return true, false
 		})
+		haveDirty = haveDirty || inode.buffers.AnyDirty()
 		inode.mu.Unlock()
 		if freed >= size {
 			break
