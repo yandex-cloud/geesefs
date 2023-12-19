@@ -696,166 +696,15 @@ func (inode *Inode) TryFlush() bool {
 		if overDeleted {
 			return false
 		}
-		return inode.SendUpload()
+		return inode.sendUpload()
 	}
 	return false
 }
 
-func (inode *Inode) SendUpload() bool {
-
-	cloud, key := inode.cloud()
-	if inode.isDir() {
-		key += "/"
-	}
-
+func (inode *Inode) sendUpload() bool {
 	if inode.oldParent != nil && inode.IsFlushing == 0 && inode.mpu == nil {
-		// Send rename
-		inode.IsFlushing += inode.fs.flags.MaxParallelParts
-		atomic.AddInt64(&inode.fs.activeFlushers, 1)
-		_, from := inode.oldParent.cloud()
-		from = appendChildName(from, inode.oldName)
-		oldParent := inode.oldParent
-		oldName := inode.oldName
-		newParent := inode.Parent
-		newName := inode.Name
-		inode.renamingTo = true
-		skipRename := false
-		if inode.isDir() {
-			from += "/"
-			skipRename = true
-		}
-		go func() {
-			var err error
-			if !inode.isDir() || !inode.fs.flags.NoDirObject {
-				// We don't use RenameBlob here even for hypothetical clouds that support it (not S3),
-				// because if we used it we'd have to do it under the inode lock. Because otherwise
-				// a parallel read could hit a non-existing name. So, with S3, we do it in 2 passes.
-				// First we copy the object, change the inode name, and then we delete the old copy.
-				inode.fs.addInflightChange(key)
-				_, err = cloud.CopyBlob(&CopyBlobInput{
-					Source:      from,
-					Destination: key,
-				})
-				inode.fs.completeInflightChange(key)
-				notFoundIgnore := false
-				if err != nil {
-					mappedErr := mapAwsError(err)
-					// Rename the old directory object to copy xattrs from it if it has them
-					// We're almost never sure if the directory is implicit or not so we
-					// always try to rename the directory object, but ignore NotFound errors
-					if mappedErr == syscall.ENOENT && skipRename {
-						err = nil
-						notFoundIgnore = true
-					} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
-						s3Log.Warnf("Conflict detected (inode %v): failed to copy %v to %v: %v. File is removed remotely, dropping cache", inode.Id, from, key, err)
-						inode.mu.Lock()
-						newParent := inode.Parent
-						oldParent := inode.oldParent
-						oldName := inode.oldName
-						inode.oldParent = nil
-						inode.oldName = ""
-						inode.renamingTo = false
-						inode.resetCache()
-						inode.mu.Unlock()
-						newParent.mu.Lock()
-						newParent.removeChildUnlocked(inode)
-						newParent.mu.Unlock()
-						if oldParent != nil {
-							oldParent.mu.Lock()
-							delete(oldParent.dir.DeletedChildren, oldName)
-							oldParent.addModified(-1)
-							oldParent.mu.Unlock()
-						}
-					} else {
-						log.Warnf("Failed to copy %v to %v (rename): %v", from, key, err)
-						inode.mu.Lock()
-						inode.recordFlushError(err)
-						if inode.Parent == oldParent && inode.Name == oldName {
-							// Someone renamed the inode back to the original name
-							// ...while we failed to copy it :)
-							inode.oldParent = nil
-							inode.oldName = ""
-							inode.renamingTo = false
-							inode.Parent.addModified(-1)
-							if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
-								!inode.isStillDirty() {
-								inode.SetCacheState(ST_CACHED)
-								inode.SetAttrTime(time.Now())
-							}
-						}
-						inode.mu.Unlock()
-					}
-				}
-				if err == nil {
-					log.Debugf("Copied %v to %v (rename)", from, key)
-					delKey := from
-					delParent := oldParent
-					delName := oldName
-					inode.mu.Lock()
-					// Now we know that the object is accessible by the new name
-					if inode.Parent == newParent && inode.Name == newName {
-						// Just clear the old path
-						inode.oldParent = nil
-						inode.oldName = ""
-					} else if inode.Parent == oldParent && inode.Name == oldName {
-						// Someone renamed the inode back to the original name(!)
-						inode.oldParent = nil
-						inode.oldName = ""
-						// Delete the new key instead of the old one (?)
-						delKey = key
-						delParent = newParent
-						delName = newName
-					} else {
-						// Someone renamed the inode again(!)
-						inode.oldParent = newParent
-						inode.oldName = newName
-					}
-					if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
-						!inode.isStillDirty() {
-						inode.SetCacheState(ST_CACHED)
-						inode.SetAttrTime(time.Now())
-					}
-					inode.renamingTo = false
-					inode.mu.Unlock()
-					// Now delete the old key
-					if !notFoundIgnore {
-						inode.fs.addInflightChange(delKey)
-						_, err = cloud.DeleteBlob(&DeleteBlobInput{
-							Key: delKey,
-						})
-						inode.fs.completeInflightChange(delKey)
-					}
-					if err != nil {
-						log.Debugf("Failed to delete %v during rename, will retry later", delKey)
-						// Emulate a deleted file
-						delParent.mu.Lock()
-						delParent.fs.mu.Lock()
-						tomb := NewInode(delParent.fs, delParent, delName)
-						tomb.Id = delParent.fs.allocateInodeId()
-						tomb.fs.inodes[tomb.Id] = tomb
-						tomb.userMetadata = make(map[string][]byte)
-						tomb.SetCacheState(ST_DELETED)
-						tomb.recordFlushError(err)
-						delParent.dir.DeletedChildren[delName] = tomb
-						delParent.fs.mu.Unlock()
-						delParent.mu.Unlock()
-					} else {
-						log.Debugf("Deleted %v - rename completed", from)
-						// Remove from DeletedChildren of the old parent
-						delParent.mu.Lock()
-						delete(delParent.dir.DeletedChildren, delName)
-						delParent.mu.Unlock()
-						// And track ModifiedChildren because rename is special - it takes two parents
-						delParent.addModified(-1)
-					}
-				}
-			}
-			inode.mu.Lock()
-			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
-			atomic.AddInt64(&inode.fs.activeFlushers, -1)
-			inode.fs.WakeupFlusher()
-			inode.mu.Unlock()
-		}()
+		// Rename file
+		inode.sendRename()
 		return true
 	}
 
@@ -865,40 +714,7 @@ func (inode *Inode) SendUpload() bool {
 		if !hasDirty {
 			// Update metadata by COPYing into the same object
 			// It results in the optimized implementation in S3
-			inode.userMetadataDirty = 0
-			inode.IsFlushing += inode.fs.flags.MaxParallelParts
-			atomic.AddInt64(&inode.fs.activeFlushers, 1)
-			copyIn := &CopyBlobInput{
-				Source:      key,
-				Destination: key,
-				Size:        PUInt64(inode.knownSize),
-				ETag:        PString(inode.knownETag),
-				Metadata:    escapeMetadata(inode.userMetadata),
-			}
-			go func() {
-				inode.fs.addInflightChange(key)
-				_, err := cloud.CopyBlob(copyIn)
-				inode.fs.completeInflightChange(key)
-				inode.mu.Lock()
-				inode.recordFlushError(err)
-				if err != nil {
-					mappedErr := mapAwsError(err)
-					inode.userMetadataDirty = 2
-					if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
-						// Object is deleted or resized remotely (416). Discard local version
-						s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
-						inode.resetCache()
-					}
-					log.Warnf("Error flushing metadata using COPY for %v: %v", key, err)
-				} else if inode.CacheState == ST_MODIFIED && !inode.isStillDirty() {
-					inode.SetCacheState(ST_CACHED)
-					inode.SetAttrTime(time.Now())
-				}
-				inode.IsFlushing -= inode.fs.flags.MaxParallelParts
-				atomic.AddInt64(&inode.fs.activeFlushers, -1)
-				inode.fs.WakeupFlusher()
-				inode.mu.Unlock()
-			}()
+			inode.sendUpdateMeta()
 			return true
 		}
 	}
@@ -927,7 +743,7 @@ func (inode *Inode) SendUpload() bool {
 			// Don't accidentally trigger a parallel multipart flush
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, 1)
-			go inode.FlushSmallObject()
+			go inode.flushSmallObject()
 			return true
 		}
 		return false
@@ -939,37 +755,266 @@ func (inode *Inode) SendUpload() bool {
 		if inode.IsFlushing > 0 {
 			return false
 		}
-		inode.IsFlushing += inode.fs.flags.MaxParallelParts
-		atomic.AddInt64(&inode.fs.activeFlushers, 1)
-		go func() {
-			params := &MultipartBlobBeginInput{
-				Key: key,
-				ContentType: inode.fs.flags.GetMimeType(key),
-			}
-			if inode.userMetadataDirty != 0 {
-				params.Metadata = escapeMetadata(inode.userMetadata)
-				// userMetadataDirty == 1 indicates that metadata wasn't changed
-				// since the multipart upload was initiated
-				inode.userMetadataDirty = 1
-			}
-			resp, err := cloud.MultipartBlobBegin(params)
-			inode.mu.Lock()
-			inode.recordFlushError(err)
-			if err != nil {
-				log.Warnf("Failed to initiate multipart upload for %v: %v", key, err)
-			} else {
-				log.Debugf("Started multi-part upload of object %v", key)
-				inode.mpu = resp
-			}
-			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
-			atomic.AddInt64(&inode.fs.activeFlushers, -1)
-			inode.fs.WakeupFlusher()
-			inode.mu.Unlock()
-		}()
+		inode.sendStartMultipart()
 		return true
 	}
 
 	// Pick part(s) to flush
+	if inode.sendUploadPart() {
+		return true
+	}
+
+	canComplete := !inode.buffers.AnyDirty() && !inode.IsRangeLocked(0, inode.Attributes.Size, true)
+
+	if canComplete && (inode.fileHandles == 0 || inode.forceFlush) {
+		// Complete the multipart upload
+		inode.IsFlushing += inode.fs.flags.MaxParallelParts
+		atomic.AddInt64(&inode.fs.activeFlushers, 1)
+		go func() {
+			inode.mu.Lock()
+			inode.completeMultipart()
+			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+			inode.mu.Unlock()
+			atomic.AddInt64(&inode.fs.activeFlushers, -1)
+			inode.fs.WakeupFlusher()
+		}()
+		return true
+	}
+
+	return false
+}
+
+func (inode *Inode) sendRename() {
+	cloud, key := inode.cloud()
+	if inode.isDir() {
+		key += "/"
+	}
+	inode.IsFlushing += inode.fs.flags.MaxParallelParts
+	atomic.AddInt64(&inode.fs.activeFlushers, 1)
+	_, from := inode.oldParent.cloud()
+	from = appendChildName(from, inode.oldName)
+	oldParent := inode.oldParent
+	oldName := inode.oldName
+	newParent := inode.Parent
+	newName := inode.Name
+	inode.renamingTo = true
+	skipRename := false
+	if inode.isDir() {
+		from += "/"
+		skipRename = true
+	}
+	go func() {
+		var err error
+		if !inode.isDir() || !inode.fs.flags.NoDirObject {
+			// We don't use RenameBlob here even for hypothetical clouds that support it (not S3),
+			// because if we used it we'd have to do it under the inode lock. Because otherwise
+			// a parallel read could hit a non-existing name. So, with S3, we do it in 2 passes.
+			// First we copy the object, change the inode name, and then we delete the old copy.
+			inode.fs.addInflightChange(key)
+			_, err = cloud.CopyBlob(&CopyBlobInput{
+				Source:      from,
+				Destination: key,
+			})
+			inode.fs.completeInflightChange(key)
+			notFoundIgnore := false
+			if err != nil {
+				mappedErr := mapAwsError(err)
+				// Rename the old directory object to copy xattrs from it if it has them
+				// We're almost never sure if the directory is implicit or not so we
+				// always try to rename the directory object, but ignore NotFound errors
+				if mappedErr == syscall.ENOENT && skipRename {
+					err = nil
+					notFoundIgnore = true
+				} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
+					s3Log.Warnf("Conflict detected (inode %v): failed to copy %v to %v: %v. File is removed remotely, dropping cache", inode.Id, from, key, err)
+					inode.mu.Lock()
+					newParent := inode.Parent
+					oldParent := inode.oldParent
+					oldName := inode.oldName
+					inode.oldParent = nil
+					inode.oldName = ""
+					inode.renamingTo = false
+					inode.resetCache()
+					inode.mu.Unlock()
+					newParent.mu.Lock()
+					newParent.removeChildUnlocked(inode)
+					newParent.mu.Unlock()
+					if oldParent != nil {
+						oldParent.mu.Lock()
+						delete(oldParent.dir.DeletedChildren, oldName)
+						oldParent.addModified(-1)
+						oldParent.mu.Unlock()
+					}
+				} else {
+					log.Warnf("Failed to copy %v to %v (rename): %v", from, key, err)
+					inode.mu.Lock()
+					inode.recordFlushError(err)
+					if inode.Parent == oldParent && inode.Name == oldName {
+						// Someone renamed the inode back to the original name
+						// ...while we failed to copy it :)
+						inode.oldParent = nil
+						inode.oldName = ""
+						inode.renamingTo = false
+						inode.Parent.addModified(-1)
+						if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
+							!inode.isStillDirty() {
+							inode.SetCacheState(ST_CACHED)
+							inode.SetAttrTime(time.Now())
+						}
+					}
+					inode.mu.Unlock()
+				}
+			}
+			if err == nil {
+				log.Debugf("Copied %v to %v (rename)", from, key)
+				delKey := from
+				delParent := oldParent
+				delName := oldName
+				inode.mu.Lock()
+				// Now we know that the object is accessible by the new name
+				if inode.Parent == newParent && inode.Name == newName {
+					// Just clear the old path
+					inode.oldParent = nil
+					inode.oldName = ""
+				} else if inode.Parent == oldParent && inode.Name == oldName {
+					// Someone renamed the inode back to the original name(!)
+					inode.oldParent = nil
+					inode.oldName = ""
+					// Delete the new key instead of the old one (?)
+					delKey = key
+					delParent = newParent
+					delName = newName
+				} else {
+					// Someone renamed the inode again(!)
+					inode.oldParent = newParent
+					inode.oldName = newName
+				}
+				if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
+					!inode.isStillDirty() {
+					inode.SetCacheState(ST_CACHED)
+					inode.SetAttrTime(time.Now())
+				}
+				inode.renamingTo = false
+				inode.mu.Unlock()
+				// Now delete the old key
+				if !notFoundIgnore {
+					inode.fs.addInflightChange(delKey)
+					_, err = cloud.DeleteBlob(&DeleteBlobInput{
+						Key: delKey,
+					})
+					inode.fs.completeInflightChange(delKey)
+				}
+				if err != nil {
+					log.Debugf("Failed to delete %v during rename, will retry later", delKey)
+					// Emulate a deleted file
+					delParent.mu.Lock()
+					delParent.fs.mu.Lock()
+					tomb := NewInode(delParent.fs, delParent, delName)
+					tomb.Id = delParent.fs.allocateInodeId()
+					tomb.fs.inodes[tomb.Id] = tomb
+					tomb.userMetadata = make(map[string][]byte)
+					tomb.SetCacheState(ST_DELETED)
+					tomb.recordFlushError(err)
+					delParent.dir.DeletedChildren[delName] = tomb
+					delParent.fs.mu.Unlock()
+					delParent.mu.Unlock()
+				} else {
+					log.Debugf("Deleted %v - rename completed", from)
+					// Remove from DeletedChildren of the old parent
+					delParent.mu.Lock()
+					delete(delParent.dir.DeletedChildren, delName)
+					delParent.mu.Unlock()
+					// And track ModifiedChildren because rename is special - it takes two parents
+					delParent.addModified(-1)
+				}
+			}
+		}
+		inode.mu.Lock()
+		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+		atomic.AddInt64(&inode.fs.activeFlushers, -1)
+		inode.fs.WakeupFlusher()
+		inode.mu.Unlock()
+	}()
+}
+
+func (inode *Inode) sendUpdateMeta() {
+	// Update metadata by COPYing into the same object
+	// It results in the optimized implementation in S3
+	cloud, key := inode.cloud()
+	if inode.isDir() {
+		key += "/"
+	}
+	inode.userMetadataDirty = 0
+	inode.IsFlushing += inode.fs.flags.MaxParallelParts
+	atomic.AddInt64(&inode.fs.activeFlushers, 1)
+	copyIn := &CopyBlobInput{
+		Source:      key,
+		Destination: key,
+		Size:        PUInt64(inode.knownSize),
+		ETag:        PString(inode.knownETag),
+		Metadata:    escapeMetadata(inode.userMetadata),
+	}
+	go func() {
+		inode.fs.addInflightChange(key)
+		_, err := cloud.CopyBlob(copyIn)
+		inode.fs.completeInflightChange(key)
+		inode.mu.Lock()
+		inode.recordFlushError(err)
+		if err != nil {
+			mappedErr := mapAwsError(err)
+			inode.userMetadataDirty = 2
+			if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
+				// Object is deleted or resized remotely (416). Discard local version
+				s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
+				inode.resetCache()
+			}
+			log.Warnf("Error flushing metadata using COPY for %v: %v", key, err)
+		} else if inode.CacheState == ST_MODIFIED && !inode.isStillDirty() {
+			inode.SetCacheState(ST_CACHED)
+			inode.SetAttrTime(time.Now())
+		}
+		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+		atomic.AddInt64(&inode.fs.activeFlushers, -1)
+		inode.fs.WakeupFlusher()
+		inode.mu.Unlock()
+	}()
+}
+
+func (inode *Inode) sendStartMultipart() {
+	cloud, key := inode.cloud()
+	if inode.isDir() {
+		key += "/"
+	}
+	inode.IsFlushing += inode.fs.flags.MaxParallelParts
+	atomic.AddInt64(&inode.fs.activeFlushers, 1)
+	go func() {
+		params := &MultipartBlobBeginInput{
+			Key: key,
+			ContentType: inode.fs.flags.GetMimeType(key),
+		}
+		if inode.userMetadataDirty != 0 {
+			params.Metadata = escapeMetadata(inode.userMetadata)
+			// userMetadataDirty == 1 indicates that metadata wasn't changed
+			// since the multipart upload was initiated
+			inode.userMetadataDirty = 1
+		}
+		resp, err := cloud.MultipartBlobBegin(params)
+		inode.mu.Lock()
+		inode.recordFlushError(err)
+		if err != nil {
+			log.Warnf("Failed to initiate multipart upload for %v: %v", key, err)
+		} else {
+			log.Debugf("Started multi-part upload of object %v", key)
+			inode.mpu = resp
+		}
+		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+		atomic.AddInt64(&inode.fs.activeFlushers, -1)
+		inode.fs.WakeupFlusher()
+		inode.mu.Unlock()
+	}()
+}
+
+func (inode *Inode) sendUploadPart() bool {
 	initiated := false
 	lastPart := uint64(0)
 	flushInode := inode.fileHandles == 0 || inode.forceFlush
@@ -979,17 +1024,13 @@ func (inode *Inode) SendUpload() bool {
 	partEvicted := false
 	partZero := false
 	firstPart := true
-	canComplete := true
 	processPart := func() bool {
 		// Don't flush parts being currently flushed
 		if partLocked {
-			canComplete = false
 		// Don't flush empty ranges when we're not under pressure
 		} else if partZero && !flushInode {
-			canComplete = false
 		// Don't flush parts which require RMW with evicted buffers
 		} else if partDirty && !partEvicted {
-			canComplete = false
 			// Don't write out the last part which is still written to (if not under memory pressure)
 			if flushInode || wantFree || lastPart != inode.fs.partNum(inode.lastWriteEnd) {
 				partOffset, partSize := inode.fs.partRange(lastPart)
@@ -1051,21 +1092,6 @@ func (inode *Inode) SendUpload() bool {
 	if !firstPart && processPart() {
 		return true
 	}
-	if canComplete && flushInode {
-		// Complete the multipart upload
-		inode.IsFlushing += inode.fs.flags.MaxParallelParts
-		atomic.AddInt64(&inode.fs.activeFlushers, 1)
-		go func() {
-			inode.mu.Lock()
-			inode.completeMultipart()
-			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
-			inode.mu.Unlock()
-			atomic.AddInt64(&inode.fs.activeFlushers, -1)
-			inode.fs.WakeupFlusher()
-		}()
-		initiated = true
-	}
-
 	return initiated
 }
 
@@ -1340,7 +1366,7 @@ func (inode *Inode) resetCache() {
 	inode.SetAttrTime(time.Time{})
 }
 
-func (inode *Inode) FlushSmallObject() {
+func (inode *Inode) flushSmallObject() {
 
 	inode.mu.Lock()
 
