@@ -36,7 +36,7 @@ func (s *BufferListTest) TestAppend(t *C) {
 	t.Assert(l.Add(0, filledBuf(1024, 1), BUF_DIRTY, true), Equals, int64(1024))
 	t.Assert(l.Add(1024, filledBuf(1024, 2), BUF_DIRTY, true), Equals, int64(1024))
 	t.Assert(l.Add(1536, filledBuf(1024, 3), BUF_DIRTY, true), Equals, int64(1024))
-	data, _, err := l.GetData(0, 2048, false, true)
+	data, _, err := l.GetData(0, 2048, true)
 	t.Assert(err, IsNil)
 	t.Assert(len(data), Equals, 1)
 	t.Assert(len(data[0]), Equals, 2048)
@@ -51,7 +51,7 @@ func (s *BufferListTest) TestGetHoles(t *C) {
 	}
 	t.Assert(l.Add(0, make([]byte, 1024), BUF_DIRTY, false), Equals, int64(1024))
 	t.Assert(l.Add(1024, make([]byte, 1024), BUF_DIRTY, false), Equals, int64(1024))
-	data, ids, err := l.GetData(0, 2048, false, true)
+	data, ids, err := l.GetData(0, 2048, true)
 	t.Assert(err, IsNil)
 	t.Assert(len(data), Equals, 2)
 	t.Assert(len(data[0]), Equals, 1024)

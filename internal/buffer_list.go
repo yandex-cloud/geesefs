@@ -15,11 +15,14 @@
 package internal
 
 import (
+	"errors"
 	"fmt"
-	"syscall"
 
 	"github.com/tidwall/btree"
 )
+
+var ErrBufferIsMissing = errors.New("tried to read from a missing buffer")
+var ErrBufferIsLoading = errors.New("tried to read from a loading buffer")
 
 type BufferState int16
 
@@ -663,7 +666,7 @@ func (l *BufferList) GetHoles(offset, size uint64) (holes []Range, loading bool,
 	return
 }
 
-func (l *BufferList) GetData(offset, size uint64, allowHoles bool, returnIds bool) (data [][]byte, ids map[uint64]bool, err error) {
+func (l *BufferList) GetData(offset, size uint64, returnIds bool) (data [][]byte, ids map[uint64]bool, err error) {
 	if returnIds {
 		ids = make(map[uint64]bool)
 	}
@@ -671,17 +674,10 @@ func (l *BufferList) GetData(offset, size uint64, allowHoles bool, returnIds boo
 	endOffset := offset + size
 	l.at.Ascend(curOffset+1, func(end uint64, b *FileBuffer) bool {
 		if b.offset > curOffset {
-			if allowHoles {
-				curEnd := min(endOffset, b.offset)
-				data = appendZero(data, curEnd-curOffset)
-				curOffset = curEnd
-			} else {
-				// hole
-				data = nil
-				// FIXME Use own error codes
-				err = syscall.EIO
-				return false
-			}
+			// hole
+			data = nil
+			err = ErrBufferIsMissing
+			return false
 		}
 		if b.offset >= endOffset {
 			return false
@@ -693,7 +689,7 @@ func (l *BufferList) GetData(offset, size uint64, allowHoles bool, returnIds boo
 		if b.loading {
 			// tried to read a loading buffer
 			data = nil
-			err = syscall.EAGAIN
+			err = ErrBufferIsLoading
 			return false
 		} else if b.zero {
 			data = appendZero(data, curEnd-curOffset)
@@ -704,13 +700,9 @@ func (l *BufferList) GetData(offset, size uint64, allowHoles bool, returnIds boo
 		return curOffset < endOffset
 	})
 	if err == nil && curOffset < endOffset {
-		if allowHoles {
-			data = appendZero(data, endOffset-curOffset)
-		} else {
-			data = nil
-			err = syscall.EIO
-			return
-		}
+		data = nil
+		err = ErrBufferIsMissing
+		return
 	}
 	return
 }

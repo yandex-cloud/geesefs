@@ -349,11 +349,11 @@ func (inode *Inode) LoadRange(offset, size uint64, readAheadSize uint64, ignoreM
 	// Wait for the data to load
 	if len(readRanges) > 0 || loading {
 		for {
-			_, _, err := inode.buffers.GetData(offset, size, false, false)
-			if err == syscall.EAGAIN {
+			_, _, err := inode.buffers.GetData(offset, size, false)
+			if err == ErrBufferIsLoading {
 				// still loading
 				inode.readCond.Wait()
-			} else if err == syscall.EIO {
+			} else if err == ErrBufferIsMissing {
 				// loading buffer disappeared => read error
 				err = inode.readError
 				if err == nil {
@@ -607,7 +607,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	}
 
 	// return cached buffers directly without copying
-	data, _, err = fh.inode.buffers.GetData(offset, size, false, false)
+	data, _, err = fh.inode.buffers.GetData(offset, size, false)
 	if err != nil && requestErr != nil {
 		return nil, 0, requestErr
 	} else if err != nil {
@@ -643,8 +643,7 @@ func (fh *FileHandle) Release() {
 func (inode *Inode) getMultiReader(offset, size uint64) (reader *MultiReader, ids map[uint64]bool, err error) {
 	inode.buffers.SplitAt(offset)
 	inode.buffers.SplitAt(offset+size)
-	// FIXME: Do not allow holes here too
-	data, ids, err := inode.buffers.GetData(offset, size, true, true)
+	data, ids, err := inode.buffers.GetData(offset, size, true)
 	if err != nil {
 		return nil, nil, err
 	}
