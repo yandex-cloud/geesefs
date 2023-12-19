@@ -580,10 +580,10 @@ func (fs *Goofys) WakeupFlusherAndWait(wait bool) {
 	if fs.flushPending == 0 {
 		fs.flushPending = 1
 		fs.flusherCond.Broadcast()
-		if wait {
-			// Wait for any result
-			fs.flusherCond.Wait()
-		}
+	}
+	if wait {
+		// Wait for any result
+		fs.flusherCond.Wait()
 	}
 	fs.flusherMu.Unlock()
 }
