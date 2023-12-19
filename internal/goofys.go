@@ -548,6 +548,8 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 	return freed, haveDirty
 }
 
+// FIXME: Implement disk cache size limit, add another btree.Map-based
+// "LRU" queue to delete old files from the disk.
 func (fs *Goofys) tryEvictToDisk(inode *Inode, buf *FileBuffer, toFs *int) {
 	if fs.flags.CachePath != "" && !buf.onDisk {
 		if *toFs == -1 {
