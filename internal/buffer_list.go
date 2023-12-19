@@ -54,16 +54,22 @@ type BufferListHelpers interface {
 	UnqueueCleanBuffer(*FileBuffer)
 }
 
+type dirtyPart struct {
+	partNum uint64
+	queueId uint64
+	refcnt  int
+}
+
 type BufferList struct {
 	// current buffers in list
 	// end offset => buffer
-	at      btree.Map[uint64, *FileBuffer]
+	at btree.Map[uint64, *FileBuffer]
 	// interface to external methods
 	helpers BufferListHelpers
-	// dirty part map (unordered)
-	// we could use another btree.Map to track them in the write order
-	// but it doesn't seem really needed at this point
-	dirtyParts map[uint64]int
+	// dirty part map and queue
+	dirtyQueue btree.Map[uint64, *dirtyPart]
+	dirtyParts map[uint64]*dirtyPart
+	dirtyQid   uint64
 	// dirty buffer count
 	dirtyCount int64
 	// next dirty index for new buffers
@@ -249,9 +255,13 @@ func (l *BufferList) unqueue(b *FileBuffer) {
 		sp := l.helpers.PartNum(b.offset)
 		ep := l.helpers.PartNum(b.offset+b.length-1)
 		for i := sp; i < ep+1; i++ {
-			l.dirtyParts[i]--
-			if l.dirtyParts[i] == 0 {
-				delete(l.dirtyParts, i)
+			p := l.dirtyParts[i]
+			if p != nil {
+				p.refcnt--
+				if p.refcnt == 0 {
+					l.dirtyQueue.Delete(p.queueId)
+					delete(l.dirtyParts, i)
+				}
 			}
 		}
 	} else if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
@@ -266,20 +276,32 @@ func (l *BufferList) queue(b *FileBuffer) {
 	if b.state == BUF_DIRTY {
 		l.dirtyCount++
 		if l.dirtyParts == nil {
-			l.dirtyParts = make(map[uint64]int)
+			l.dirtyParts = make(map[uint64]*dirtyPart)
 		}
 		sp := l.helpers.PartNum(b.offset)
 		ep := l.helpers.PartNum(b.offset+b.length-1)
 		for i := sp; i < ep+1; i++ {
-			l.dirtyParts[i]++
+			l.dirtyQid++
+			p := l.dirtyParts[i]
+			if p == nil {
+				p = &dirtyPart{partNum: i, queueId: l.dirtyQid, refcnt: 1}
+				l.dirtyParts[i] = p
+				l.dirtyQueue.Set(p.queueId, p)
+			} else {
+				l.dirtyQueue.Delete(p.queueId)
+				p.queueId = l.dirtyQid
+				l.dirtyQueue.Set(p.queueId, p)
+			}
 		}
 	} else if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
 		l.helpers.QueueCleanBuffer(b)
 	}
 }
 
-func (l *BufferList) GetDirtyParts() (map[uint64]int) {
-	return l.dirtyParts
+func (l *BufferList) IterateDirtyParts(cb func(partNum uint64) bool) {
+	l.dirtyQueue.Ascend(0, func(qid uint64, p *dirtyPart) bool {
+		return cb(p.partNum)
+	})
 }
 
 func (l *BufferList) SetState(offset, size uint64, ids map[uint64]bool, state BufferState) {
