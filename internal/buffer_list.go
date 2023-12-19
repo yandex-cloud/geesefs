@@ -258,7 +258,9 @@ func (l *BufferList) unqueue(b *FileBuffer) {
 			p := l.dirtyParts[i]
 			if p != nil {
 				p.refcnt--
-				if p.refcnt == 0 {
+				if p.refcnt < 0 {
+					panic("BUG: dirty buffer count of part < 0")
+				} else if p.refcnt == 0 {
 					l.dirtyQueue.Delete(p.queueId)
 					delete(l.dirtyParts, i)
 				}
@@ -285,7 +287,7 @@ func (l *BufferList) referenceDirtyPart(partNum uint64) {
 
 func (l *BufferList) queue(b *FileBuffer) {
 	if b.length == 0 {
-		panic("buffer length should never be 0")
+		panic("BUG: buffer length should never be 0")
 	}
 	if b.state == BUF_DIRTY {
 		l.dirtyCount++
@@ -304,7 +306,7 @@ func (l *BufferList) queue(b *FileBuffer) {
 
 func (l *BufferList) requeueSplit(left *FileBuffer) {
 	if left.length == 0 {
-		panic("buffer length should never be 0")
+		panic("BUG: buffer length should never be 0")
 	}
 	if left.state == BUF_DIRTY {
 		l.dirtyCount++
@@ -421,7 +423,7 @@ func (l *BufferList) insertOrAppend(offset uint64, data []byte, state BufferStat
 	})
 	if prev != nil && prev.offset+prev.length == end {
 		panic(fmt.Sprintf(
-			"Tried to insert %x+%x (s%v) but already have %x+%x (s%v)",
+			"BUG: Tried to insert %x+%x (s%v) but already have %x+%x (s%v)",
 			offset, len(data), state, prev.offset, prev.length, prev.state,
 		))
 	}
