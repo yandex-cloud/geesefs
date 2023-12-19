@@ -269,6 +269,20 @@ func (l *BufferList) unqueue(b *FileBuffer) {
 	}
 }
 
+func (l *BufferList) referenceDirtyPart(partNum uint64) {
+	l.dirtyQid++
+	p := l.dirtyParts[partNum]
+	if p == nil {
+		p = &dirtyPart{partNum: partNum, queueId: l.dirtyQid, refcnt: 1}
+		l.dirtyParts[partNum] = p
+		l.dirtyQueue.Set(p.queueId, p)
+	} else {
+		l.dirtyQueue.Delete(p.queueId)
+		p.queueId = l.dirtyQid
+		l.dirtyQueue.Set(p.queueId, p)
+	}
+}
+
 func (l *BufferList) queue(b *FileBuffer) {
 	if b.length == 0 {
 		panic("buffer length should never be 0")
@@ -280,21 +294,32 @@ func (l *BufferList) queue(b *FileBuffer) {
 		}
 		sp := l.helpers.PartNum(b.offset)
 		ep := l.helpers.PartNum(b.offset+b.length-1)
-		for i := sp; i < ep+1; i++ {
-			l.dirtyQid++
-			p := l.dirtyParts[i]
-			if p == nil {
-				p = &dirtyPart{partNum: i, queueId: l.dirtyQid, refcnt: 1}
-				l.dirtyParts[i] = p
-				l.dirtyQueue.Set(p.queueId, p)
-			} else {
-				l.dirtyQueue.Delete(p.queueId)
-				p.queueId = l.dirtyQid
-				l.dirtyQueue.Set(p.queueId, p)
-			}
+		for i := sp; i <= ep; i++ {
+			l.referenceDirtyPart(i)
 		}
 	} else if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
 		l.helpers.QueueCleanBuffer(b)
+	}
+}
+
+func (l *BufferList) requeueSplit(left *FileBuffer) {
+	if left.length == 0 {
+		panic("buffer length should never be 0")
+	}
+	if left.state == BUF_DIRTY {
+		l.dirtyCount++
+		if l.dirtyParts == nil {
+			l.dirtyParts = make(map[uint64]*dirtyPart)
+		}
+		// most refcounts don't change - except if splitting not at part boundary
+		lbound := l.helpers.PartNum(left.offset+left.length-1)
+		rbound := l.helpers.PartNum(left.offset+left.length)
+		if lbound == rbound {
+			l.referenceDirtyPart(lbound)
+		}
+	} else if left.state == BUF_CLEAN || left.state == BUF_FLUSHED_FULL {
+		// we only have to add the left buffer, right remains as is
+		l.helpers.QueueCleanBuffer(left)
 	}
 }
 
@@ -331,6 +356,20 @@ func (l *BufferList) SetFlushedClean() {
 	})
 }
 
+func (l *BufferList) delete(b *FileBuffer) (allocated int64) {
+	if b.data != nil {
+		b.ptr.refs--
+		if b.ptr.refs == 0 {
+			allocated -= int64(len(b.ptr.mem))
+		}
+		b.ptr = nil
+		b.data = nil
+	}
+	l.at.Delete(b.offset+b.length)
+	l.unqueue(b)
+	return
+}
+
 // Remove buffers in range (offset..size)
 func (l *BufferList) RemoveRange(removeOffset, removeSize uint64, filter func(b *FileBuffer) bool) (allocated int64) {
 	endOffset := removeOffset + removeSize
@@ -340,59 +379,28 @@ func (l *BufferList) RemoveRange(removeOffset, removeSize uint64, filter func(b 
 		}
 		bufEnd := b.offset + b.length
 		if (filter == nil || filter(b)) && bufEnd > removeOffset && endOffset > b.offset {
-			if removeOffset <= b.offset {
-				if endOffset >= bufEnd {
-					// whole buffer
-					if b.data != nil {
-						b.ptr.refs--
-						if b.ptr.refs == 0 {
-							allocated -= int64(len(b.ptr.mem))
-						}
-						b.ptr = nil
-						b.data = nil
-					}
-					l.at.Delete(bufEnd)
-					l.unqueue(b)
-					return true, true
-				} else {
-					// remove beginning
-					l.unqueue(b)
-					if b.data != nil {
-						b.data = b.data[endOffset-b.offset:]
-					}
-					b.length = bufEnd - endOffset
-					b.offset = endOffset
-					l.queue(b)
-				}
-			} else if endOffset >= bufEnd {
-				// remove end
-				l.unqueue(b)
-				if b.data != nil {
-					b.data = b.data[0 : removeOffset-b.offset]
-				}
-				b.length = removeOffset - b.offset
-				l.at.Delete(bufEnd)
-				l.at.Set(b.offset+b.length, b)
-				l.queue(b)
-				return true, true
+			if removeOffset <= b.offset && endOffset >= bufEnd {
+				// whole buffer
+				allocated += l.delete(b)
+				changed = true
 			} else {
-				// middle
-				l.unqueue(b)
-				startBuf := *b
-				startBuf.length = removeOffset - b.offset
-				if b.data != nil {
-					b.ptr.refs++
-					startBuf.data = b.data[0 : removeOffset-b.offset]
-					b.data = b.data[endOffset-b.offset:]
+				var left, right *FileBuffer
+				// split-delete is simpler than cut regarding the dirty part reference count
+				if endOffset < bufEnd {
+					// remove beginning
+					left, b = l.split(b, endOffset)
+					allocated += l.delete(left)
+					changed = true
 				}
-				b.offset, b.length = endOffset, b.length-(endOffset-b.offset)
-				l.at.Set(startBuf.offset+startBuf.length, &startBuf)
-				l.queue(&startBuf)
-				l.queue(b)
-				return true, true
+				if removeOffset > b.offset {
+					// remove end
+					b, right = l.split(b, removeOffset)
+					allocated += l.delete(right)
+					changed = true
+				}
 			}
 		}
-		return true, false
+		return true, changed
 	})
 	return
 }
@@ -619,7 +627,7 @@ func (l *BufferList) split(b *FileBuffer, offset uint64) (left, right *FileBuffe
 	b.length = b.offset + b.length - offset
 	b.offset = offset
 	l.at.Set(offset, &startBuf)
-	l.queue(&startBuf)
+	l.requeueSplit(&startBuf)
 	return &startBuf, b
 }
 
