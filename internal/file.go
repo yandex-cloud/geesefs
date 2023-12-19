@@ -1610,7 +1610,8 @@ func (inode *Inode) FlushPart(part uint64) {
 			inode.mpu.Parts[part] = resp.PartId
 		}
 		doneState := BUF_FLUSHED_FULL
-		if bufLen < partFullSize {
+		if bufLen < partFullSize || part == 0 {
+			// Do not evict modified header (first part)
 			doneState = BUF_FLUSHED_CUT
 		}
 		log.Debugf("Flushed part %v of object %v", part, key)

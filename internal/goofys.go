@@ -525,12 +525,13 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 		buf := inode.buffers.Get(cleanEnd)
 		// Never evict buffers flushed in an incomplete (last) part
 		if buf != nil && (buf.state == BUF_CLEAN || buf.state == BUF_FLUSHED_FULL) &&
-			buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) &&
-			// Do not evict modified header
-			(buf.state != BUF_FLUSHED_FULL || buf.offset >= fs.flags.PartSizes[0].PartSize) {
+			buf.ptr != nil && !inode.IsRangeLocked(buf.offset, buf.length, false) {
 			fs.tryEvictToDisk(inode, buf, &toFs)
 			allocated, _ := inode.buffers.EvictFromMemory(buf)
-			fs.bufferPool.UseUnlocked(allocated, false)
+			if allocated != 0 {
+				fs.bufferPool.UseUnlocked(allocated, false)
+				freed -= allocated
+			}
 		}
 		inode.mu.Unlock()
 		if freed >= size {
