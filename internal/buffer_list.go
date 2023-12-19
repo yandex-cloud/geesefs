@@ -47,6 +47,7 @@ const (
 
 type BufferListHelpers interface {
 	PartNum(uint64) uint64
+	// FIXME Rename to *CleanBuffer
 	QueueBuffer(*FileBuffer)
 	UnqueueBuffer(*FileBuffer)
 }
@@ -54,8 +55,14 @@ type BufferListHelpers interface {
 type BufferList struct {
 	// current buffers in list
 	// end offset => buffer
-	at         btree.Map[uint64, *FileBuffer]
-	helpers    BufferListHelpers
+	at      btree.Map[uint64, *FileBuffer]
+	// interface to external methods
+	helpers BufferListHelpers
+	// dirty part map (unordered)
+	// we could use another btree.Map to track them in the write order
+	// but it doesn't seem really needed at this point
+	dirtyParts map[uint64]int
+	// dirty buffer count
 	dirtyCount int64
 	// next dirty index for new buffers
 	curDirtyID uint64
@@ -217,7 +224,7 @@ func (l *BufferList) Get(end uint64) *FileBuffer {
 }
 
 func (l *BufferList) Select(start, end uint64, cb func(buf *FileBuffer) (good bool)) (bufs []*FileBuffer) {
-	l.Ascend(start, func(bufEnd uint64, buf *FileBuffer) (cont bool, chg bool) {
+	l.Ascend(start+1, func(bufEnd uint64, buf *FileBuffer) (cont bool, chg bool) {
 		if buf.offset >= end {
 			return false, false
 		}
@@ -237,8 +244,17 @@ func (l *BufferList) nextID() uint64 {
 func (l *BufferList) unqueue(b *FileBuffer) {
 	if b.state == BUF_DIRTY {
 		l.dirtyCount--
+		sp := l.helpers.PartNum(b.offset)
+		ep := l.helpers.PartNum(b.offset+b.length-1)
+		for i := sp; i < ep+1; i++ {
+			l.dirtyParts[i]--
+			if l.dirtyParts[i] == 0 {
+				delete(l.dirtyParts, i)
+			}
+		}
+	} else {
+		l.helpers.UnqueueBuffer(b)
 	}
-	l.helpers.UnqueueBuffer(b)
 }
 
 func (l *BufferList) queue(b *FileBuffer) {
@@ -247,8 +263,21 @@ func (l *BufferList) queue(b *FileBuffer) {
 	}
 	if b.state == BUF_DIRTY {
 		l.dirtyCount++
+		if l.dirtyParts == nil {
+			l.dirtyParts = make(map[uint64]int)
+		}
+		sp := l.helpers.PartNum(b.offset)
+		ep := l.helpers.PartNum(b.offset+b.length-1)
+		for i := sp; i < ep+1; i++ {
+			l.dirtyParts[i]++
+		}
+	} else {
+		l.helpers.QueueBuffer(b)
 	}
-	l.helpers.QueueBuffer(b)
+}
+
+func (l *BufferList) GetDirtyParts() (map[uint64]int) {
+	return l.dirtyParts
 }
 
 func (l *BufferList) SetState(offset, size uint64, ids map[uint64]bool, state BufferState) {

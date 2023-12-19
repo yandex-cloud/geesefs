@@ -1016,77 +1016,53 @@ func (inode *Inode) sendStartMultipart() {
 
 func (inode *Inode) sendUploadPart() bool {
 	initiated := false
-	lastPart := uint64(0)
 	flushInode := inode.fileHandles == 0 || inode.forceFlush
 	wantFree := atomic.LoadInt32(&inode.fs.wantFree) > 0
-	partDirty := false
-	partEvicted := false
-	partZero := false
-	firstPart := true
-	processPart := func() bool {
-		partOffset, partSize := inode.fs.partRange(lastPart)
+	for partNum := range inode.buffers.GetDirtyParts() {
+		partOffset, partSize := inode.fs.partRange(partNum)
 		if inode.IsRangeLocked(partOffset, partSize, true) {
 			// Don't flush parts being currently flushed
-		} else if partZero && !flushInode {
-			// Don't flush empty ranges when we're not under pressure
-		} else if partDirty && !partEvicted {
-			// Don't flush parts which require RMW with evicted buffers
-			if flushInode || wantFree || lastPart != inode.fs.partNum(inode.lastWriteEnd) {
-				// Don't write out the last part which is still written to (if not under memory pressure)
-				// Guard part against eviction
-				inode.LockRange(partOffset, partSize, true)
-				inode.IsFlushing++
-				atomic.AddInt64(&inode.fs.activeFlushers, 1)
-				go func(lastPart, partOffset, partSize uint64) {
-					inode.mu.Lock()
-					inode.FlushPart(lastPart)
-					inode.UnlockRange(partOffset, partSize, true)
-					inode.IsFlushing--
-					inode.mu.Unlock()
-					atomic.AddInt64(&inode.fs.activeFlushers, -1)
-					inode.fs.WakeupFlusher()
-				}(lastPart, partOffset, partSize)
-				initiated = true
-				if atomic.LoadInt64(&inode.fs.activeFlushers) >= inode.fs.flags.MaxFlushers ||
-					inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
-					return true
-				}
-			}
+			continue
 		}
-		return false
-	}
-	// FIXME: Use ScanDirty()
-	inode.buffers.Ascend(0, func(end uint64, buf *FileBuffer) (cont bool, changed bool) {
-		startPart := inode.fs.partNum(buf.offset)
-		endPart := inode.fs.partNum(buf.offset + buf.length - 1)
-		if firstPart || startPart != lastPart {
-			if !firstPart {
-				if processPart() {
-					return false, false
-				}
-			}
-			firstPart = false
-			partDirty = false
-			partEvicted = false
-			partZero = false
-			lastPart = startPart
+		if partNum == inode.fs.partNum(inode.lastWriteEnd) && !flushInode && !wantFree {
+			// Don't write out the last part which is still written to (if not under memory pressure)
+			continue
 		}
-		partDirty = partDirty || buf.state == BUF_DIRTY
-		partEvicted = partEvicted || buf.state == BUF_FL_CLEARED
-		partZero = partZero || buf.zero
-		for lastPart < endPart {
-			if processPart() {
+		partEnd := partOffset+partSize
+		var partDirty, partEvicted, partZero bool
+		inode.buffers.Ascend(partOffset+1, func(end uint64, buf *FileBuffer) (cont bool, changed bool) {
+			if buf.offset >= partEnd {
 				return false, false
 			}
-			partDirty = buf.state == BUF_DIRTY
-			partEvicted = buf.state == BUF_FL_CLEARED
-			partZero = buf.zero
-			lastPart++
+			partDirty = partDirty || buf.state == BUF_DIRTY
+			partEvicted = partEvicted || buf.state == BUF_FL_CLEARED
+			partZero = partZero || buf.zero
+			return true, false
+		})
+		if partZero && !flushInode {
+			// Don't flush empty ranges when we're not under pressure
+		} else if !partDirty || partEvicted {
+			// Don't flush parts which require RMW with evicted buffers
+		} else {
+			// Guard part against eviction
+			inode.LockRange(partOffset, partSize, true)
+			inode.IsFlushing++
+			atomic.AddInt64(&inode.fs.activeFlushers, 1)
+			go func(lastPart, partOffset, partSize uint64) {
+				inode.mu.Lock()
+				inode.FlushPart(lastPart)
+				inode.UnlockRange(partOffset, partSize, true)
+				inode.IsFlushing--
+				inode.mu.Unlock()
+				atomic.AddInt64(&inode.fs.activeFlushers, -1)
+				inode.fs.WakeupFlusher()
+			}(partNum, partOffset, partSize)
+			initiated = true
+			if atomic.LoadInt64(&inode.fs.activeFlushers) >= inode.fs.flags.MaxFlushers ||
+				inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
+				return true
+			}
 		}
-		return true, false
-	})
-	if !firstPart && processPart() {
-		return true
 	}
 	return initiated
 }
@@ -1109,10 +1085,9 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 	}
 
 	updatedPartID := inode.fs.partNum(inode.lastWriteEnd)
-	endPartID := inode.fs.partNum(inode.Attributes.Size - 1)
 
 	var prevSize uint64
-	for part := uint64(0); part <= endPartID; part++ {
+	for part := range inode.buffers.GetDirtyParts() {
 		if inode.flushLimitsExceeded() {
 			break
 		}
