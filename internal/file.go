@@ -1040,6 +1040,9 @@ func (inode *Inode) sendUploadPart() bool {
 		})
 		if partZero && !flushInode {
 			// Don't flush empty ranges when we're not under pressure
+			// FIXME: Can probably lead to a hang when the only way to free memory
+			// is flushing parts with empty ranges. But we have to flush them only
+			// if we already tried all 'normal' parts...
 		} else if !partDirty || partEvicted {
 			// Don't flush parts which require RMW with evicted buffers
 		} else {
