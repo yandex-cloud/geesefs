@@ -27,9 +27,6 @@ type QueuedBuffer struct {
 
 type BufferQueue struct {
 	mu sync.Mutex
-	// dirty buffer queue - buffers eligible for flushing
-	// queue index (arbitrary increasing value) => buffer
-	dirtyQueue btree.Map[uint64, QueuedBuffer]
 	// clean/flushed buffer queue - buffers eligible for eviction from memory
 	// queue index (arbitrary increasing value) => buffer
 	cleanQueue btree.Map[uint64, QueuedBuffer]
@@ -38,40 +35,29 @@ type BufferQueue struct {
 }
 
 func (l *BufferQueue) Unqueue(b *FileBuffer) {
-	l.mu.Lock()
-	if b.state == BUF_DIRTY {
-		// We don't flush zero buffers until file is closed
-		// We don't flush the currently modified part (last part written to)
-		// However this filtering is done outside BufferQueue
-		l.dirtyQueue.Delete(b.queueId)
-	} else if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
+	if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
 		// We don't evict used buffers
 		// We don't evict the first part
 		// However, this filtering is also done outside BufferQueue :)
+		l.mu.Lock()
 		l.cleanQueue.Delete(b.queueId)
+		l.mu.Unlock()
 	}
-	l.mu.Unlock()
 }
 
 func (l *BufferQueue) Queue(inode *Inode, b *FileBuffer) {
-	l.mu.Lock()
-	l.curQueueID++
-	b.queueId = l.curQueueID
-	if b.state == BUF_DIRTY {
-		l.dirtyQueue.Set(b.queueId, QueuedBuffer{inode, b.offset+b.length})
-	} else if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
+	if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
+		l.mu.Lock()
+		l.curQueueID++
+		b.queueId = l.curQueueID
 		l.cleanQueue.Set(b.queueId, QueuedBuffer{inode, b.offset+b.length})
+		l.mu.Unlock()
 	}
-	l.mu.Unlock()
 }
 
-func (l *BufferQueue) DirtyCount() int {
-	return l.dirtyQueue.Len()
-}
-
-func (l *BufferQueue) NextDirty(minQueueId uint64) (inode *Inode, end, nextQueueId uint64) {
+func (l *BufferQueue) NextClean(minQueueId uint64) (inode *Inode, end, nextQueueId uint64) {
 	l.mu.Lock()
-	l.dirtyQueue.Ascend(minQueueId, func(queueId uint64, b QueuedBuffer) bool {
+	l.cleanQueue.Ascend(minQueueId, func(queueId uint64, b QueuedBuffer) bool {
 		inode = b.inode
 		end = b.end
 		nextQueueId = queueId+1
@@ -81,12 +67,40 @@ func (l *BufferQueue) NextDirty(minQueueId uint64) (inode *Inode, end, nextQueue
 	return
 }
 
-func (l *BufferQueue) NextClean(minQueueId uint64) (inode *Inode, end, nextQueueId uint64) {
+type InodeQueue struct {
+	mu sync.Mutex
+	// dirty inode queue
+	dirtyQueue btree.Map[uint64, uint64]
+	// next queue index for new buffers
+	curQueueID uint64
+}
+
+func (l *InodeQueue) Add(inodeID uint64) (queueID uint64) {
 	l.mu.Lock()
-	l.cleanQueue.Ascend(minQueueId, func(queueId uint64, b QueuedBuffer) bool {
-		inode = b.inode
-		end = b.end
-		nextQueueId = queueId+1
+	l.curQueueID++
+	queueID = l.curQueueID
+	l.dirtyQueue.Set(queueID, inodeID)
+	l.mu.Unlock()
+	return
+}
+
+func (l *InodeQueue) Delete(queueID uint64) {
+	l.mu.Lock()
+	l.dirtyQueue.Delete(queueID)
+	l.mu.Unlock()
+}
+
+func (l *InodeQueue) Size() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.dirtyQueue.Len()
+}
+
+func (l *InodeQueue) Next(minQueueID uint64) (inodeID, nextQueueID uint64) {
+	l.mu.Lock()
+	l.dirtyQueue.Ascend(minQueueID, func(queueID uint64, ino uint64) bool {
+		inodeID = ino
+		nextQueueID = queueID+1
 		return false
 	})
 	l.mu.Unlock()

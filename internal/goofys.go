@@ -107,7 +107,8 @@ type Goofys struct {
 
 	forgotCnt uint32
 
-	bufferQueue BufferQueue
+	cleanQueue BufferQueue
+	inodeQueue InodeQueue
 
 	zeroBuf []byte
 
@@ -515,7 +516,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 	var inode *Inode
 	var cleanEnd, cleanQueueID uint64
 	for freed < size {
-		inode, cleanEnd, cleanQueueID = fs.bufferQueue.NextClean(cleanQueueID)
+		inode, cleanEnd, cleanQueueID = fs.cleanQueue.NextClean(cleanQueueID)
 		if cleanQueueID == 0 {
 			break
 		}
@@ -536,7 +537,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 			break
 		}
 	}
-	haveDirty := fs.bufferQueue.DirtyCount() > 0
+	haveDirty := fs.inodeQueue.Size() > 0
 	if freed < origSize && haveDirty {
 		fs.bufferPool.mu.Unlock()
 		atomic.AddInt32(&fs.wantFree, 1)
@@ -614,9 +615,7 @@ func (fs *Goofys) ScheduleRetryFlush() {
 // 4) Dirty memory limit reached => without on-disk cache we have to flush the whole object.
 //    With on-disk cache we can unload some dirty buffers to disk.
 func (fs *Goofys) Flusher() {
-	var inode *Inode
-	var prevInodeID fuseops.InodeID
-	var nextQueueID uint64
+	var inodeID, nextQueueID uint64
 	for atomic.LoadInt32(&fs.shutdown) == 0 {
 		fs.flusherMu.Lock()
 		if fs.flushPending == 0 {
@@ -624,17 +623,16 @@ func (fs *Goofys) Flusher() {
 		}
 		fs.flushPending = 0
 		fs.flusherMu.Unlock()
-		prevInodeID = 0
 		attempt := 1
 		if nextQueueID != 0 {
 			attempt = 2
 		}
 		for attempt > 0 && atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers {
-			inode, _, nextQueueID = fs.bufferQueue.NextDirty(nextQueueID)
-			if inode == nil {
+			inodeID, nextQueueID = fs.inodeQueue.Next(nextQueueID)
+			if inodeID == 0 {
 				attempt--
-			} else if inode.Id != prevInodeID {
-				prevInodeID = inode.Id
+			} else {
+				inode := fs.getInodeOrDie(fuseops.InodeID(inodeID))
 				for sent := true; sent && atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers; {
 					sent = inode.TryFlush()
 					if sent {

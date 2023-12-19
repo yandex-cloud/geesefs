@@ -1020,20 +1020,19 @@ func (inode *Inode) sendUploadPart() bool {
 	flushInode := inode.fileHandles == 0 || inode.forceFlush
 	wantFree := atomic.LoadInt32(&inode.fs.wantFree) > 0
 	partDirty := false
-	partLocked := false
 	partEvicted := false
 	partZero := false
 	firstPart := true
 	processPart := func() bool {
-		// Don't flush parts being currently flushed
-		if partLocked {
-		// Don't flush empty ranges when we're not under pressure
+		partOffset, partSize := inode.fs.partRange(lastPart)
+		if inode.IsRangeLocked(partOffset, partSize, true) {
+			// Don't flush parts being currently flushed
 		} else if partZero && !flushInode {
-		// Don't flush parts which require RMW with evicted buffers
+			// Don't flush empty ranges when we're not under pressure
 		} else if partDirty && !partEvicted {
-			// Don't write out the last part which is still written to (if not under memory pressure)
+			// Don't flush parts which require RMW with evicted buffers
 			if flushInode || wantFree || lastPart != inode.fs.partNum(inode.lastWriteEnd) {
-				partOffset, partSize := inode.fs.partRange(lastPart)
+				// Don't write out the last part which is still written to (if not under memory pressure)
 				// Guard part against eviction
 				inode.LockRange(partOffset, partSize, true)
 				inode.IsFlushing++
@@ -1068,13 +1067,11 @@ func (inode *Inode) sendUploadPart() bool {
 			}
 			firstPart = false
 			partDirty = false
-			partLocked = false
 			partEvicted = false
 			partZero = false
 			lastPart = startPart
 		}
 		partDirty = partDirty || buf.state == BUF_DIRTY
-		partLocked = partLocked || inode.IsRangeLocked(buf.offset, buf.length, true)
 		partEvicted = partEvicted || buf.state == BUF_FL_CLEARED
 		partZero = partZero || buf.zero
 		for lastPart < endPart {
@@ -1082,7 +1079,6 @@ func (inode *Inode) sendUploadPart() bool {
 				return false, false
 			}
 			partDirty = buf.state == BUF_DIRTY
-			partLocked = inode.IsRangeLocked(buf.offset, buf.length, true)
 			partEvicted = buf.state == BUF_FL_CLEARED
 			partZero = buf.zero
 			lastPart++
