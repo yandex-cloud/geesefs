@@ -178,13 +178,13 @@ func (inode *Inode) PartNum(offset uint64) uint64 {
 }
 
 // For BufferListHelpers
-func (inode *Inode) QueueBuffer(buf *FileBuffer) {
-	inode.fs.cleanQueue.Queue(inode, buf)
+func (inode *Inode) QueueCleanBuffer(buf *FileBuffer) {
+	inode.fs.cleanQueue.Add(inode, buf)
 }
 
 // For BufferListHelpers
-func (inode *Inode) UnqueueBuffer(buf *FileBuffer) {
-	inode.fs.cleanQueue.Unqueue(buf)
+func (inode *Inode) UnqueueCleanBuffer(buf *FileBuffer) {
+	inode.fs.cleanQueue.Delete(buf)
 }
 
 // LOCKS_EXCLUDED(inode.mu)

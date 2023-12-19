@@ -34,25 +34,21 @@ type BufferQueue struct {
 	curQueueID uint64
 }
 
-func (l *BufferQueue) Unqueue(b *FileBuffer) {
-	if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
-		// We don't evict used buffers
-		// We don't evict the first part
-		// However, this filtering is also done outside BufferQueue :)
-		l.mu.Lock()
-		l.cleanQueue.Delete(b.queueId)
-		l.mu.Unlock()
-	}
+func (l *BufferQueue) Add(inode *Inode, b *FileBuffer) {
+	l.mu.Lock()
+	l.curQueueID++
+	b.queueId = l.curQueueID
+	l.cleanQueue.Set(b.queueId, QueuedBuffer{inode, b.offset+b.length})
+	l.mu.Unlock()
 }
 
-func (l *BufferQueue) Queue(inode *Inode, b *FileBuffer) {
-	if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
-		l.mu.Lock()
-		l.curQueueID++
-		b.queueId = l.curQueueID
-		l.cleanQueue.Set(b.queueId, QueuedBuffer{inode, b.offset+b.length})
-		l.mu.Unlock()
-	}
+func (l *BufferQueue) Delete(b *FileBuffer) {
+	// We don't evict used buffers
+	// We don't evict the first part
+	// However, this filtering is also done outside BufferQueue :)
+	l.mu.Lock()
+	l.cleanQueue.Delete(b.queueId)
+	l.mu.Unlock()
 }
 
 func (l *BufferQueue) NextClean(minQueueId uint64) (inode *Inode, end, nextQueueId uint64) {

@@ -451,7 +451,7 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 	inode.mu.Unlock()
 }
 
-// FIXME: Move LockRange/UnlockRange into buffer_list.go, but they still have
+// LockRange/UnlockRange could be moved into buffer_list.go, but they still have
 // to be stored separately from buffers and can't be a refcount - otherwise
 // an overwrite would reset the reference count and break locking
 func (inode *Inode) LockRange(offset uint64, size uint64, flushing bool) {

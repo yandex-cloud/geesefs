@@ -47,9 +47,8 @@ const (
 
 type BufferListHelpers interface {
 	PartNum(uint64) uint64
-	// FIXME Rename to *CleanBuffer
-	QueueBuffer(*FileBuffer)
-	UnqueueBuffer(*FileBuffer)
+	QueueCleanBuffer(*FileBuffer)
+	UnqueueCleanBuffer(*FileBuffer)
 }
 
 type BufferList struct {
@@ -252,8 +251,8 @@ func (l *BufferList) unqueue(b *FileBuffer) {
 				delete(l.dirtyParts, i)
 			}
 		}
-	} else {
-		l.helpers.UnqueueBuffer(b)
+	} else if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
+		l.helpers.UnqueueCleanBuffer(b)
 	}
 }
 
@@ -271,8 +270,8 @@ func (l *BufferList) queue(b *FileBuffer) {
 		for i := sp; i < ep+1; i++ {
 			l.dirtyParts[i]++
 		}
-	} else {
-		l.helpers.QueueBuffer(b)
+	} else if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
+		l.helpers.QueueCleanBuffer(b)
 	}
 }
 

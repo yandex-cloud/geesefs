@@ -15,10 +15,10 @@ func (t *TestBLHelpers) PartNum(offset uint64) uint64 {
 	return offset / (5 * 1024)
 }
 
-func (t *TestBLHelpers) QueueBuffer(buf *FileBuffer) {
+func (t *TestBLHelpers) QueueCleanBuffer(buf *FileBuffer) {
 }
 
-func (t *TestBLHelpers) UnqueueBuffer(buf *FileBuffer) {
+func (t *TestBLHelpers) UnqueueCleanBuffer(buf *FileBuffer) {
 }
 
 func filledBuf(n int, c byte) []byte {
