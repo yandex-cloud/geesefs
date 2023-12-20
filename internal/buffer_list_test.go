@@ -121,3 +121,30 @@ func (s *BufferListTest) TestFill(t *C) {
 		1: true,
 	})
 }
+
+func (s *BufferListTest) TestCutZero(t *C) {
+	l := BufferList{
+		helpers: &TestBLHelpers{},
+	}
+	t.Assert(l.Add(0, filledBuf(100, 1), BUF_DIRTY, true), Equals, int64(100))
+	z, a := l.ZeroRange(100, 1000)
+	t.Assert(z, Equals, true)
+	t.Assert(a, Equals, int64(0))
+	t.Assert(l.Add(1100, filledBuf(100, 2), BUF_DIRTY, true), Equals, int64(100))
+	t.Assert(l.Add(500, filledBuf(100, 3), BUF_DIRTY, true), Equals, int64(100))
+	data, ids, err := l.GetData(0, 1200, true)
+	t.Assert(err, IsNil)
+	t.Assert(len(data), Equals, 5)
+	t.Assert(data[0], DeepEquals, filledBuf(100, 1))
+	t.Assert(data[1], DeepEquals, make([]byte, 400))
+	t.Assert(data[2], DeepEquals, filledBuf(100, 3))
+	t.Assert(data[3], DeepEquals, make([]byte, 500))
+	t.Assert(data[4], DeepEquals, filledBuf(100, 2))
+	t.Assert(ids, DeepEquals, map[uint64]bool{
+		1: true,
+		2: true,
+		3: true,
+		4: true,
+		6: true,
+	})
+}

@@ -386,18 +386,18 @@ func (l *BufferList) RemoveRange(removeOffset, removeSize uint64, filter func(b 
 				allocated += l.delete(b)
 				changed = true
 			} else {
-				var left, right *FileBuffer
+				rm := b
 				// split-delete is simpler than cut regarding the dirty part reference count
 				if endOffset < bufEnd {
 					// remove beginning
-					left, b = l.split(b, endOffset)
-					allocated += l.delete(left)
-					changed = true
+					rm, _ = l.split(rm, endOffset)
 				}
-				if removeOffset > b.offset {
+				if removeOffset > rm.offset {
 					// remove end
-					b, right = l.split(b, removeOffset)
-					allocated += l.delete(right)
+					_, rm = l.split(rm, removeOffset)
+				}
+				if rm != b {
+					allocated += l.delete(rm)
 					changed = true
 				}
 			}
