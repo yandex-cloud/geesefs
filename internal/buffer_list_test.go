@@ -74,25 +74,31 @@ func (s *BufferListTest) TestSplitDirtyQueue(t *C) {
 	zeroed, allocated := l.ZeroRange(0, 100*1024)
 	t.Assert(zeroed, Equals, true)
 	t.Assert(allocated, Equals, int64(0))
-	// 6*1024 and 12*1024 isn't part boundary, refcnt of part 2 and 3 = 2, 1 and others = 1
-	t.Assert(l.Add(0, make([]byte, 6*1024), BUF_DIRTY, false), Equals, int64(6*1024))
+	// 6*1024 and 12*1024 isn't part boundary, refcnts should be: 3 2 2 1 1 ... 1
+	t.Assert(l.Add(0*1024, make([]byte, 1*1024), BUF_DIRTY, false), Equals, int64(1*1024))
+	t.Assert(l.Add(1*1024, make([]byte, 2*1024), BUF_DIRTY, false), Equals, int64(2*1024))
+	t.Assert(l.Add(3*1024, make([]byte, 3*1024), BUF_DIRTY, false), Equals, int64(3*1024))
 	t.Assert(l.Add(6*1024, make([]byte, 6*1024), BUF_DIRTY, false), Equals, int64(6*1024))
 	data, ids, err := l.GetData(12*1024, (100-12)*1024, true)
 	t.Assert(err, IsNil)
 	t.Assert(len(data), Equals, 1)
 	t.Assert(len(data[0]), Equals, (100-12)*1024)
 	t.Assert(ids, DeepEquals, map[uint64]bool{
-		4: true,
+		8: true,
 	})
 	l.SetState(12*1024, (100-12)*1024, ids, BUF_CLEAN)
 	data, ids, err = l.GetData(0, 12*1024, true)
 	t.Assert(err, IsNil)
-	t.Assert(len(data), Equals, 2)
-	t.Assert(len(data[0]), Equals, 6*1024)
-	t.Assert(len(data[1]), Equals, 6*1024)
+	t.Assert(len(data), Equals, 4)
+	t.Assert(len(data[0]), Equals, 1*1024)
+	t.Assert(len(data[1]), Equals, 2*1024)
+	t.Assert(len(data[2]), Equals, 3*1024)
+	t.Assert(len(data[3]), Equals, 6*1024)
 	t.Assert(ids, DeepEquals, map[uint64]bool{
 		3: true,
 		5: true,
+		7: true,
+		9: true,
 	})
 	l.SetState(0, 12*1024, ids, BUF_CLEAN)
 	// Now check dirty list - it should be empty

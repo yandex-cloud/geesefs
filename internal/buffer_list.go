@@ -256,14 +256,13 @@ func (l *BufferList) unqueue(b *FileBuffer) {
 		ep := l.helpers.PartNum(b.offset+b.length-1)
 		for i := sp; i < ep+1; i++ {
 			p := l.dirtyParts[i]
-			if p != nil {
-				p.refcnt--
-				if p.refcnt < 0 {
-					panic("BUG: dirty buffer count of part < 0")
-				} else if p.refcnt == 0 {
-					l.dirtyQueue.Delete(p.queueId)
-					delete(l.dirtyParts, i)
-				}
+			if p == nil || p.refcnt == 0 {
+				panic("BUG: dirty buffer count of part < 0")
+			}
+			p.refcnt--
+			if p.refcnt == 0 {
+				l.dirtyQueue.Delete(p.queueId)
+				delete(l.dirtyParts, i)
 			}
 		}
 	} else if b.state == BUF_CLEAN || b.state == BUF_FLUSHED_FULL {
@@ -280,6 +279,7 @@ func (l *BufferList) referenceDirtyPart(partNum uint64) {
 		l.dirtyQueue.Set(p.queueId, p)
 	} else {
 		l.dirtyQueue.Delete(p.queueId)
+		p.refcnt++
 		p.queueId = l.dirtyQid
 		l.dirtyQueue.Set(p.queueId, p)
 	}
