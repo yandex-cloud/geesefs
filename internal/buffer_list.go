@@ -196,7 +196,7 @@ func (l *BufferList) EvictFromMemory(buf *FileBuffer) (allocated int64, deleted 
 			l.queue(buf)
 			deleted = true
 		}
-	} else if buf.dirtyID == 0 {
+	} else if buf.state == BUF_CLEAN {
 		l.unqueue(buf)
 		l.at.Delete(buf.offset+buf.length)
 		deleted = true
@@ -632,6 +632,24 @@ func (l *BufferList) split(b *FileBuffer, offset uint64) (left, right *FileBuffe
 	l.at.Set(offset, &startBuf)
 	l.requeueSplit(&startBuf)
 	return &startBuf, b
+}
+
+// Left here for the ease of debugging
+func (l *BufferList) DebugCheckHoles(s string) {
+	var eof uint64
+	l.at.Descend(0xFFFFFFFFFFFFFFFF, func(end uint64, b *FileBuffer) bool {
+		eof = end
+		return false
+	})
+	h, _, _ := l.GetHoles(0, eof)
+	if len(h) > 0 {
+		fmt.Printf("Debug: holes detected%s: %#v\n", s, h)
+		l.at.Ascend(0, func(end uint64, b *FileBuffer) bool {
+			fmt.Printf("%x-%x s%v z%v\n", b.offset, b.offset+b.length, b.state, b.zero)
+			return true
+		})
+		panic("holes detected")
+	}
 }
 
 func (l *BufferList) SplitAt(offset uint64) {
