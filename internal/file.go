@@ -1017,6 +1017,7 @@ func (inode *Inode) sendUploadPart() bool {
 	initiated := false
 	flushInode := inode.fileHandles == 0 || inode.forceFlush
 	wantFree := atomic.LoadInt32(&inode.fs.wantFree) > 0
+	var partlyZero []uint64
 	inode.buffers.IterateDirtyParts(func(partNum uint64) bool {
 		partOffset, partSize := inode.fs.partRange(partNum)
 		if inode.IsRangeLocked(partOffset, partSize, true) {
@@ -1028,7 +1029,7 @@ func (inode *Inode) sendUploadPart() bool {
 			return true
 		}
 		partEnd := partOffset+partSize
-		var partDirty, partEvicted, partZero bool
+		var partDirty, partEvicted, partZero, partNonZero bool
 		inode.buffers.Ascend(partOffset+1, func(end uint64, buf *FileBuffer) (cont bool, changed bool) {
 			if buf.offset >= partEnd {
 				return false, false
@@ -1036,38 +1037,55 @@ func (inode *Inode) sendUploadPart() bool {
 			partDirty = partDirty || buf.state == BUF_DIRTY
 			partEvicted = partEvicted || buf.state == BUF_FL_CLEARED
 			partZero = partZero || buf.zero
+			partNonZero = partNonZero || !buf.zero
 			return true, false
 		})
-		if partZero && !flushInode {
-			// Don't flush empty ranges when we're not under pressure
-			// FIXME: Can probably lead to a hang when the only way to free memory
-			// is flushing parts with empty ranges. But we have to flush them only
-			// if we already tried all 'normal' parts...
-		} else if !partDirty || partEvicted {
+		if !partDirty || partEvicted {
 			// Don't flush parts which require RMW with evicted buffers
+		} else if partZero && !flushInode {
+			// Don't flush parts with empty ranges UNLESS we're under memory pressure
+			// and tried all parts without empty ranges, because flushing them may be
+			// the only way to free memory
+			if wantFree && partNonZero {
+				partlyZero = append(partlyZero, partNum)
+			}
 		} else {
 			// Guard part against eviction
-			inode.LockRange(partOffset, partSize, true)
-			inode.IsFlushing++
-			atomic.AddInt64(&inode.fs.activeFlushers, 1)
-			go func(lastPart, partOffset, partSize uint64) {
-				inode.mu.Lock()
-				inode.FlushPart(lastPart)
-				inode.UnlockRange(partOffset, partSize, true)
-				inode.IsFlushing--
-				inode.mu.Unlock()
-				atomic.AddInt64(&inode.fs.activeFlushers, -1)
-				inode.fs.WakeupFlusher()
-			}(partNum, partOffset, partSize)
 			initiated = true
-			if atomic.LoadInt64(&inode.fs.activeFlushers) >= inode.fs.flags.MaxFlushers ||
-				inode.IsFlushing >= inode.fs.flags.MaxParallelParts {
+			inode.goFlushPart(partNum, partOffset, partSize)
+			if inode.flushLimitsExceeded() {
 				return false
 			}
 		}
 		return true
 	})
+	if !initiated && len(partlyZero) > 0 {
+		for _, partNum := range partlyZero {
+			partOffset, partSize := inode.fs.partRange(partNum)
+			initiated = true
+			inode.goFlushPart(partNum, partOffset, partSize)
+			if inode.flushLimitsExceeded() {
+				break
+			}
+		}
+	}
 	return initiated
+}
+
+// LOCKS_REQUIRED(inode.mu)
+func (inode *Inode) goFlushPart(partNum, partOffset, partSize uint64) {
+	inode.LockRange(partOffset, partSize, true)
+	inode.IsFlushing++
+	atomic.AddInt64(&inode.fs.activeFlushers, 1)
+	go func() {
+		inode.mu.Lock()
+		inode.flushPart(partNum)
+		inode.UnlockRange(partOffset, partSize, true)
+		inode.IsFlushing--
+		inode.mu.Unlock()
+		atomic.AddInt64(&inode.fs.activeFlushers, -1)
+		inode.fs.WakeupFlusher()
+	}()
 }
 
 func (inode *Inode) uploadedAsMultipart() bool {
@@ -1526,7 +1544,8 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 	return
 }
 
-func (inode *Inode) FlushPart(part uint64) {
+// LOCKS_REQUIRED(inode.mu)
+func (inode *Inode) flushPart(part uint64) {
 
 	partOffset, partSize := inode.fs.partRange(part)
 	partFullSize := partSize
