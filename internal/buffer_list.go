@@ -441,6 +441,7 @@ func (l *BufferList) insertOrAppend(offset uint64, data []byte, state BufferStat
 		l.at.Delete(prev.offset + prev.length)
 		allocated += prev.Append(data)
 		prev.onDisk = false
+		prev.dirtyID = dirtyID
 		l.at.Set(prev.offset+prev.length, prev)
 		l.queue(prev)
 		return
@@ -645,7 +646,7 @@ func (l *BufferList) DebugCheckHoles(s string) {
 	if len(h) > 0 {
 		fmt.Printf("Debug: holes detected%s: %#v\n", s, h)
 		l.at.Ascend(0, func(end uint64, b *FileBuffer) bool {
-			fmt.Printf("%x-%x s%v z%v\n", b.offset, b.offset+b.length, b.state, b.zero)
+			fmt.Printf("%x-%x s%v z%v d%v\n", b.offset, b.offset+b.length, b.state, b.zero, b.dirtyID)
 			return true
 		})
 		panic("holes detected")

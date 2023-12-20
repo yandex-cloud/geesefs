@@ -36,13 +36,32 @@ func (s *BufferListTest) TestAppend(t *C) {
 	t.Assert(l.Add(0, filledBuf(1024, 1), BUF_DIRTY, true), Equals, int64(1024))
 	t.Assert(l.Add(1024, filledBuf(1024, 2), BUF_DIRTY, true), Equals, int64(1024))
 	t.Assert(l.Add(1536, filledBuf(1024, 3), BUF_DIRTY, true), Equals, int64(1024))
-	data, _, err := l.GetData(0, 2048, true)
+	data, ids, err := l.GetData(0, 2048, true)
 	t.Assert(err, IsNil)
+	t.Assert(len(ids), Equals, 1)
+	var oldId uint64
+	for id := range ids {
+		oldId = id
+	}
 	t.Assert(len(data), Equals, 1)
 	t.Assert(len(data[0]), Equals, 2048)
 	t.Assert(data[0][0:1024], DeepEquals, filledBuf(1024, 1))
 	t.Assert(data[0][1024:1536], DeepEquals, filledBuf(512, 2))
 	t.Assert(data[0][1536:], DeepEquals, filledBuf(512, 3))
+	// Then modify one of the buffers again and recheck that dirty ID is reassigned
+	t.Assert(l.Add(1536, filledBuf(1024, 4), BUF_DIRTY, true), Equals, int64(0))
+	l.SetState(0, 2048, ids, BUF_CLEAN)
+	data, ids, err = l.GetData(0, 2048, true)
+	t.Assert(len(ids), Equals, 1)
+	for id := range ids {
+		t.Assert(id, Not(Equals), oldId)
+	}
+	t.Assert(err, IsNil)
+	t.Assert(len(data), Equals, 1)
+	t.Assert(len(data[0]), Equals, 2048)
+	t.Assert(data[0][0:1024], DeepEquals, filledBuf(1024, 1))
+	t.Assert(data[0][1024:1536], DeepEquals, filledBuf(512, 2))
+	t.Assert(data[0][1536:], DeepEquals, filledBuf(512, 4))
 }
 
 func (s *BufferListTest) TestGetHoles(t *C) {
