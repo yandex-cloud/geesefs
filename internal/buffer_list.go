@@ -375,7 +375,7 @@ func (l *BufferList) delete(b *FileBuffer) (allocated int64) {
 // Remove buffers in range (offset..size)
 func (l *BufferList) RemoveRange(removeOffset, removeSize uint64, filter func(b *FileBuffer) bool) (allocated int64) {
 	endOffset := removeOffset + removeSize
-	ascendChange(&l.at, removeOffset, func(end uint64, b *FileBuffer) (cont bool, changed bool) {
+	ascendChange(&l.at, removeOffset+1, func(end uint64, b *FileBuffer) (cont bool, changed bool) {
 		if b.offset >= endOffset {
 			return false, false
 		}
@@ -387,16 +387,17 @@ func (l *BufferList) RemoveRange(removeOffset, removeSize uint64, filter func(b 
 				changed = true
 			} else {
 				rm := b
+				bufStart := b.offset
 				// split-delete is simpler than cut regarding the dirty part reference count
 				if endOffset < bufEnd {
 					// remove beginning
 					rm, _ = l.split(rm, endOffset)
 				}
-				if removeOffset > rm.offset {
+				if removeOffset > bufStart {
 					// remove end
 					_, rm = l.split(rm, removeOffset)
 				}
-				if rm != b {
+				if removeOffset > bufStart || endOffset < bufEnd {
 					allocated += l.delete(rm)
 					changed = true
 				}
@@ -636,6 +637,16 @@ func (l *BufferList) split(b *FileBuffer, offset uint64) (left, right *FileBuffe
 }
 
 // Left here for the ease of debugging
+func (l *BufferList) Dump(offset, size uint64) {
+	l.at.Ascend(offset+1, func(end uint64, b *FileBuffer) bool {
+		if b.offset >= offset+size {
+			return false
+		}
+		fmt.Printf("%x-%x s%v l%v z%v d%v\n", b.offset, b.offset+b.length, b.state, b.loading, b.zero, b.dirtyID)
+		return true
+	})
+}
+
 func (l *BufferList) DebugCheckHoles(s string) {
 	var eof uint64
 	l.at.Descend(0xFFFFFFFFFFFFFFFF, func(end uint64, b *FileBuffer) bool {
@@ -645,10 +656,7 @@ func (l *BufferList) DebugCheckHoles(s string) {
 	h, _, _ := l.GetHoles(0, eof)
 	if len(h) > 0 {
 		fmt.Printf("Debug: holes detected%s: %#v\n", s, h)
-		l.at.Ascend(0, func(end uint64, b *FileBuffer) bool {
-			fmt.Printf("%x-%x s%v z%v d%v\n", b.offset, b.offset+b.length, b.state, b.zero, b.dirtyID)
-			return true
-		})
+		l.Dump(0, 0xFFFFFFFFFFFFFFFF)
 		panic("holes detected")
 	}
 }
