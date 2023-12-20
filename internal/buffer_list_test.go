@@ -101,3 +101,23 @@ func (s *BufferListTest) TestSplitDirtyQueue(t *C) {
 	l.IterateDirtyParts(func(partNum uint64) bool { numDirty++; return true; })
 	t.Assert(numDirty, Equals, 0)
 }
+
+func (s *BufferListTest) TestFill(t *C) {
+	l := BufferList{
+		helpers: &TestBLHelpers{},
+	}
+	t.Assert(l.Add(1, filledBuf(1, 1), BUF_DIRTY, true), Equals, int64(1))
+	l.AddLoading(0, 4)
+	_, _, err := l.GetData(0, 4, true)
+	t.Assert(err, Equals, ErrBufferIsLoading)
+	t.Assert(l.Add(0, filledBuf(4, 2), BUF_CLEAN, true), Equals, int64(3))
+	data, ids, err := l.GetData(0, 4, true)
+	t.Assert(err, IsNil)
+	t.Assert(len(data), Equals, 3)
+	t.Assert(data[0], DeepEquals, filledBuf(1, 2))
+	t.Assert(data[1], DeepEquals, filledBuf(1, 1))
+	t.Assert(data[2], DeepEquals, filledBuf(2, 2))
+	t.Assert(ids, DeepEquals, map[uint64]bool{
+		1: true,
+	})
+}

@@ -537,6 +537,7 @@ func (l *BufferList) fill(offset, size uint64, cb func(start, end uint64)) {
 			next = b
 			if next.offset <= curOffset {
 				curOffset = next.offset + next.length
+				next = nil
 				return curOffset < endOffset
 			}
 			return false
@@ -715,7 +716,7 @@ func (l *BufferList) GetData(offset, size uint64, returnIds bool) (data [][]byte
 			return false
 		}
 		curEnd := min(endOffset, b.offset+b.length)
-		if returnIds {
+		if returnIds && b.dirtyID != 0 {
 			ids[b.dirtyID] = true
 		}
 		if b.loading {
