@@ -279,7 +279,7 @@ func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ign
 		key = appendChildName(key, inode.oldName)
 	}
 	for _, rr := range readRanges {
-		go inode.sendRead(cloud, key, rr.Start, rr.End-rr.Start, ignoreMemoryLimit)
+		go inode.retryRead(cloud, key, rr.Start, rr.End-rr.Start, ignoreMemoryLimit)
 	}
 }
 
@@ -369,10 +369,8 @@ func (inode *Inode) LoadRange(offset, size uint64, readAheadSize uint64, ignoreM
 	return
 }
 
-func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint64, ignoreMemoryLimit bool) {
+func (inode *Inode) retryRead(cloud StorageBackend, key string, offset, size uint64, ignoreMemoryLimit bool) {
 	// Maybe free some buffers first
-	origOffset := offset
-	origSize := size
 	err := inode.fs.bufferPool.Use(int64(size), ignoreMemoryLimit)
 	if err != nil {
 		log.Errorf("Error reading %v +%v of %v: %v", offset, size, key, err)
@@ -386,27 +384,46 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 	inode.mu.Lock()
 	inode.LockRange(offset, size, false)
 	inode.mu.Unlock()
+	// We want to retry all errors and sometimes even OK states because S3 may
+	// sometimes return 200 or 206 and then drop the connection if some data
+	// is temporarily unavailable (err would be io.EOF in that case)
+	allocated := int64(0)
+	curOffset, curSize := offset, size
+	err = ReadBackoff(inode.fs.flags, func(attempt int) error {
+		alloc, done, err := inode.sendRead(cloud, key, curOffset, curSize)
+		if err != nil && shouldRetry(err) {
+			s3Log.Warnf("Error reading %v +%v of %v (attempt %v): %v", curOffset, curSize, key, attempt, err)
+		}
+		curOffset += done
+		curSize -= done
+		allocated += alloc
+		return err
+	})
+	if allocated != int64(size) {
+		inode.fs.bufferPool.Use(int64(allocated)-int64(size), true)
+	}
+	inode.mu.Lock()
+	inode.buffers.RemoveLoading(offset, size)
+	inode.UnlockRange(offset, size, false)
+	inode.readError = err
+	inode.mu.Unlock()
+	if err != nil {
+		inode.readCond.Broadcast()
+	}
+}
+
+func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint64) (allocated int64, totalDone uint64, err error) {
 	resp, err := cloud.GetBlob(&GetBlobInput{
 		Key:   key,
 		Start: offset,
 		Count: size,
 	})
 	if err != nil {
-		log.Errorf("Error reading %v +%v of %v: %v", offset, size, key, err)
-		inode.fs.bufferPool.Use(-int64(size), false)
-		inode.mu.Lock()
-		inode.UnlockRange(origOffset, origSize, false)
-		inode.buffers.RemoveLoading(offset, size)
-		inode.readError = err
-		inode.mu.Unlock()
-		inode.readCond.Broadcast()
-		return
+		return 0, 0, err
 	}
-	allocated := int64(0)
-	left := size
-	for left > 0 {
+	for size > 0 {
 		// Read the result in smaller parts so parallelism can be utilized better
-		bs := left
+		bs := size
 		if bs > READ_BUF_SIZE {
 			bs = READ_BUF_SIZE
 		}
@@ -416,17 +433,7 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 			n, err := resp.Body.Read(buf[done :])
 			done += uint64(n)
 			if err != nil && (err != io.EOF || done < bs) {
-				log.Errorf("Error reading %v +%v of %v: %v", offset, bs, key, err)
-				inode.mu.Lock()
-				inode.readError = err
-				inode.buffers.RemoveLoading(offset, left)
-				inode.UnlockRange(origOffset, origSize, false)
-				inode.mu.Unlock()
-				if allocated != int64(size) {
-					inode.fs.bufferPool.Use(allocated-int64(size), true)
-				}
-				inode.readCond.Broadcast()
-				return
+				return allocated, totalDone, err
 			}
 		}
 		// Cache part of the result
@@ -437,18 +444,13 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 		}
 		allocated += inode.buffers.Add(offset, buf, BUF_CLEAN, false)
 		inode.mu.Unlock()
-		left -= done
+		size -= done
 		offset += done
+		totalDone += done
 		// Notify waiting readers
 		inode.readCond.Broadcast()
 	}
-	// Correct memory usage
-	if allocated != int64(size) {
-		inode.fs.bufferPool.Use(int64(allocated)-int64(size), true)
-	}
-	inode.mu.Lock()
-	inode.UnlockRange(origOffset, origSize, false)
-	inode.mu.Unlock()
+	return allocated, totalDone, nil
 }
 
 // LockRange/UnlockRange could be moved into buffer_list.go, but they still have

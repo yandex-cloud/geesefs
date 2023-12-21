@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/jacobsa/fuse/fuseops"
+
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 )
 
 type SlurpGap struct {
@@ -224,6 +226,18 @@ func isInvalidName(name string) bool {
 		strings.Index(name, "/../") >= 0
 }
 
+func RetryListBlobs(flags *cfg.FlagStorage, cloud StorageBackend, req *ListBlobsInput) (resp *ListBlobsOutput, err error) {
+	ReadBackoff(flags, func(attempt int) error {
+		resp, err = cloud.ListBlobs(req)
+		if err != nil && shouldRetry(err) {
+			s3Log.Warnf("Error listing objects with prefix=%v delimiter=%v start-after=%v max-keys=%v (attempt %v): %v\n",
+				NilStr(req.Prefix), NilStr(req.Delimiter), NilStr(req.StartAfter), NilUInt32(req.MaxKeys), attempt, err)
+		}
+		return err
+	})
+	return
+}
+
 func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, sealEnd bool, lock bool) (nextStartAfter string, err error) {
 	// Prefix is for insertSubTree
 	cloud, prefix := parent.cloud()
@@ -245,7 +259,7 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, sealEnd b
 		Prefix:     &prefix,
 		StartAfter: startWith,
 	}
-	resp, err := cloud.ListBlobs(params)
+	resp, err := RetryListBlobs(parent.fs.flags, cloud, params)
 	if err != nil {
 		parent.fs.completeInflightListing(myList)
 		return
@@ -497,7 +511,7 @@ func prefixLarger(s1, s2 string, pos int) bool {
 // with slash ('abc-def' is in listing, then we check 'abc/').
 //
 // Relevant test case: TestReadDirDash
-func intelligentListCut(resp *ListBlobsOutput, cloud StorageBackend, prefix string) (lastName string, err error) {
+func intelligentListCut(resp *ListBlobsOutput, flags *cfg.FlagStorage, cloud StorageBackend, prefix string) (lastName string, err error) {
 	if !resp.IsTruncated {
 		return
 	}
@@ -533,7 +547,7 @@ func intelligentListCut(resp *ListBlobsOutput, cloud StorageBackend, prefix stri
 			// \xF4\x8F\xBF\xBF = 0x10FFFF in UTF-8 = largest code point of 3-byte UTF-8
 			// \xEF\xBF\xBD = 0xFFFD in UTF-8 = largest valid symbol of 2-byte UTF-8
 			// So, > xxx.\xEF\xBF\xBF is the same as >= xxx/
-			dirobj, err := cloud.ListBlobs(&ListBlobsInput{
+			dirobj, err := RetryListBlobs(flags, cloud, &ListBlobsInput{
 				StartAfter: PString(lastName[0:lastLtPos]+".\xEF\xBF\xBD"),
 				MaxKeys:    PUInt32(1),
 			})
@@ -579,7 +593,7 @@ func (dh *DirHandle) listObjectsFlat() (start string, err error) {
 	myList := dh.inode.fs.addInflightListing()
 
 	dh.mu.Unlock()
-	resp, err := cloud.ListBlobs(params)
+	resp, err := RetryListBlobs(dh.inode.fs.flags, cloud, params)
 	dh.mu.Lock()
 
 	if err != nil {
@@ -590,7 +604,7 @@ func (dh *DirHandle) listObjectsFlat() (start string, err error) {
 	s3Log.Debug(resp)
 
 	// See comment to intelligentListCut above
-	lastName, err := intelligentListCut(resp, cloud, prefix)
+	lastName, err := intelligentListCut(resp, dh.inode.fs.flags, cloud, prefix)
 	if err != nil {
 		dh.inode.fs.completeInflightListing(myList)
 		return
@@ -2034,7 +2048,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		if !parent.fs.flags.ExplicitDir {
 			n++
 			go func() {
-				prefixList, prefixError = cloud.ListBlobs(&ListBlobsInput{
+				prefixList, prefixError = RetryListBlobs(parent.fs.flags, cloud, &ListBlobsInput{
 					Delimiter: PString("/"),
 					MaxKeys:   PUInt32(1),
 					Prefix:    PString(key+"/"),

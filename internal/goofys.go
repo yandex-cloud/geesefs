@@ -946,6 +946,30 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 	return mappedErr
 }
 
+// FIXME: Add similar write backoff (now it's handled by file/dir code)
+func ReadBackoff(flags *cfg.FlagStorage, try func(attempt int) error) (err error) {
+	interval := flags.ReadRetryInterval
+	attempt := 1
+	for {
+		err = try(attempt)
+		if err != nil {
+			if shouldRetry(err) && (flags.ReadRetryAttempts < 1 || attempt < flags.ReadRetryAttempts) {
+				attempt++
+				time.Sleep(interval)
+				interval = time.Duration(flags.ReadRetryMultiplier * float64(interval))
+				if interval > flags.ReadRetryMax {
+					interval = flags.ReadRetryMax
+				}
+			} else {
+				break
+			}
+		} else {
+			break
+		}
+	}
+	return
+}
+
 func mapHttpError(status int) error {
 	switch status {
 	case 400:

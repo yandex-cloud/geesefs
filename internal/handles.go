@@ -32,6 +32,8 @@ import (
 	"github.com/jacobsa/fuse/fuseops"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 )
 
 const (
@@ -458,6 +460,17 @@ func (inode *Inode) isDir() bool {
 	return inode.dir != nil
 }
 
+func RetryHeadBlob(flags *cfg.FlagStorage, cloud StorageBackend, req *HeadBlobInput) (resp *HeadBlobOutput, err error) {
+	ReadBackoff(flags, func(attempt int) error {
+		resp, err = cloud.HeadBlob(req)
+		if err != nil && shouldRetry(err) {
+			s3Log.Warnf("Error getting metadata of %v (attempt %v): %v\n", req.Key, attempt, err)
+		}
+		return err
+	})
+	return
+}
+
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) fillXattrFromHead(resp *HeadBlobOutput) {
 	if resp.ETag != nil {
@@ -595,7 +608,7 @@ func (inode *Inode) fillXattr() (err error) {
 			key += "/"
 		}
 		inode.mu.Unlock()
-		resp, err := cloud.HeadBlob(&HeadBlobInput{Key: key})
+		resp, err := RetryHeadBlob(inode.fs.flags, cloud, &HeadBlobInput{Key: key})
 		inode.mu.Lock()
 		if err != nil {
 			err = mapAwsError(err)

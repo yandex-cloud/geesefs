@@ -2,6 +2,8 @@ package internal
 
 import (
 	. "gopkg.in/check.v1"
+
+	"github.com/yandex-cloud/geesefs/internal/cfg"
 )
 
 type DirTest struct{}
@@ -29,7 +31,7 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 		IsTruncated: false,
 		Items:       []BlobItemOutput{{Key: PString("item.jpg")}},
 		Prefixes:    []BlobPrefixOutput{{Prefix: PString("prefix-has-dash/")}},
-	}, nil, "")
+	}, nil, nil, "")
 	t.Assert(lastName, Equals, "")
 	t.Assert(err, IsNil)
 
@@ -44,7 +46,7 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 		Prefixes: []BlobPrefixOutput{
 			{Prefix: PString("w-o-w/prefix-has-dash/")},
 			{Prefix: PString("w-o-w/prefix/")}},
-	}, nil, "w-o-w/")
+	}, nil, nil, "w-o-w/")
 	t.Assert(lastName, Equals, "w-o-w/prefix/")
 	t.Assert(err, IsNil)
 
@@ -56,7 +58,7 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 			{Key: PString("w-o-w/item")}},
 		Prefixes: []BlobPrefixOutput{
 			{Prefix: PString("w-o-w/dir/")}},
-	}, nil, "w-o-w/")
+	}, nil, nil, "w-o-w/")
 	t.Assert(lastName, Equals, "w-o-w/item")
 	t.Assert(err, IsNil)
 
@@ -75,7 +77,7 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 			{Prefix: PString("w-o-w/l180404691.req/")},
 		},
 	}
-	lastName, err = intelligentListCut(resp, nil, "w-o-w/")
+	lastName, err = intelligentListCut(resp, nil, nil, "w-o-w/")
 	t.Assert(lastName, Equals, "w-o-w/l180404691.req/")
 	t.Assert(len(resp.Items), Equals, 2)
 	t.Assert(len(resp.Prefixes), Equals, 3)
@@ -94,7 +96,7 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 			{Key: PString("w-o-w/l1804046910.req")},
 		},
 	}
-	lastName, err = intelligentListCut(resp, nil, "w-o-w/")
+	lastName, err = intelligentListCut(resp, nil, nil, "w-o-w/")
 	t.Assert(lastName, Equals, "w-o-w/l180404691.req")
 	t.Assert(len(resp.Items), Equals, 5)
 	t.Assert(err, IsNil)
@@ -112,7 +114,7 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 			{Key: PString("w-o-w/l180404691.req")},
 		},
 	}
-	lastName, err = intelligentListCut(resp, nil, "w-o-w/")
+	lastName, err = intelligentListCut(resp, nil, nil, "w-o-w/")
 	t.Assert(lastName, Equals, "w-o-w/l180404690.req")
 	t.Assert(len(resp.Items), Equals, 4)
 	t.Assert(err, IsNil)
@@ -130,7 +132,7 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 			{Key: PString("w-o-w/l1805.req")},
 		},
 	}
-	lastName, err = intelligentListCut(resp, nil, "w-o-w/")
+	lastName, err = intelligentListCut(resp, nil, nil, "w-o-w/")
 	t.Assert(lastName, Equals, "w-o-w/l180404691.req")
 	t.Assert(len(resp.Items), Equals, 5)
 	t.Assert(err, IsNil)
@@ -167,7 +169,8 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 			}, nil
 		},
 	}
-	lastName, err = intelligentListCut(resp, cloud, "w-o-w/")
+	flags := cfg.DefaultFlags()
+	lastName, err = intelligentListCut(resp, flags, cloud, "w-o-w/")
 	t.Assert(lastName, Equals, "w-o-w/2019-0005")
 	t.Assert(len(resp.Items), Equals, 3)
 	t.Assert(len(resp.Prefixes), Equals, 4)
@@ -179,7 +182,7 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 	listCalled = 0
 	checkedPrefix = "w-o-w/2020-0000"
 	resp.Prefixes = resp.Prefixes[0:3]
-	lastName, err = intelligentListCut(resp, cloud, "w-o-w/")
+	lastName, err = intelligentListCut(resp, flags, cloud, "w-o-w/")
 	t.Assert(lastName, Equals, "w-o-w/2019-0005")
 	t.Assert(len(resp.Items), Equals, 3)
 	t.Assert(len(resp.Prefixes), Equals, 3)
