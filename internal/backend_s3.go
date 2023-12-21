@@ -805,37 +805,41 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 		metadataDirective = s3.MetadataDirectiveReplace
 	}
 
-	// FIXME Remove additional HEAD query
-
-	if param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
-		(param.Metadata == nil || param.StorageClass == nil)) {
-
-		params := &HeadBlobInput{Key: param.Source}
-		resp, err := s.HeadBlob(params)
-		if err != nil {
-			return nil, err
-		}
-
-		param.Size = &resp.Size
-		param.ETag = resp.ETag
-		if param.Metadata == nil {
-			param.Metadata = resp.Metadata
-		}
-		param.StorageClass = resp.StorageClass
-	}
-
-	if param.StorageClass == nil {
-		param.StorageClass = s.selectStorageClass(param.Size)
-	}
-
 	from := s.bucket + "/" + param.Source
 
-	if !s.gcs && *param.Size > s.config.MultipartCopyThreshold {
-		reqId, err := s.copyObjectMultipart(int64(*param.Size), from, param.Destination, "", param.ETag, param.Metadata, param.StorageClass)
-		if err != nil {
-			return nil, err
+	// Copy into the same object is used to just update metadata
+	// and should be very quick regardless of parameters
+	if param.Source != param.Destination {
+
+		// FIXME Remove additional HEAD query
+		if param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
+			(param.Metadata == nil || param.StorageClass == nil)) {
+
+			params := &HeadBlobInput{Key: param.Source}
+			resp, err := s.HeadBlob(params)
+			if err != nil {
+				return nil, err
+			}
+
+			param.Size = &resp.Size
+			param.ETag = resp.ETag
+			if param.Metadata == nil {
+				param.Metadata = resp.Metadata
+			}
+			param.StorageClass = resp.StorageClass
 		}
-		return &CopyBlobOutput{reqId}, nil
+
+		if param.StorageClass == nil {
+			param.StorageClass = s.selectStorageClass(param.Size)
+		}
+
+		if !s.gcs && *param.Size > s.config.MultipartCopyThreshold {
+			reqId, err := s.copyObjectMultipart(int64(*param.Size), from, param.Destination, "", param.ETag, param.Metadata, param.StorageClass)
+			if err != nil {
+				return nil, err
+			}
+			return &CopyBlobOutput{reqId}, nil
+		}
 	}
 
 	params := &s3.CopyObjectInput{
