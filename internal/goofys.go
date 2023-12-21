@@ -988,6 +988,8 @@ func mapHttpError(status int) error {
 		return syscall.ERANGE
 	case 429:
 		return syscall.EAGAIN
+	case 503:
+		return syscall.EAGAIN
 	case 500:
 		return syscall.EAGAIN
 	default:
