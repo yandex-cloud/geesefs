@@ -684,13 +684,10 @@ func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId strin
 	parts := make([]*s3.CompletedPart, s.partsRequired(partSizes, size))
 
 	wg := errgroup.Group{}
-	wg.SetLimit(MinInt(128, len(parts)))
+	wg.SetLimit(s.flags.MaxParallelParts)
 
-	var (
-		startOffset int64
-		partIdx     int
-	)
-
+	var startOffset int64
+	var partIdx     int
 	for _, cfg := range partSizes {
 		for i := 0; i < int(cfg.PartCount) && startOffset < size; i++ {
 			endOffset := MinInt64(startOffset+int64(cfg.PartSize), size)
@@ -713,6 +710,7 @@ func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId strin
 			startOffset += int64(cfg.PartSize)
 		}
 	}
+
 	return parts, wg.Wait()
 }
 
