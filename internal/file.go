@@ -1795,16 +1795,24 @@ func (inode *Inode) SetAttributes(size *uint64, mode *os.FileMode,
 
 	if mtime != nil && fs.flags.EnableMtime && inode.Attributes.Mtime != *mtime {
 		inode.Attributes.Mtime = *mtime
-		inode.setUserMeta(fs.flags.MtimeAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Mtime.Unix())))
+		err = inode.setUserMeta(fs.flags.MtimeAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Mtime.Unix())))
+		if err != nil {
+			inode.mu.Unlock()
+			return err
+		}
 		modified = true
 	}
 
 	if uid != nil && fs.flags.EnablePerms && inode.Attributes.Uid != *uid {
 		inode.Attributes.Uid = *uid
 		if inode.Attributes.Uid != fs.flags.Uid {
-			inode.setUserMeta(fs.flags.UidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Uid)))
+			err = inode.setUserMeta(fs.flags.UidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Uid)))
 		} else {
-			inode.setUserMeta(fs.flags.UidAttr, nil)
+			err = inode.setUserMeta(fs.flags.UidAttr, nil)
+		}
+		if err != nil {
+			inode.mu.Unlock()
+			return err
 		}
 		modified = true
 	}
@@ -1812,9 +1820,13 @@ func (inode *Inode) SetAttributes(size *uint64, mode *os.FileMode,
 	if gid != nil && fs.flags.EnablePerms && inode.Attributes.Gid != *gid {
 		inode.Attributes.Gid = *gid
 		if inode.Attributes.Gid != fs.flags.Gid {
-			inode.setUserMeta(fs.flags.GidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Gid)))
+			err = inode.setUserMeta(fs.flags.GidAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Gid)))
 		} else {
-			inode.setUserMeta(fs.flags.GidAttr, nil)
+			err = inode.setUserMeta(fs.flags.GidAttr, nil)
+		}
+		if err != nil {
+			inode.mu.Unlock()
+			return err
 		}
 		modified = true
 	}

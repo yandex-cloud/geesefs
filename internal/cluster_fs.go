@@ -548,7 +548,10 @@ func (fs *ClusterFs) setInodeAttributes(inode *Inode, size *uint64, mtime *time.
 
 	if mtime != nil && fs.Flags.EnableMtime && inode.Attributes.Mtime != *mtime {
 		inode.Attributes.Mtime = *mtime
-		inode.setUserMeta(fs.Flags.MtimeAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Mtime.Unix())))
+		err := inode.setUserMeta(fs.Flags.MtimeAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Mtime.Unix())))
+		if err != nil {
+			return err
+		}
 		modified = true
 	}
 

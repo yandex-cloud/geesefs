@@ -486,26 +486,30 @@ func (inode *Inode) fillXattrFromHead(resp *HeadBlobOutput) {
 }
 
 // LOCKS_REQUIRED(inode.mu)
-func (inode *Inode) setUserMeta(key string, value []byte) {
+func (inode *Inode) setUserMeta(key string, value []byte) error {
 	if inode.userMetadata == nil {
 		if value == nil {
-			return
+			return nil
 		}
-		inode.userMetadata = make(map[string][]byte)
+		err := inode.fillXattr()
+		if err != nil {
+			return err
+		}
 	}
 	oldValue, exists := inode.userMetadata[key]
 	if value == nil {
 		if !exists {
-			return
+			return nil
 		}
 		delete(inode.userMetadata, key)
 	} else {
 		if exists && bytes.Compare(oldValue, value) == 0 {
-			return
+			return nil
 		}
 		inode.userMetadata[key] = value
 	}
 	inode.userMetadataDirty = 2
+	return nil
 }
 
 // LOCKS_REQUIRED(inode.mu)
@@ -577,6 +581,7 @@ func (inode *Inode) setFileMode(newMode os.FileMode) (changed bool, err error) {
 	if inode.fs.flags.EnablePerms {
 		inode.Attributes.Mode = (inode.Attributes.Mode & os.ModeType) | (newMode & os.ModePerm)
 	}
+	changed = (prevMode != inode.Attributes.Mode)
 	var defaultMode os.FileMode
 	if inode.dir != nil {
 		defaultMode = inode.fs.flags.DirMode | os.ModeDir
@@ -584,46 +589,53 @@ func (inode *Inode) setFileMode(newMode os.FileMode) (changed bool, err error) {
 		defaultMode = inode.fs.flags.FileMode
 	}
 	if (inode.Attributes.Mode & os.ModeDevice) != 0 {
-		inode.setUserMeta(inode.fs.flags.RdevAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Rdev)))
+		err = inode.setUserMeta(inode.fs.flags.RdevAttr, []byte(fmt.Sprintf("%d", inode.Attributes.Rdev)))
+		if err != nil {
+			return
+		}
 	}
 	if inode.Attributes.Mode != defaultMode {
-		inode.setUserMeta(inode.fs.flags.FileModeAttr, []byte(fmt.Sprintf("%d", fuseops.ConvertGolangMode(inode.Attributes.Mode))))
+		err = inode.setUserMeta(inode.fs.flags.FileModeAttr, []byte(fmt.Sprintf("%d", fuseops.ConvertGolangMode(inode.Attributes.Mode))))
 	} else {
-		inode.setUserMeta(inode.fs.flags.FileModeAttr, nil)
+		err = inode.setUserMeta(inode.fs.flags.FileModeAttr, nil)
 	}
-	return prevMode != inode.Attributes.Mode, nil
+	return
 }
 
 // FIXME: Move all these xattr-related functions to file.go
 
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) fillXattr() (err error) {
-	if inode.userMetadata == nil && (inode.dir == nil || !inode.dir.ImplicitDir) {
-		cloud, key := inode.cloud()
-		if inode.oldParent != nil {
-			_, key = inode.oldParent.cloud()
-			key = appendChildName(key, inode.oldName)
-		}
-		if inode.isDir() {
-			key += "/"
-		}
-		inode.mu.Unlock()
-		resp, err := RetryHeadBlob(inode.fs.flags, cloud, &HeadBlobInput{Key: key})
-		inode.mu.Lock()
-		if err != nil {
-			err = mapAwsError(err)
-			if err == syscall.ENOENT {
-				err = nil
-				if inode.isDir() {
-					inode.dir.ImplicitDir = true
-				}
-			}
-			return err
-		} else if inode.userMetadata == nil {
-			inode.fillXattrFromHead(resp)
-		}
+	if inode.userMetadata != nil {
+		return nil
 	}
-
+	if inode.dir != nil && inode.dir.ImplicitDir {
+		inode.userMetadata = make(map[string][]byte)
+		return nil
+	}
+	cloud, key := inode.cloud()
+	if inode.oldParent != nil {
+		_, key = inode.oldParent.cloud()
+		key = appendChildName(key, inode.oldName)
+	}
+	if inode.isDir() {
+		key += "/"
+	}
+	inode.mu.Unlock()
+	resp, err := RetryHeadBlob(inode.fs.flags, cloud, &HeadBlobInput{Key: key})
+	inode.mu.Lock()
+	if err != nil {
+		err = mapAwsError(err)
+		if err == syscall.ENOENT {
+			err = nil
+			if inode.isDir() {
+				inode.dir.ImplicitDir = true
+			}
+		}
+		return err
+	} else if inode.userMetadata == nil {
+		inode.fillXattrFromHead(resp)
+	}
 	return
 }
 
