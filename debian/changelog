@@ -1,3 +1,15 @@
+geesefs (0.40.0) unstable; urgency=medium
+
+  * Refactor internal buffer list operations to improve read&write speed and
+    code maintainability
+  * Retry unexpected EOFs during reads (S3 may drop the connection on
+    temporary data unavailability)
+  * Do not use multipart copying for metadata-only updates
+  * Limit multipart copying parallelism to --max-parallel-parts instead of fixed 128
+  * Load metadata before changing it, otherwise it may be lost in non-yandex clouds
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 22 Dec 2023 11:56:04 +0300
+
 geesefs (0.39.1) unstable; urgency=medium
 
   * Fix a memory leak in inodesByTime (evicted inodes were not removed from the map)
