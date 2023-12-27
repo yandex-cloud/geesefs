@@ -837,13 +837,13 @@ func (inode *Inode) sendRename() {
 					inode.renamingTo = false
 					inode.resetCache()
 					inode.mu.Unlock()
-					newParent.mu.Lock()
-					newParent.removeChildUnlocked(inode)
-					newParent.mu.Unlock()
+					newParent.removeChild(inode)
 					if oldParent != nil {
 						oldParent.mu.Lock()
-						delete(oldParent.dir.DeletedChildren, oldName)
-						oldParent.addModified(-1)
+						if _, ok := oldParent.dir.DeletedChildren[oldName]; ok {
+							delete(oldParent.dir.DeletedChildren, oldName)
+							oldParent.addModified(-1)
+						}
 						oldParent.mu.Unlock()
 					}
 				} else {
