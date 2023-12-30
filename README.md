@@ -71,7 +71,7 @@ See also [Common Issues](#common-issues).
 |                                | GeeseFS | rclone | Goofys | S3FS | gcsfuse |
 | ------------------------------ | ------- | ------ | ------ | ---- | ------- |
 | Parallel readahead             |    +    |    -   |    +   |   +  |    -    |
-| Parallel multipart uploads     |    +    |    -   |    +   |   +  |    -    |z
+| Parallel multipart uploads     |    +    |    -   |    +   |   +  |    -    |
 | No readahead on random read    |    +    |    -   |    +   |   -  |    +    |
 | Server-side copy on append     |    +    |    -   |    -   |   *  |    +    |
 | Server-side copy on update     |    +    |    -   |    -   |   *  |    -    |
