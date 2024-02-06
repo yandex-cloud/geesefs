@@ -635,8 +635,10 @@ func (fs *Goofys) Flusher() {
 			if inodeID == 0 {
 				attempt--
 			} else {
-				inode := fs.getInodeOrDie(fuseops.InodeID(inodeID))
-				for sent := true; sent && atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers; {
+				fs.mu.RLock()
+				inode := fs.inodes[fuseops.InodeID(inodeID)]
+				fs.mu.RUnlock()
+				for sent := true; inode != nil && sent && atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers; {
 					sent = inode.TryFlush()
 					if sent {
 						atomic.AddInt64(&fs.stats.flushes, 1)
