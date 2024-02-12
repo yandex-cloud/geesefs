@@ -1625,6 +1625,12 @@ func (inode *Inode) flushPart(part uint64) {
 	inode.recordFlushError(err)
 	if err != nil {
 		log.Warnf("Failed to flush part %v of object %v: %v", part, key, err)
+		mappedErr := mapAwsError(err)
+		if mappedErr == syscall.ENOENT {
+			// Multipart upload is deleted
+			s3Log.Warnf("Conflict detected (inode %v): Multipart upload of file %v is aborted remotely, discarding local changes", inode.Id, inode.FullName())
+			inode.resetCache()
+		}
 	} else {
 		if inode.mpu != nil {
 			// It could become nil if the file was deleted remotely in the meantime
