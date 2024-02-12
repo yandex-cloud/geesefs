@@ -1381,12 +1381,21 @@ func (s *GoofysTest) anonymous(t *C) {
 }
 
 func (s *GoofysTest) disableS3() {
+	s.setS3(nil)
+}
+
+func (s *GoofysTest) setS3(back StorageBackend) StorageBackend {
 	time.Sleep(1 * time.Second) // wait for any background goroutines to finish
 	dir := s.fs.inodes[fuseops.RootInodeID].dir
-	dir.cloud = StorageBackendInitError{
-		fmt.Errorf("cloud disabled"),
-		*dir.cloud.Capabilities(),
+	old := dir.cloud
+	if back == nil {
+		back = StorageBackendInitError{
+			fmt.Errorf("cloud disabled"),
+			*dir.cloud.Capabilities(),
+		}
 	}
+	dir.cloud = back
+	return old
 }
 
 func (s *GoofysTest) TestWriteAnonymous(t *C) {
@@ -2720,4 +2729,27 @@ func (s *GoofysTest) TestIssue474(t *C) {
 	dir2, err := s.fs.LookupPath("2")
 	t.Assert(err, IsNil)
 	s.assertEntries(t, dir2, []string{"c"})
+}
+
+func (s *GoofysTest) TestSlurpDisappear(t *C) {
+	s.fs.flags.StatCacheTTL = 1 * time.Second
+
+	in, err := s.fs.LookupPath("dir2/dir3")
+	t.Assert(err, IsNil)
+	t.Assert(in.dir, NotNil)
+	old := s.setS3(nil)
+	s.assertHasEntries(t, in, []string{"file4"})
+
+	_, err = s.cloud.DeleteBlob(&DeleteBlobInput{"dir2/dir3/file4"})
+	t.Assert(err, IsNil)
+
+	time.Sleep(s.fs.flags.StatCacheTTL)
+
+	// Redo a lookup - dir3 should be loaded during lookup
+	s.setS3(old)
+	in, err = s.fs.LookupPath("dir2/dir3")
+	t.Assert(err, IsNil)
+	t.Assert(in.dir, NotNil)
+	s.setS3(nil)
+	s.assertEntries(t, in, nil)
 }
