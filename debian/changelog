@@ -1,3 +1,11 @@
+geesefs (0.40.1) unstable; urgency=medium
+
+  * Fix deleted files not disappearing from directories reloading using slurp optimisation
+  * Fix two rarely possible panics
+  * Report conflict and stop upload retries when receiving a 404 from UploadPart
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 12 Feb 2024 18:44:39 +0300
+
 geesefs (0.40.0) unstable; urgency=medium
 
   * Refactor internal buffer list operations to improve read&write speed and
