@@ -396,6 +396,7 @@ func (inode *Inode) sealDir() {
 	} else {
 		inode.Attributes.Mtime, inode.Attributes.Ctime = inode.findChildMaxTime()
 	}
+	inode.removeExpired("")
 }
 
 // LOCKS_REQUIRED(dh.inode.mu)
@@ -715,7 +716,7 @@ func (dh *DirHandle) loadListing() error {
 		}
 	}
 
-	if loaded {
+	if loaded || parent.dir.listDone {
 		parent.removeExpired(startMarker)
 	}
 
