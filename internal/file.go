@@ -1170,7 +1170,7 @@ func (inode *Inode) patchSimpleObj(bufs []*FileBuffer) {
 
 	go func() {
 		inode.mu.Lock()
-		inode.patchFromBuffers(bufs, 0)
+		inode.patchFromBuffers(bufs, inode.fs.flags.SinglePartMB*1024*1024)
 
 		inode.UnlockRange(0, size, true)
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
