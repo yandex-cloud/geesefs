@@ -129,8 +129,9 @@ func waitFor(t *C, addr string) (err error) {
 }
 
 func (t *GoofysTest) deleteBlobsParallelly(cloud StorageBackend, blobs []string) error {
-	sem := make(semaphore, 100)
-	sem.P(100)
+	const concurrency = 10
+	sem := make(semaphore, concurrency)
+	sem.P(concurrency)
 	var err error
 	for _, blobOuter := range blobs {
 		sem.V(1)
@@ -145,7 +146,7 @@ func (t *GoofysTest) deleteBlobsParallelly(cloud StorageBackend, blobs []string)
 			break
 		}
 	}
-	sem.V(100)
+	sem.V(concurrency)
 	return err
 }
 
@@ -364,10 +365,9 @@ func (s *GoofysTest) removeBlob(cloud StorageBackend, t *C, blobPath string) {
 }
 
 func (s *GoofysTest) setupBlobs(cloud StorageBackend, t *C, env map[string]*string) {
-
-	// concurrency = 100
-	throttler := make(semaphore, 100)
-	throttler.P(100)
+	const concurrency = 10
+	throttler := make(semaphore, concurrency)
+	throttler.P(concurrency)
 
 	var globalErr error
 	for path, c := range env {
@@ -403,9 +403,9 @@ func (s *GoofysTest) setupBlobs(cloud StorageBackend, t *C, env map[string]*stri
 			t.Assert(err, IsNil)
 		}(path, c)
 	}
-	throttler.V(100)
-	throttler = make(semaphore, 100)
-	throttler.P(100)
+	throttler.V(concurrency)
+	throttler = make(semaphore, concurrency)
+	throttler.P(concurrency)
 	t.Assert(globalErr, IsNil)
 
 	// double check, except on AWS S3, because there we sometimes
@@ -435,7 +435,7 @@ func (s *GoofysTest) setupBlobs(cloud StorageBackend, t *C, env map[string]*stri
 				}
 			}(path, c)
 		}
-		throttler.V(100)
+		throttler.V(concurrency)
 		t.Assert(globalErr, IsNil)
 	}
 }
