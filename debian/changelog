@@ -1,3 +1,10 @@
+geesefs (0.40.2) unstable; urgency=medium
+
+  * PATCH bugfixes
+  * reduce test concurrency to 10
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Wed, 28 Feb 2024 12:23:04 +0300
+
 geesefs (0.40.1) unstable; urgency=medium
 
   * Fix deleted files not disappearing from directories reloading using slurp optimisation
