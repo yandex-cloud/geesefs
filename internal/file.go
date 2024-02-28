@@ -1098,18 +1098,17 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 	smallFile := inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024
 	wantFlush := inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0
 
-	if smallFile && wantFlush {
-		if inode.flushLimitsExceeded() {
+	if smallFile {
+		if inode.flushLimitsExceeded() || !wantFlush {
 			return
 		}
-		flushBufs := inode.buffers.Select(0, inode.Attributes.Size, func(buf *FileBuffer) bool { return buf.state == BUF_DIRTY; })
+		flushBufs := inode.buffers.Select(0, inode.Attributes.Size, func(buf *FileBuffer) bool { return buf.state == BUF_DIRTY })
 		inode.patchSimpleObj(flushBufs)
 		return true
 	}
 
 	updatedPartID := inode.fs.partNum(inode.lastWriteEnd)
 
-	var prevSize uint64
 	inode.buffers.IterateDirtyParts(func(part uint64) bool {
 		if inode.flushLimitsExceeded() {
 			return false
@@ -1121,15 +1120,16 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 			return false
 		}
 
+		_, prevSize := inode.fs.partRange(MaxUInt64(part-1, 0))
+
 		partEnd, rangeBorder := partStart+partSize, partSize != prevSize
 		appendPatch, newPart := partEnd > inode.knownSize, partStart == inode.knownSize
 
 		// When entering a new part range, we can't immediately switch to the new part size,
 		// because we need to init a new part first.
-		if newPart && rangeBorder && prevSize > 0 {
+		if newPart && rangeBorder {
 			partEnd, partSize = partStart+prevSize, prevSize
 		}
-		prevSize = partSize
 
 		smallTail := appendPatch && inode.Attributes.Size-partStart < partSize
 		if smallTail && !wantFlush {
@@ -1137,12 +1137,13 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 		}
 
 		partLocked := inode.IsRangeLocked(partStart, partEnd, true)
-		if !wantFlush && part == updatedPartID || partLocked {
+		if partLocked || !wantFlush && part == updatedPartID {
 			return true
 		}
 
 		inode.buffers.SplitAt(partStart)
 		inode.buffers.SplitAt(partEnd)
+
 		flushBufs := inode.buffers.Select(partStart, partEnd, func(buf *FileBuffer) bool {
 			return buf.state == BUF_DIRTY && (!buf.zero || wantFlush || appendPatch)
 		})
@@ -1150,7 +1151,6 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 			inode.patchPart(partStart, partSize, flushBufs)
 			initiated = true
 		}
-
 		return true
 	})
 	return
@@ -1170,7 +1170,7 @@ func (inode *Inode) patchSimpleObj(bufs []*FileBuffer) {
 
 	go func() {
 		inode.mu.Lock()
-		inode.patchFromBuffers(bufs, 0)
+		inode.patchFromBuffers(bufs, inode.fs.flags.SinglePartMB*1024*1024)
 
 		inode.UnlockRange(0, size, true)
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
