@@ -537,7 +537,7 @@ MISC OPTIONS:
 			Usage: "Maximum interval for retrying unsuccessful reads",
 		},
 
-		cli.DurationFlag{
+		cli.IntFlag{
 			Name:  "read-retry-attempts",
 			Value: 0,
 			Usage: "Maximum read retry attempts (0 means unlimited)",
