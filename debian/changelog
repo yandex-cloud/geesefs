@@ -1,9 +1,16 @@
+geesefs (0.40.3) unstable; urgency=medium
+
+  * Fix read-modify-write with evicted multipart parts hanging (introduced in 0.40.0)
+  * Fix non-working --read-retry-attempts flag
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 13 Mar 2024 17:14:28 +0300
+
 geesefs (0.40.2) unstable; urgency=medium
 
   * PATCH bugfixes
   * reduce test concurrency to 10
 
- -- Vitaliy Filippov <vitalif@yourcmc.ru>  Wed, 28 Feb 2024 12:23:04 +0300
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 28 Feb 2024 12:23:04 +0300
 
 geesefs (0.40.1) unstable; urgency=medium
 
