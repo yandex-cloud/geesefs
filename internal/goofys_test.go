@@ -567,6 +567,44 @@ func (s *GoofysTest) TestWriteLargeTruncateMem20M(t *C) {
 	t.Assert(resp.Size, Equals, uint64(100*1024*1024))
 }
 
+func (s *GoofysTest) TestEvictedRMWMem20M(t *C) {
+	fileName := "testRMW"
+
+	root := s.getRoot(t)
+
+	err := root.Unlink(fileName)
+	t.Assert(err == nil || err == syscall.ENOENT, Equals, true)
+
+	in, fh, err := root.Create(fileName)
+	t.Assert(err, IsNil)
+
+	// Write 100 MB
+	buf := make([]byte, 1048576)
+	for i := 0; i < len(buf); i++ {
+		buf[i] = byte(i)
+	}
+	for i := 0; i < 100; i++ {
+		err := fh.WriteFile(int64(i*len(buf)), buf, true)
+		t.Assert(err, IsNil)
+	}
+
+	// Modify an evicted part (but not the header)
+	err = fh.WriteFile(7*1048576, buf[23:23+4096], true)
+	t.Assert(err, IsNil)
+
+	// Complete the upload
+	// Before 0.40.3 it would hang at this point
+	err = in.SyncFile()
+	t.Assert(err, IsNil)
+
+	// Complete the upload again
+	err = in.SyncFile()
+	t.Assert(err, IsNil)
+
+	// Close
+	fh.Release()
+}
+
 func (s *GoofysTest) TestMultipartOverwrite(t *C) {
 	s.testWriteFile(t, "test%d0%b0", 20*1024*1024, 128*1024)
 	// Test overwrite
