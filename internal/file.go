@@ -761,11 +761,12 @@ func (inode *Inode) sendUpload() bool {
 	}
 
 	// Pick part(s) to flush
-	if inode.sendUploadPart() {
+	initiated, canComplete := inode.sendUploadPart()
+	if initiated {
 		return true
 	}
 
-	canComplete := !inode.buffers.AnyDirty() && !inode.IsRangeLocked(0, inode.Attributes.Size, true)
+	canComplete = canComplete && !inode.IsRangeLocked(0, inode.Attributes.Size, true)
 
 	if canComplete && (inode.fileHandles == 0 || inode.forceFlush) {
 		// Complete the multipart upload
@@ -1015,8 +1016,9 @@ func (inode *Inode) sendStartMultipart() {
 	}()
 }
 
-func (inode *Inode) sendUploadPart() bool {
+func (inode *Inode) sendUploadPart() (bool, bool) {
 	initiated := false
+	shouldComplete := true
 	flushInode := inode.fileHandles == 0 || inode.forceFlush
 	wantFree := atomic.LoadInt32(&inode.fs.wantFree) > 0
 	var partlyZero []uint64
@@ -1024,10 +1026,12 @@ func (inode *Inode) sendUploadPart() bool {
 		partOffset, partSize := inode.fs.partRange(partNum)
 		if inode.IsRangeLocked(partOffset, partSize, true) {
 			// Don't flush parts being currently flushed
+			shouldComplete = false
 			return true
 		}
 		if partNum == inode.fs.partNum(inode.lastWriteEnd) && !flushInode && !wantFree {
 			// Don't write out the last part which is still written to (if not under memory pressure)
+			shouldComplete = false
 			return true
 		}
 		partEnd := partOffset+partSize
@@ -1051,9 +1055,11 @@ func (inode *Inode) sendUploadPart() bool {
 			if wantFree && partNonZero {
 				partlyZero = append(partlyZero, partNum)
 			}
+			shouldComplete = false
 		} else {
 			// Guard part against eviction
 			initiated = true
+			shouldComplete = false
 			inode.goFlushPart(partNum, partOffset, partSize)
 			if inode.flushLimitsExceeded() {
 				return false
@@ -1071,7 +1077,7 @@ func (inode *Inode) sendUploadPart() bool {
 			}
 		}
 	}
-	return initiated
+	return initiated, shouldComplete
 }
 
 // LOCKS_REQUIRED(inode.mu)
