@@ -1444,6 +1444,35 @@ func (inode *Inode) flushSmallObject() {
 	inode.fs.completeInflightChange(key)
 	inode.mu.Lock()
 
+	/*When the user/bucket quota is enabled on Ceph, and the quota limit is reached, the err is:
+	QuotaExceeded: 
+	status code: 403, request id: tx00000000000000055a642-0065efe3a5-129c-default, host id: 
+
+	and If this error is not handled, it will trigger a "Asynchronous Write Errors" error.
+	*/
+
+
+	if err != nil && strings.Contains(err.Error(), "QuotaExceeded:") {
+		log.Errorf("Failed to flush small file %v: %v and doUnlink begin", key, err)
+		// inode.resetCache()
+		// inode.SendDelete()
+		// inode.mu.Lock()
+		// inode.mu.TryLock()
+		// inode.mu.Unlock()
+
+		inode.UnlockRange(0, sz, true)
+
+		inode.doUnlink()
+
+		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
+		atomic.AddInt64(&inode.fs.activeFlushers, -1)
+		inode.fs.WakeupFlusher()
+		inode.mu.Unlock()
+		log.Errorf("Failed to flush small file %v: %v and doUnlink end", key, err)
+
+		return
+	}
+
 	inode.recordFlushError(err)
 	if err != nil {
 		log.Warnf("Failed to flush small file %v: %v", key, err)
@@ -1623,6 +1652,22 @@ func (inode *Inode) flushPart(part uint64) {
 	inode.mu.Unlock()
 	resp, err := cloud.MultipartBlobAdd(&partInput)
 	inode.mu.Lock()
+
+	/*When the user/bucket quota is enabled on Ceph, and the quota limit is reached, the err is:
+	QuotaExceeded: 
+	status code: 403, request id: tx00000000000000055a642-0065efe3a5-129c-default, host id: 
+
+	and If this error is not handled, it will trigger a "Asynchronous Write Errors" error.
+	*/
+
+	if err != nil && strings.Contains(err.Error(), "QuotaExceeded:") {
+		log.Errorf("Failed to flush part %v of object %v: %v and doUnlink begin", part, key, err)
+		inode.Parent.mu.Lock()
+		inode.doUnlink()
+		inode.Parent.mu.Unlock()
+		log.Errorf("Failed to flush part %v of object %v: %v and doUnlink end", part, key, err)
+		return
+	}
 
 	if inode.CacheState == ST_DELETED {
 		// File was deleted while we were flushing it

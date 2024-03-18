@@ -1427,6 +1427,22 @@ func (dir *Inode) SendMkDir() {
 		atomic.AddInt64(&dir.fs.activeFlushers, -1)
 		dir.IsFlushing -= dir.fs.flags.MaxParallelParts
 		dir.recordFlushError(err)
+
+		/*When the user/bucket quota is enabled on Ceph, and the quota limit is reached, the err is:
+		QuotaExceeded: 
+		status code: 403, request id: tx00000000000000055a642-0065efe3a5-129c-default, host id: 
+
+		and If this error is not handled, it will trigger a "Asynchronous Write Errors" error.
+		*/
+
+		if err != nil && strings.Contains(err.Error(), "QuotaExceeded:") {
+			log.Errorf("Failed to create directory object %v: %v and doUnlink start", key, err)
+			dir.doUnlink()
+			log.Errorf("Failed to create directory object %v: %v and doUnlink end", key, err)
+			// dir.fs.WakeupFlusher()
+			return
+		}
+
 		if err != nil {
 			log.Warnf("Failed to create directory object %v: %v", key, err)
 			dir.fs.WakeupFlusher()
