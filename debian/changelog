@@ -1,3 +1,9 @@
+geesefs (0.40.4) unstable; urgency=medium
+
+  * Fix possible hangs during random write after full linear overwrite
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 20 Mar 2024 12:57:19 +0300
+
 geesefs (0.40.3) unstable; urgency=medium
 
   * Fix read-modify-write with evicted multipart parts hanging (introduced in 0.40.0)
