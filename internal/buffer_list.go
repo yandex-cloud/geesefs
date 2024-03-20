@@ -641,7 +641,8 @@ func (l *BufferList) split(b *FileBuffer, offset uint64) (left, right *FileBuffe
 }
 
 // Left here for the ease of debugging
-func (l *BufferList) Dump(offset, size uint64) {
+func (l *BufferList) Dump(offset, size uint64) string {
+	r := ""
 	l.at.Ascend(offset+1, func(end uint64, b *FileBuffer) bool {
 		if b.offset >= offset+size {
 			return false
@@ -654,9 +655,10 @@ func (l *BufferList) Dump(offset, size uint64) {
 		if b.zero {
 			z = 1
 		}
-		fmt.Printf("%x-%x s%v l%v z%v d%v\n", b.offset, b.offset+b.length, b.state, l, z, b.dirtyID)
+		r += fmt.Sprintf("%x-%x s%v l%v z%v d%v\n", b.offset, b.offset+b.length, b.state, l, z, b.dirtyID)
 		return true
 	})
+	return r
 }
 
 func (l *BufferList) DebugCheckHoles(s string) {
@@ -667,8 +669,7 @@ func (l *BufferList) DebugCheckHoles(s string) {
 	})
 	h, _, _ := l.GetHoles(0, eof)
 	if len(h) > 0 {
-		fmt.Printf("Debug: holes detected%s: %#v\n", s, h)
-		l.Dump(0, 0xFFFFFFFFFFFFFFFF)
+		fmt.Printf("Debug: holes detected%s: %#v\n%v", s, h, l.Dump(0, 0xFFFFFFFFFFFFFFFF))
 		panic("holes detected")
 	}
 }
