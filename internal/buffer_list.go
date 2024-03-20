@@ -710,6 +710,9 @@ func (l *BufferList) GetHoles(offset, size uint64) (holes []Range, loading bool,
 	curOffset := offset
 	endOffset := offset + size
 	l.at.Ascend(offset+1, func(end uint64, b *FileBuffer) bool {
+		if b.offset >= endOffset {
+			return false
+		}
 		if b.offset > curOffset {
 			curEnd := min(endOffset, b.offset)
 			holes = append(holes, Range{curOffset, curEnd})
@@ -718,7 +721,7 @@ func (l *BufferList) GetHoles(offset, size uint64) (holes []Range, loading bool,
 		curOffset = b.offset + b.length
 		loading = loading || b.loading
 		flushCleared = flushCleared || b.state == BUF_FL_CLEARED
-		return b.offset+b.length < endOffset
+		return true
 	})
 	if curOffset < endOffset {
 		holes = append(holes, Range{curOffset, endOffset})
