@@ -213,7 +213,6 @@ func (inode *Inode) OpenCacheFD() error {
 	return nil
 }
 
-// FIXME: Tests for these two functions
 func mergeRA(rr []Range, readAhead uint64, readMerge uint64) []Range {
 	if readMerge >= readAhead {
 		readMerge -= readAhead
@@ -242,7 +241,7 @@ func splitRA(rr []Range, maxPart uint64) []Range {
 	for i := 0; i < len(rr); i++ {
 		if rr[i].End-rr[i].Start > maxPart {
 			if !split {
-				res = rr[0:i]
+				res = append([]Range(nil), rr[0:i]...)
 				split = true
 			}
 			for off := rr[i].Start; off < rr[i].End; off += maxPart {
