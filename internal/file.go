@@ -213,48 +213,6 @@ func (inode *Inode) OpenCacheFD() error {
 	return nil
 }
 
-func mergeRA(rr []Range, readAhead uint64, readMerge uint64) []Range {
-	if readMerge >= readAhead {
-		readMerge -= readAhead
-	} else {
-		readMerge = 0
-	}
-	prev := -1
-	for i := 0; i < len(rr); i++ {
-		if prev >= 0 && rr[prev].End+readMerge >= rr[i].Start {
-			rr[prev].End = rr[i].End
-		} else {
-			prev++
-			sz := rr[i].End-rr[i].Start
-			if sz < readAhead {
-				sz = readAhead
-			}
-			rr[prev] = Range{Start: rr[i].Start, End: rr[i].Start+sz}
-		}
-	}
-	return rr[0:prev+1]
-}
-
-func splitRA(rr []Range, maxPart uint64) []Range {
-	res := rr
-	split := false
-	for i := 0; i < len(rr); i++ {
-		if rr[i].End-rr[i].Start > maxPart {
-			if !split {
-				res = append([]Range(nil), rr[0:i]...)
-				split = true
-			}
-			for off := rr[i].Start; off < rr[i].End; off += maxPart {
-				res = append(res, Range{Start: off, End: off+maxPart})
-			}
-			res[len(res)-1].End = rr[i].End
-		} else if split {
-			res = append(res, rr[i])
-		}
-	}
-	return res
-}
-
 func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ignoreMemoryLimit bool) {
 	// Add readahead & merge adjacent requests
 	readRanges = mergeRA(readRanges, readAheadSize, inode.fs.flags.ReadMergeKB*1024)
