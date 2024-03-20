@@ -212,3 +212,19 @@ func (s *BufferListTest) TestCutZero(t *C) {
 		6: true,
 	})
 }
+
+func (s *BufferListTest) TestRA(t *C) {
+	rr := []Range{
+		{6841958400, 6862929920},
+		{6845149184, 6845333504},
+		{6845804544, 6847561728},
+		{6848061440, 6855168000},
+		{6855610368, 6855716864},
+		{6855884800, 6857936896},
+		{6858420224, 6868172800},
+	}
+	merged := mergeRA(rr, 0, 512*1024)
+	t.Assert(merged, DeepEquals, []Range{{6841958400, 6868172800}})
+	split := splitRA(merged, 20*1024*1024)
+	t.Assert(split, DeepEquals, []Range{{6841958400, 6862929920}, {6862929920, 6868172800}})
+}
