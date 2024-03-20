@@ -169,6 +169,10 @@ func (l *BufferList) Ascend(offset uint64, iter func(end uint64, b *FileBuffer) 
 	ascendChange(&l.at, offset, iter)
 }
 
+func (l *BufferList) Count() int {
+	return l.at.Len()
+}
+
 func (l *BufferList) EvictFromMemory(buf *FileBuffer) (allocated int64, deleted bool) {
 	// Release memory
 	buf.ptr.refs--
@@ -642,7 +646,15 @@ func (l *BufferList) Dump(offset, size uint64) {
 		if b.offset >= offset+size {
 			return false
 		}
-		fmt.Printf("%x-%x s%v l%v z%v d%v\n", b.offset, b.offset+b.length, b.state, b.loading, b.zero, b.dirtyID)
+		l := 0
+		if b.loading {
+			l = 1
+		}
+		z := 0
+		if b.zero {
+			z = 1
+		}
+		fmt.Printf("%x-%x s%v l%v z%v d%v\n", b.offset, b.offset+b.length, b.state, l, z, b.dirtyID)
 		return true
 	})
 }
