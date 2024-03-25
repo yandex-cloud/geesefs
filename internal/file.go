@@ -213,49 +213,6 @@ func (inode *Inode) OpenCacheFD() error {
 	return nil
 }
 
-// FIXME: Tests for these two functions
-func mergeRA(rr []Range, readAhead uint64, readMerge uint64) []Range {
-	if readMerge >= readAhead {
-		readMerge -= readAhead
-	} else {
-		readMerge = 0
-	}
-	prev := -1
-	for i := 0; i < len(rr); i++ {
-		if prev >= 0 && rr[prev].End+readMerge >= rr[i].Start {
-			rr[prev].End = rr[i].End
-		} else {
-			prev++
-			sz := rr[i].End-rr[i].Start
-			if sz < readAhead {
-				sz = readAhead
-			}
-			rr[prev] = Range{Start: rr[i].Start, End: rr[i].Start+sz}
-		}
-	}
-	return rr[0:prev+1]
-}
-
-func splitRA(rr []Range, maxPart uint64) []Range {
-	res := rr
-	split := false
-	for i := 0; i < len(rr); i++ {
-		if rr[i].End-rr[i].Start > maxPart {
-			if !split {
-				res = rr[0:i]
-				split = true
-			}
-			for off := rr[i].Start; off < rr[i].End; off += maxPart {
-				res = append(res, Range{Start: off, End: off+maxPart})
-			}
-			res[len(res)-1].End = rr[i].End
-		} else if split {
-			res = append(res, rr[i])
-		}
-	}
-	return res
-}
-
 func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ignoreMemoryLimit bool) {
 	// Add readahead & merge adjacent requests
 	readRanges = mergeRA(readRanges, readAheadSize, inode.fs.flags.ReadMergeKB*1024)
@@ -743,6 +700,7 @@ func (inode *Inode) sendUpload() bool {
 		if inode.IsFlushing == 0 && (inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0) {
 			// Don't accidentally trigger a parallel multipart flush
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
+			atomic.AddInt64(&inode.fs.stats.flushes, 1)
 			atomic.AddInt64(&inode.fs.activeFlushers, 1)
 			go inode.flushSmallObject()
 			return true
@@ -761,16 +719,17 @@ func (inode *Inode) sendUpload() bool {
 	}
 
 	// Pick part(s) to flush
-	initiated, canComplete := inode.sendUploadPart()
+	initiated, canComplete := inode.sendUploadParts()
 	if initiated {
 		return true
 	}
 
 	canComplete = canComplete && !inode.IsRangeLocked(0, inode.Attributes.Size, true)
 
-	if canComplete && (inode.fileHandles == 0 || inode.forceFlush) {
+	if canComplete && (inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0) {
 		// Complete the multipart upload
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
+		atomic.AddInt64(&inode.fs.stats.flushes, 1)
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
 		go func() {
 			inode.mu.Lock()
@@ -792,6 +751,7 @@ func (inode *Inode) sendRename() {
 		key += "/"
 	}
 	inode.IsFlushing += inode.fs.flags.MaxParallelParts
+	atomic.AddInt64(&inode.fs.stats.flushes, 1)
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
 	_, from := inode.oldParent.cloud()
 	from = appendChildName(from, inode.oldName)
@@ -948,6 +908,7 @@ func (inode *Inode) sendUpdateMeta() {
 	}
 	inode.userMetadataDirty = 0
 	inode.IsFlushing += inode.fs.flags.MaxParallelParts
+	atomic.AddInt64(&inode.fs.stats.flushes, 1)
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
 	copyIn := &CopyBlobInput{
 		Source:      key,
@@ -988,6 +949,7 @@ func (inode *Inode) sendStartMultipart() {
 		key += "/"
 	}
 	inode.IsFlushing += inode.fs.flags.MaxParallelParts
+	atomic.AddInt64(&inode.fs.stats.flushes, 1)
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
 	go func() {
 		params := &MultipartBlobBeginInput{
@@ -1016,7 +978,7 @@ func (inode *Inode) sendStartMultipart() {
 	}()
 }
 
-func (inode *Inode) sendUploadPart() (bool, bool) {
+func (inode *Inode) sendUploadParts() (bool, bool) {
 	initiated := false
 	shouldComplete := true
 	flushInode := inode.fileHandles == 0 || inode.forceFlush
@@ -1084,6 +1046,7 @@ func (inode *Inode) sendUploadPart() (bool, bool) {
 func (inode *Inode) goFlushPart(partNum, partOffset, partSize uint64) {
 	inode.LockRange(partOffset, partSize, true)
 	inode.IsFlushing++
+	atomic.AddInt64(&inode.fs.stats.flushes, 1)
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
 	go func() {
 		inode.mu.Lock()
@@ -1172,6 +1135,7 @@ func (inode *Inode) patchSimpleObj(bufs []*FileBuffer) {
 
 	inode.LockRange(0, size, true)
 	inode.IsFlushing += inode.fs.flags.MaxParallelParts
+	atomic.AddInt64(&inode.fs.stats.flushes, 1)
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
 
 	go func() {
@@ -1190,6 +1154,7 @@ func (inode *Inode) patchSimpleObj(bufs []*FileBuffer) {
 func (inode *Inode) patchPart(partOffset, partSize uint64, bufs []*FileBuffer) {
 	inode.LockRange(partOffset, partSize, true)
 	inode.IsFlushing++
+	atomic.AddInt64(&inode.fs.stats.flushes, 1)
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
 
 	go func() {
@@ -1608,6 +1573,7 @@ func (inode *Inode) flushPart(part uint64) {
 		_, err := inode.LoadRange(partOffset, partSize, 0, true)
 		if err == syscall.ESPIPE {
 			// Part is partly evicted, we can't flush it
+			log.Warnf("Could not flush part %v (%v-%v) of object %v because it's partly evicted", part, partOffset, partSize, key)
 			return
 		}
 		mappedErr := mapAwsError(err)
@@ -1639,6 +1605,7 @@ func (inode *Inode) flushPart(part uint64) {
 	// Finally upload it
 	bufReader, bufIds, err := inode.getMultiReader(partOffset, partSize)
 	if err != nil {
+		log.Errorf("BUG: Failed to get MultiReader for flushed part %v (%v-%v) of object %v: %v", part, partOffset, partSize, key, err)
 		return
 	}
 	bufLen := bufReader.Len()

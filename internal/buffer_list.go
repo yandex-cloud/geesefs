@@ -169,6 +169,10 @@ func (l *BufferList) Ascend(offset uint64, iter func(end uint64, b *FileBuffer) 
 	ascendChange(&l.at, offset, iter)
 }
 
+func (l *BufferList) Count() int {
+	return l.at.Len()
+}
+
 func (l *BufferList) EvictFromMemory(buf *FileBuffer) (allocated int64, deleted bool) {
 	// Release memory
 	buf.ptr.refs--
@@ -637,14 +641,24 @@ func (l *BufferList) split(b *FileBuffer, offset uint64) (left, right *FileBuffe
 }
 
 // Left here for the ease of debugging
-func (l *BufferList) Dump(offset, size uint64) {
+func (l *BufferList) Dump(offset, size uint64) string {
+	r := ""
 	l.at.Ascend(offset+1, func(end uint64, b *FileBuffer) bool {
 		if b.offset >= offset+size {
 			return false
 		}
-		fmt.Printf("%x-%x s%v l%v z%v d%v\n", b.offset, b.offset+b.length, b.state, b.loading, b.zero, b.dirtyID)
+		l := 0
+		if b.loading {
+			l = 1
+		}
+		z := 0
+		if b.zero {
+			z = 1
+		}
+		r += fmt.Sprintf("%x-%x s%v l%v z%v d%v\n", b.offset, b.offset+b.length, b.state, l, z, b.dirtyID)
 		return true
 	})
+	return r
 }
 
 func (l *BufferList) DebugCheckHoles(s string) {
@@ -655,8 +669,7 @@ func (l *BufferList) DebugCheckHoles(s string) {
 	})
 	h, _, _ := l.GetHoles(0, eof)
 	if len(h) > 0 {
-		fmt.Printf("Debug: holes detected%s: %#v\n", s, h)
-		l.Dump(0, 0xFFFFFFFFFFFFFFFF)
+		fmt.Printf("Debug: holes detected%s: %#v\n%v", s, h, l.Dump(0, 0xFFFFFFFFFFFFFFFF))
 		panic("holes detected")
 	}
 }
@@ -710,6 +723,9 @@ func (l *BufferList) GetHoles(offset, size uint64) (holes []Range, loading bool,
 	curOffset := offset
 	endOffset := offset + size
 	l.at.Ascend(offset+1, func(end uint64, b *FileBuffer) bool {
+		if b.offset >= endOffset {
+			return false
+		}
 		if b.offset > curOffset {
 			curEnd := min(endOffset, b.offset)
 			holes = append(holes, Range{curOffset, curEnd})
@@ -718,7 +734,7 @@ func (l *BufferList) GetHoles(offset, size uint64) (holes []Range, loading bool,
 		curOffset = b.offset + b.length
 		loading = loading || b.loading
 		flushCleared = flushCleared || b.state == BUF_FL_CLEARED
-		return b.offset+b.length < endOffset
+		return true
 	})
 	if curOffset < endOffset {
 		holes = append(holes, Range{curOffset, endOffset})
@@ -765,4 +781,46 @@ func (l *BufferList) GetData(offset, size uint64, returnIds bool) (data [][]byte
 		return
 	}
 	return
+}
+
+func mergeRA(rr []Range, readAhead uint64, readMerge uint64) []Range {
+	if readMerge >= readAhead {
+		readMerge -= readAhead
+	} else {
+		readMerge = 0
+	}
+	prev := -1
+	for i := 0; i < len(rr); i++ {
+		if prev >= 0 && rr[prev].End+readMerge >= rr[i].Start {
+			rr[prev].End = rr[i].End
+		} else {
+			prev++
+			sz := rr[i].End-rr[i].Start
+			if sz < readAhead {
+				sz = readAhead
+			}
+			rr[prev] = Range{Start: rr[i].Start, End: rr[i].Start+sz}
+		}
+	}
+	return rr[0:prev+1]
+}
+
+func splitRA(rr []Range, maxPart uint64) []Range {
+	res := rr
+	split := false
+	for i := 0; i < len(rr); i++ {
+		if rr[i].End-rr[i].Start > maxPart {
+			if !split {
+				res = append([]Range(nil), rr[0:i]...)
+				split = true
+			}
+			for off := rr[i].Start; off < rr[i].End; off += maxPart {
+				res = append(res, Range{Start: off, End: off+maxPart})
+			}
+			res[len(res)-1].End = rr[i].End
+		} else if split {
+			res = append(res, rr[i])
+		}
+	}
+	return res
 }

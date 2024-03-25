@@ -638,12 +638,7 @@ func (fs *Goofys) Flusher() {
 				fs.mu.RLock()
 				inode := fs.inodes[fuseops.InodeID(inodeID)]
 				fs.mu.RUnlock()
-				for sent := true; inode != nil && sent && atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers; {
-					sent = inode.TryFlush()
-					if sent {
-						atomic.AddInt64(&fs.stats.flushes, 1)
-					}
-				}
+				inode.TryFlush()
 			}
 		}
 	}

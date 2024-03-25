@@ -64,7 +64,7 @@ func (s *BufferListTest) TestAppend(t *C) {
 	t.Assert(data[0][1536:], DeepEquals, filledBuf(512, 4))
 }
 
-func (s *BufferListTest) TestGetHoles(t *C) {
+func (s *BufferListTest) TestGetHolesEmpty(t *C) {
 	l := BufferList{
 		helpers: &TestBLHelpers{},
 	}
@@ -81,6 +81,45 @@ func (s *BufferListTest) TestGetHoles(t *C) {
 	})
 	holes, loading, flcl := l.GetHoles(0, 2048)
 	t.Assert(holes, DeepEquals, []Range(nil))
+	t.Assert(loading, Equals, false)
+	t.Assert(flcl, Equals, false)
+}
+
+func (s *BufferListTest) TestGetHolesEvicted(t *C) {
+	l := BufferList{
+		helpers: &TestBLHelpers{},
+	}
+	t.Assert(l.Add(0, make([]byte, 5*1024), BUF_DIRTY, false), Equals, int64(5*1024))
+	t.Assert(l.Add(5*1024, make([]byte, 3*1024), BUF_DIRTY, false), Equals, int64(3*1024))
+	t.Assert(l.Add(10*1024, make([]byte, 5*1024), BUF_DIRTY, false), Equals, int64(5*1024))
+	t.Assert(l.Add(15*1024, make([]byte, 5*1024), BUF_DIRTY, false), Equals, int64(5*1024))
+	// Mark second buffer as flushed
+	data, ids, err := l.GetData(10*1024, 5*1024, true)
+	t.Assert(err, IsNil)
+	t.Assert(len(data), Equals, 1)
+	t.Assert(len(data[0]), Equals, 5*1024)
+	t.Assert(ids, DeepEquals, map[uint64]bool{
+		3: true,
+	})
+	l.SetState(10*1024, 5*1024, ids, BUF_FLUSHED_FULL)
+	// Mark it as FL_CLEARED
+	l.Ascend(10*1024+1, func(end uint64, b *FileBuffer) (cont bool, changed bool) {
+		if end > 15*1024 {
+			return false, false
+		}
+		alloc, del := l.EvictFromMemory(b)
+		t.Assert(alloc, Equals, int64(-5*1024))
+		t.Assert(del, Equals, false)
+		return true, del
+	})
+	// Check FL_CLEARED - it should be there
+	holes, loading, flcl := l.GetHoles(10*1024, 5*1024)
+	t.Assert(holes, DeepEquals, []Range(nil))
+	t.Assert(loading, Equals, false)
+	t.Assert(flcl, Equals, true)
+	// Now check previous part - it should have a hole, but no FL_CLEARED
+	holes, loading, flcl = l.GetHoles(5*1024, 5*1024)
+	t.Assert(holes, DeepEquals, []Range{{8*1024, 10*1024}})
 	t.Assert(loading, Equals, false)
 	t.Assert(flcl, Equals, false)
 }
@@ -172,4 +211,20 @@ func (s *BufferListTest) TestCutZero(t *C) {
 		4: true,
 		6: true,
 	})
+}
+
+func (s *BufferListTest) TestRA(t *C) {
+	rr := []Range{
+		{6841958400, 6862929920},
+		{6845149184, 6845333504},
+		{6845804544, 6847561728},
+		{6848061440, 6855168000},
+		{6855610368, 6855716864},
+		{6855884800, 6857936896},
+		{6858420224, 6868172800},
+	}
+	merged := mergeRA(rr, 0, 512*1024)
+	t.Assert(merged, DeepEquals, []Range{{6841958400, 6868172800}})
+	split := splitRA(merged, 20*1024*1024)
+	t.Assert(split, DeepEquals, []Range{{6841958400, 6862929920}, {6862929920, 6868172800}})
 }
