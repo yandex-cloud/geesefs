@@ -605,6 +605,73 @@ func (s *GoofysTest) TestEvictedRMWMem20M(t *C) {
 	fh.Release()
 }
 
+func (s *GoofysTest) TestMultiStreamMem100M(t *C) {
+	streams := []string{"stream1", "stream2", "stream3", "stream4", "stream5"}
+	inodes := make([]*Inode, len(streams))
+	fhs := make([]*FileHandle, len(streams))
+
+	root := s.getRoot(t)
+	s3 := root.dir.cloud
+	cloud := &TestBackend{StorageBackend: s3}
+	// Check that all uploads work optimally and don't complete until the end
+	cloud.MultipartBlobCommitFunc = func(param *MultipartBlobCommitInput) (*MultipartBlobCommitOutput, error) {
+		t.Fatal("Uploads should not be completed in the middle of upload")
+		return nil, syscall.ENOSYS
+	}
+	// Check that no parts are uploaded twice
+	var seenMu sync.Mutex
+	seen := make(map[string]bool)
+	cloud.MultipartBlobAddFunc = func(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error) {
+		key := *param.Commit.Key + fmt.Sprintf("-%d", param.PartNumber)
+		seenMu.Lock()
+		if seen[key] {
+			seenMu.Unlock()
+			t.Fatal("Parts should not be uploaded twice, we are streaming")
+			return nil, syscall.ENOSYS
+		}
+		seen[key] = true
+		seenMu.Unlock()
+		return s3.MultipartBlobAdd(param)
+	}
+	root.dir.cloud = cloud
+
+	for i, filename := range streams {
+		err := root.Unlink(filename)
+		t.Assert(err == nil || err == syscall.ENOENT, Equals, true)
+
+		in, fh, err := root.Create(filename)
+		t.Assert(err, IsNil)
+
+		inodes[i] = in
+		fhs[i] = fh
+
+		err = in.SetAttributes(PUInt64(50*1048576), nil, nil, nil, nil)
+		t.Assert(err, IsNil)
+	}
+
+	// Write all files in parallel
+	buf := make([]byte, 1048576)
+	for i := 0; i < len(buf); i++ {
+		buf[i] = byte(i)
+	}
+	for i := 0; i < 100; i++ {
+		for _, fh := range fhs {
+			err := fh.WriteFile(int64(i*len(buf)), buf, true)
+			t.Assert(err, IsNil)
+		}
+	}
+
+	cloud.MultipartBlobCommitFunc = nil
+	for _, fh := range fhs {
+		fh.Release()
+	}
+	fhs = nil
+	for _, in := range inodes {
+		err := in.SyncFile()
+		t.Assert(err, IsNil)
+	}
+}
+
 func (s *GoofysTest) TestMultipartOverwrite(t *C) {
 	s.testWriteFile(t, "test%d0%b0", 20*1024*1024, 128*1024)
 	// Test overwrite

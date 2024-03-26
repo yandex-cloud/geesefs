@@ -22,6 +22,7 @@ type TestBackend struct {
 	HeadBlobFunc func(param *HeadBlobInput) (*HeadBlobOutput, error)
 	MultipartBlobAddFunc func(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error)
 	MultipartBlobCopyFunc func(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error)
+	MultipartBlobCommitFunc func(param *MultipartBlobCommitInput) (*MultipartBlobCommitOutput, error)
 	capabilities *Capabilities
 	err error
 }
@@ -147,6 +148,9 @@ func (s *TestBackend) MultipartBlobAbort(param *MultipartBlobCommitInput) (*Mult
 }
 
 func (s *TestBackend) MultipartBlobCommit(param *MultipartBlobCommitInput) (*MultipartBlobCommitOutput, error) {
+	if s.MultipartBlobCommitFunc != nil {
+		return s.MultipartBlobCommitFunc(param)
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
