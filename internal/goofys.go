@@ -104,6 +104,8 @@ type Goofys struct {
 
 	activeFlushers int64
 	flushRetrySet int32
+	hasNewWrites uint64
+	flushPriorities []int64
 
 	forgotCnt uint32
 
@@ -296,6 +298,7 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 		stats: OpStats{
 			ts: time.Now(),
 		},
+		flushPriorities: make([]int64, MAX_FLUSH_PRIORITY+1),
 	}
 
 	var prefix string
@@ -619,6 +622,7 @@ func (fs *Goofys) ScheduleRetryFlush() {
 //    With on-disk cache we can unload some dirty buffers to disk.
 func (fs *Goofys) Flusher() {
 	var inodeID, nextQueueID uint64
+	priority := 1
 	for atomic.LoadInt32(&fs.shutdown) == 0 {
 		fs.flusherMu.Lock()
 		if fs.flushPending == 0 {
@@ -626,19 +630,42 @@ func (fs *Goofys) Flusher() {
 		}
 		fs.flushPending = 0
 		fs.flusherMu.Unlock()
-		attempt := 1
-		if nextQueueID != 0 {
-			attempt = 2
+		attempts := 1
+		if priority > 1 || priority == 1 && nextQueueID != 0 {
+			attempts = 2
 		}
-		for attempt > 0 && atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers {
+		curPriorityOk := false
+		for i := 1; i <= priority; i++ {
+			curPriorityOk = curPriorityOk || atomic.LoadInt64(&fs.flushPriorities[priority]) > 0
+		}
+		for attempts > 0 && atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers {
 			inodeID, nextQueueID = fs.inodeQueue.Next(nextQueueID)
 			if inodeID == 0 {
-				attempt--
+				if curPriorityOk {
+					break
+				}
+				priority++
+				if priority > MAX_FLUSH_PRIORITY {
+					attempts--
+					priority = 1
+				}
+				if curPriorityOk {
+					break
+				}
 			} else {
+				if atomic.CompareAndSwapUint64(&fs.hasNewWrites, 1, 0) {
+					// restart from the beginning
+					inodeID, nextQueueID = 0, 0
+					priority = 1
+					attempts = 1
+					curPriorityOk = atomic.LoadInt64(&fs.flushPriorities[1]) > 0
+					continue
+				}
 				fs.mu.RLock()
 				inode := fs.inodes[fuseops.InodeID(inodeID)]
 				fs.mu.RUnlock()
-				inode.TryFlush()
+				started := inode.TryFlush(priority)
+				curPriorityOk = curPriorityOk || started
 			}
 		}
 	}

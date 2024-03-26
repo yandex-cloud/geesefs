@@ -40,6 +40,7 @@ type FileHandle struct {
 // On Linux and MacOS, IOV_MAX = 1024
 const IOV_MAX = 1024
 const READ_BUF_SIZE = 128 * 1024
+const MAX_FLUSH_PRIORITY = 3
 
 // NewFileHandle returns a new file handle for the given `inode`
 func NewFileHandle(inode *Inode) *FileHandle {
@@ -167,6 +168,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 	}
 
 	allocated := fh.inode.buffers.Add(uint64(offset), data, BUF_DIRTY, copyData)
+	atomic.StoreUint64(&fh.inode.fs.hasNewWrites, 1)
 
 	fh.inode.lastWriteEnd = end
 	if fh.inode.CacheState == ST_CACHED {
@@ -621,7 +623,7 @@ func (inode *Inode) recordFlushError(err error) {
 	inode.fs.ScheduleRetryFlush()
 }
 
-func (inode *Inode) TryFlush() bool {
+func (inode *Inode) TryFlush(priority int) bool {
 	overDeleted := false
 	parent := inode.Parent
 	if parent != nil {
@@ -654,12 +656,12 @@ func (inode *Inode) TryFlush() bool {
 		if overDeleted {
 			return false
 		}
-		return inode.sendUpload()
+		return inode.sendUpload(priority)
 	}
 	return false
 }
 
-func (inode *Inode) sendUpload() bool {
+func (inode *Inode) sendUpload(priority int) bool {
 	if inode.oldParent != nil && inode.IsFlushing == 0 && inode.mpu == nil {
 		// Rename file
 		inode.sendRename()
@@ -719,7 +721,7 @@ func (inode *Inode) sendUpload() bool {
 	}
 
 	// Pick part(s) to flush
-	initiated, canComplete := inode.sendUploadParts()
+	initiated, canComplete := inode.sendUploadParts(priority)
 	if initiated {
 		return true
 	}
@@ -978,12 +980,18 @@ func (inode *Inode) sendStartMultipart() {
 	}()
 }
 
-func (inode *Inode) sendUploadParts() (bool, bool) {
+func (inode *Inode) sendUploadParts(priority int) (bool, bool) {
 	initiated := false
 	shouldComplete := true
 	flushInode := inode.fileHandles == 0 || inode.forceFlush
 	wantFree := atomic.LoadInt32(&inode.fs.wantFree) > 0
 	var partlyZero []uint64
+	var fullyZero []uint64
+	anyEvicted := false
+	// Dirty parts should be flushed in the following order:
+	// 1) completely filled non-zero non-RMW-evicted parts
+	// 2) only when there are no more (priority 1) parts: partly filled non-RMW parts
+	// 3) only when there are no (1) and (2) parts, but there exist RMW-evicted parts: zero parts
 	inode.buffers.IterateDirtyParts(func(partNum uint64) bool {
 		partOffset, partSize := inode.fs.partRange(partNum)
 		if inode.IsRangeLocked(partOffset, partSize, true) {
@@ -998,6 +1006,7 @@ func (inode *Inode) sendUploadParts() (bool, bool) {
 		}
 		partEnd := partOffset+partSize
 		var partDirty, partEvicted, partZero, partNonZero bool
+		var lastBufferEnd uint64
 		inode.buffers.Ascend(partOffset+1, func(end uint64, buf *FileBuffer) (cont bool, changed bool) {
 			if buf.offset >= partEnd {
 				return false, false
@@ -1006,25 +1015,31 @@ func (inode *Inode) sendUploadParts() (bool, bool) {
 			partEvicted = partEvicted || buf.state == BUF_FL_CLEARED
 			partZero = partZero || buf.zero
 			partNonZero = partNonZero || !buf.zero
+			lastBufferEnd = end
 			return true, false
 		})
+		partZero = partZero || lastBufferEnd < partEnd
 		if !partDirty || partEvicted {
 			// Don't flush parts which require RMW with evicted buffers
+			anyEvicted = anyEvicted || partEvicted
 		} else if partZero && !flushInode {
 			// Don't flush parts with empty ranges UNLESS we're under memory pressure
 			// and tried all parts without empty ranges, because flushing them may be
 			// the only way to free memory
-			if wantFree && partNonZero {
+			if !partNonZero && priority >= 3 {
+				fullyZero = append(fullyZero, partNum)
+			}
+			if wantFree && partNonZero && priority >= 2 {
 				partlyZero = append(partlyZero, partNum)
 			}
 			shouldComplete = false
 		} else {
-			// Guard part against eviction
-			initiated = true
 			shouldComplete = false
-			inode.goFlushPart(partNum, partOffset, partSize)
-			if inode.flushLimitsExceeded() {
-				return false
+			if inode.goFlushPart(partNum, partOffset, partSize, 1) {
+				initiated = true
+				if inode.flushLimitsExceeded() {
+					return false
+				}
 			}
 		}
 		return true
@@ -1032,8 +1047,16 @@ func (inode *Inode) sendUploadParts() (bool, bool) {
 	if !initiated && len(partlyZero) > 0 {
 		for _, partNum := range partlyZero {
 			partOffset, partSize := inode.fs.partRange(partNum)
-			initiated = true
-			inode.goFlushPart(partNum, partOffset, partSize)
+			initiated = initiated || inode.goFlushPart(partNum, partOffset, partSize, 2)
+			if inode.flushLimitsExceeded() {
+				break
+			}
+		}
+	}
+	if !initiated && anyEvicted && len(fullyZero) > 0 {
+		for _, partNum := range partlyZero {
+			partOffset, partSize := inode.fs.partRange(partNum)
+			initiated = initiated || inode.goFlushPart(partNum, partOffset, partSize, 3)
 			if inode.flushLimitsExceeded() {
 				break
 			}
@@ -1043,20 +1066,24 @@ func (inode *Inode) sendUploadParts() (bool, bool) {
 }
 
 // LOCKS_REQUIRED(inode.mu)
-func (inode *Inode) goFlushPart(partNum, partOffset, partSize uint64) {
+func (inode *Inode) goFlushPart(partNum, partOffset, partSize uint64, priority uint64) bool {
+	// Guard part against eviction
 	inode.LockRange(partOffset, partSize, true)
 	inode.IsFlushing++
 	atomic.AddInt64(&inode.fs.stats.flushes, 1)
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
+	atomic.AddInt64(&inode.fs.flushPriorities[priority], 1)
 	go func() {
 		inode.mu.Lock()
 		inode.flushPart(partNum)
 		inode.UnlockRange(partOffset, partSize, true)
 		inode.IsFlushing--
 		inode.mu.Unlock()
+		atomic.AddInt64(&inode.fs.flushPriorities[priority], -1)
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
 		inode.fs.WakeupFlusher()
 	}()
+	return true
 }
 
 func (inode *Inode) uploadedAsMultipart() bool {
@@ -1717,7 +1744,7 @@ func (inode *Inode) SyncFile() (err error) {
 		}
 		inode.forceFlush = true
 		inode.mu.Unlock()
-		inode.TryFlush()
+		inode.TryFlush(MAX_FLUSH_PRIORITY)
 		inode.fs.flusherMu.Lock()
 		if inode.fs.flushPending == 0 {
 			inode.fs.flusherCond.Wait()
