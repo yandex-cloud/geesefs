@@ -39,6 +39,12 @@ type S3Config struct {
 	RoleSessionName string
 	StsEndpoint     string
 
+	SDKMaxRetries       int
+	SDKMinRetryDelay    time.Duration
+	SDKMaxRetryDelay    time.Duration
+	SDKMinThrottleDelay time.Duration
+	SDKMaxThrottleDelay time.Duration
+
 	RequesterPays bool
 	Region        string
 	RegionSet     bool
@@ -119,6 +125,14 @@ func (c *S3Config) ToAwsConfig(flags *FlagStorage) (*aws.Config, error) {
 	}
 
 	awsConfig.S3ForcePathStyle = aws.Bool(!c.Subdomain)
+
+	awsConfig.Retryer = client.DefaultRetryer{
+		NumMaxRetries:    c.SDKMaxRetries,
+		MinRetryDelay:    c.SDKMinRetryDelay,
+		MaxRetryDelay:    c.SDKMaxRetryDelay,
+		MinThrottleDelay: c.SDKMinThrottleDelay,
+		MaxThrottleDelay: c.SDKMaxThrottleDelay,
+	}
 
 	if c.Session == nil {
 		if s3Session == nil {

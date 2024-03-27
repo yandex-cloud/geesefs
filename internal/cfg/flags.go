@@ -277,6 +277,36 @@ MISC OPTIONS:
 			Name:  "subdomain",
 			Usage: "Enable subdomain mode of S3",
 		},
+
+		cli.IntFlag{
+			Name:  "sdk-max-retries",
+			Value: 3,
+			Usage: "Maximum number of AWS SDK request retries.",
+		},
+
+		cli.DurationFlag{
+			Name:  "sdk-min-retry-delay",
+			Value: 30 * time.Millisecond,
+			Usage: "Minimum delay for AWS SDK retries of temporary request failures.",
+		},
+
+		cli.DurationFlag{
+			Name:  "sdk-max-retry-delay",
+			Value: 300 * time.Second,
+			Usage: "Maximum delay for AWS SDK retries of temporary request failures.",
+		},
+
+		cli.DurationFlag{
+			Name:  "sdk-min-throttle-delay",
+			Value: 500 * time.Millisecond,
+			Usage: "Minimum delay for AWS SDK retries of throttled requests (429, 502, 503, 504).",
+		},
+
+		cli.DurationFlag{
+			Name:  "sdk-max-throttle-delay",
+			Value: 300 * time.Second,
+			Usage: "Maximum delay for AWS SDK retries of throttled requests.",
+		},
 	}
 
 	tuningFlags := []cli.Flag{
@@ -908,6 +938,12 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.ListV2        = listType == "2"
 
 		config.MultipartCopyThreshold = uint64(c.Int("multipart-copy-threshold")) * 1024 * 1024
+
+		config.SDKMaxRetries = c.Int("sdk-max-retries")
+		config.SDKMinRetryDelay = c.Duration("sdk-min-retry-delay")
+		config.SDKMaxRetryDelay = c.Duration("sdk-max-retry-delay")
+		config.SDKMinThrottleDelay = c.Duration("sdk-min-throttle-delay")
+		config.SDKMaxThrottleDelay = c.Duration("sdk-max-throttle-delay")
 
 		// KMS implies SSE
 		if config.UseKMS {
