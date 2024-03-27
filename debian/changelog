@@ -1,3 +1,10 @@
+geesefs (0.40.6) unstable; urgency=medium
+
+  * Prevent unnecessary reuploads during parallel linear write and check it in tests
+  * Allow to customize AWS SDK retry parameters
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 27 Mar 2024 12:08:52 +0300
+
 geesefs (0.40.5) unstable; urgency=medium
 
   * Fix another bug in readahead merging also leading to inability to flush random writes
