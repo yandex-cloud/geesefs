@@ -1,3 +1,9 @@
+geesefs (0.40.7) unstable; urgency=medium
+
+  * Prevent panic possible on conflict during multipart complete
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 02 Apr 2024 23:34:57 +0300
+
 geesefs (0.40.6) unstable; urgency=medium
 
   * Prevent unnecessary reuploads during parallel linear write and check it in tests
