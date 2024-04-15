@@ -664,7 +664,10 @@ func (fs *Goofys) Flusher() {
 				fs.mu.RLock()
 				inode := fs.inodes[fuseops.InodeID(inodeID)]
 				fs.mu.RUnlock()
-				started := inode.TryFlush(priority)
+				started := false
+				if inode != nil {
+					started = inode.TryFlush(priority)
+				}
 				curPriorityOk = curPriorityOk || started
 			}
 		}
