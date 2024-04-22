@@ -1,3 +1,9 @@
+geesefs (0.40.8) unstable; urgency=medium
+
+  * Prevent panic (crash) possible during flushing and inode expiration
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Mon, 22 Apr 2024 12:48:23 +0300
+
 geesefs (0.40.7) unstable; urgency=medium
 
   * Prevent panic possible on conflict during multipart complete
