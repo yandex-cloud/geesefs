@@ -779,6 +779,9 @@ func (inode *Inode) RemoveXattr(name string) error {
 
 func (inode *Inode) GetXattr(name string) ([]byte, error) {
 	inode.logFuse("GetXattr", name)
+	if name == "geesefs" {
+		return []byte(cfg.GEESEFS_VERSION), nil
+	}
 
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
