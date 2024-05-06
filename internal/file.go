@@ -1116,7 +1116,11 @@ func (inode *Inode) patchObjectRanges() (initiated bool) {
 			return false
 		}
 
-		_, prevSize := inode.fs.partRange(MaxUInt64(part-1, 0))
+		var prevPart uint64
+		if part > 0 {
+			prevPart = part - 1
+		}
+		_, prevSize := inode.fs.partRange(prevPart)
 
 		partEnd, rangeBorder := partStart+partSize, partSize != prevSize
 		appendPatch, newPart := partEnd > inode.knownSize, partStart == inode.knownSize
