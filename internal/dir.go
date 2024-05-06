@@ -1618,12 +1618,18 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 	toFullName := appendChildName(toPath, to)
 
 	if toInode != nil {
-		// this file's been overwritten, it's
-		// been detached but we can't delete
-		// it just yet, because the kernel
-		// will still send forget ops to us
+		// this file's been overwritten, it's been detached but we can't delete
+		// it just yet, because the kernel will still send forget ops to us
 		toInode.mu.Lock()
-		toInode.doUnlink()
+		if toInode.isDir() {
+			toInode.doUnlink()
+		} else {
+			// Do not unlink target file if it's a file to make situation where the old
+			// file is already deleted, but the new one is not uploaded yet, impossible
+			newParent.removeChildUnlocked(toInode)
+			toInode.resetCache()
+			toInode.SetCacheState(ST_DEAD)
+		}
 		toInode.mu.Unlock()
 	}
 
