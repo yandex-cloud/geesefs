@@ -18,6 +18,7 @@ package internal
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -705,6 +706,11 @@ func unescapeMetadata(meta map[string]*string) map[string][]byte {
 func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
 	inode.logFuse("SetXattr", name)
 
+	if name == "debug" {
+		inode.DumpTree(string(value) == "buffers")
+		return nil
+	}
+
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 
@@ -838,4 +844,179 @@ func (inode *Inode) OpenFile() (fh *FileHandle, err error) {
 		inode.Parent.addModified(1)
 	}
 	return
+}
+
+func (inode *Inode) DumpTree(withBuffers bool) {
+	children := inode.DumpThis(withBuffers)
+	for _, child := range children {
+		child.DumpThis(withBuffers)
+	}
+}
+
+func (inode *Inode) DumpThis(withBuffers bool) (children []*Inode) {
+	inode.mu.Lock()
+	defer inode.mu.Unlock()
+
+	fs := inode.fs
+
+	dataMap := make(map[string]interface{})
+	dataMap["id"] = inode.Id
+	dataMap["path"] = inode.FullName()
+	if inode.CacheState == ST_DEAD {
+		dataMap["state"] = "dead"
+	} else if inode.CacheState == ST_CREATED {
+		dataMap["state"] = "created"
+	} else if inode.CacheState == ST_MODIFIED {
+		dataMap["state"] = "modified"
+	} else if inode.CacheState == ST_DELETED {
+		dataMap["state"] = "deleted"
+	}
+
+	dataMap["size"] = inode.Attributes.Size
+	dataMap["mtime"] = inode.Attributes.Mtime.Unix()
+	dataMap["ctime"] = inode.Attributes.Ctime.Unix()
+	if inode.Attributes.Uid != fs.flags.Uid {
+		dataMap["uid"] = inode.Attributes.Uid
+	}
+	if inode.Attributes.Gid != fs.flags.Gid {
+		dataMap["gid"] = inode.Attributes.Gid
+	}
+	if inode.Attributes.Rdev != 0 {
+		dataMap["rdev"] = inode.Attributes.Rdev
+	}
+	if inode.isDir() && inode.Attributes.Mode != (os.ModeDir | fs.flags.DirMode) ||
+		!inode.isDir() && inode.Attributes.Mode != fs.flags.FileMode {
+		dataMap["mode"] = fuseops.ConvertGolangMode(inode.Attributes.Mode)
+	}
+
+	dataMap["attrTime"] = inode.AttrTime.Unix()
+	dataMap["expireTime"] = inode.ExpireTime.Unix()
+	if inode.fileHandles != 0 {
+		dataMap["fileHandles"] = inode.fileHandles
+	}
+	if inode.oldParent != nil {
+		oldPath := inode.oldName
+		if inode.oldParent.Id != fuseops.RootInodeID {
+			oldPath = inode.oldParent.FullName()+"/"+oldPath
+		}
+		dataMap["oldPath"] = oldPath
+		if inode.renamingTo {
+			dataMap["renameStarted"] = true
+		}
+	}
+	if len(inode.userMetadata) != 0 {
+		dataMap["userMetadata"] = inode.userMetadata
+	}
+	if inode.userMetadataDirty != 0 {
+		dataMap["userMetadataDirty"] = inode.userMetadataDirty
+	}
+	dataMap["knownSize"] = inode.knownSize
+	dataMap["knownETag"] = inode.knownETag
+	dataMap["refcnt"] = inode.refcnt
+	if inode.pauseWriters != 0 {
+		dataMap["pauseWriters"] = inode.pauseWriters
+	}
+	if inode.forceFlush {
+		dataMap["forceFlush"] = true
+	}
+	if inode.IsFlushing != 0 {
+		dataMap["flushing"] = inode.IsFlushing
+	}
+	if inode.OnDisk {
+		dataMap["onDisk"] = inode.OnDisk
+	}
+	if inode.flushError != nil {
+		dataMap["flushError"] = inode.flushError.Error()
+		dataMap["flushErrorTime"] = inode.flushErrorTime.Unix()
+	}
+	if inode.readError != nil {
+		dataMap["readError"] = inode.readError.Error()
+	}
+
+	if withBuffers && len(inode.readRanges) > 0 {
+		var ranges [][]uint64
+		for _, r := range inode.readRanges {
+			fl := uint64(0)
+			if r.Flushing {
+				fl = 1
+			}
+			ranges = append(ranges, []uint64{fl, r.Offset, r.Size})
+		}
+		dataMap["readRanges"] = ranges
+	}
+	if withBuffers && inode.mpu != nil {
+		var mpu []string
+		for i := uint32(0); i < inode.mpu.NumParts; i++ {
+			mpu = append(mpu, NilStr(inode.mpu.Parts[i]))
+		}
+		dataMap["uploadId"] = *inode.mpu.UploadId
+		dataMap["uploadParts"] = mpu
+	}
+
+	if inode.isDir() {
+		dirData := make(map[string]interface{})
+		dirData["dirTime"] = inode.dir.DirTime.Unix()
+		if inode.dir.ModifiedChildren != 0 {
+			dirData["modifiedChildren"] = inode.dir.ModifiedChildren
+		}
+		if inode.dir.ImplicitDir {
+			dirData["implicit"] = true
+		}
+		if inode.dir.listMarker != "" {
+			dirData["listMarker"] = inode.dir.listMarker
+		}
+		if inode.dir.lastFromCloud != nil {
+			dirData["lastFromCloud"] = *inode.dir.lastFromCloud
+		}
+		if !inode.dir.listDone {
+			dirData["listing"] = true
+		}
+		if inode.dir.forgetDuringList {
+			dirData["forgetDuringList"] = true
+		}
+		if inode.dir.lastOpenDirIdx != 0 {
+			dirData["lastOpenDirIdx"] = inode.dir.lastOpenDirIdx
+		}
+		if inode.dir.seqOpenDirScore >= 2 {
+			dirData["seqOpenDir"] = true
+		}
+		if !inode.dir.refreshStartTime.IsZero() {
+			dirData["refreshStartTime"] = inode.dir.refreshStartTime.Unix()
+		}
+		if len(inode.dir.handles) > 0 {
+			dirData["dirHandles"] = len(inode.dir.handles)
+		}
+		if len(inode.dir.Gaps) > 0 {
+			var gaps []map[string]interface{}
+			for _, gap := range inode.dir.Gaps {
+				m := make(map[string]interface{})
+				m["start"] = gap.start
+				m["end"] = gap.end
+				m["loadTime"] = gap.loadTime
+			}
+			dirData["gaps"] = gaps
+		}
+		if len(inode.dir.DeletedChildren) > 0 {
+			var deletedNames []string
+			for key := range inode.dir.DeletedChildren {
+				deletedNames = append(deletedNames, key)
+			}
+			dirData["deletedChildren"] = deletedNames
+		}
+		dataMap["dir"] = dirData
+		for _, child := range inode.dir.Children {
+			children = append(children, child)
+		}
+	}
+
+	dumpBuf, _ := json.Marshal(dataMap)
+	dump := string(dumpBuf)
+	if withBuffers && inode.buffers.Count() > 0 {
+		b := inode.buffers.Dump(0, 0xffffffffffffffff)
+		b = b[0:len(b)-1]
+		dump += "\n"+b
+	}
+	log.Error(dump)
+
+	return children
 }
