@@ -1,3 +1,11 @@
+geesefs (0.40.9) unstable; urgency=medium
+
+  * Implement "debug" xattr to dump internal file/directory states online
+  * Do not delete destination file when renaming another file over it
+  * Return geesefs version in a hidden extended attribute "geesefs"
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 17 May 2024 17:56:22 +0300
+
 geesefs (0.40.8) unstable; urgency=medium
 
   * Prevent panic (crash) possible during flushing and inode expiration
