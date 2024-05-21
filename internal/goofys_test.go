@@ -706,7 +706,14 @@ func (s *GoofysTest) TestMultipartWriteAndTruncate(t *C) {
 	// Now don't close the FD, but wait until both parts are flushed
 	for {
 		fh.inode.mu.Lock()
-		dirty := fh.inode.buffers.AnyDirty()
+		dirty := false
+		fh.inode.buffers.Ascend(0, func(end uint64, b *FileBuffer) (cont bool, changed bool) {
+			if b.state == BUF_DIRTY {
+				dirty = true
+				return false, false
+			}
+			return true, false
+		})
 		fh.inode.mu.Unlock()
 		if !dirty {
 			break

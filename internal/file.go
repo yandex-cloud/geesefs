@@ -670,7 +670,7 @@ func (inode *Inode) sendUpload(priority int) bool {
 
 	if inode.CacheState == ST_MODIFIED && inode.userMetadataDirty != 0 &&
 		inode.oldParent == nil && inode.IsFlushing == 0 {
-		hasDirty := inode.buffers.AnyDirty()
+		hasDirty := inode.buffers.AnyUnclean()
 		if !hasDirty {
 			// Update metadata by COPYing into the same object
 			// It results in the optimized implementation in S3
@@ -1321,7 +1321,7 @@ func (inode *Inode) isStillDirty() bool {
 	if inode.userMetadataDirty != 0 || inode.oldParent != nil || inode.Attributes.Size != inode.knownSize {
 		return true
 	}
-	return inode.buffers.AnyDirty()
+	return inode.buffers.AnyUnclean()
 }
 
 func (inode *Inode) resetCache() {

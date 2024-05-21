@@ -70,8 +70,8 @@ type BufferList struct {
 	dirtyQueue btree.Map[uint64, *dirtyPart]
 	dirtyParts map[uint64]*dirtyPart
 	dirtyQid   uint64
-	// dirty buffer count
-	dirtyCount int64
+	// unclean (anything except BUF_CLEAN) buffer count
+	uncleanCount int64
 	// next dirty index for new buffers
 	curDirtyID uint64
 }
@@ -254,8 +254,10 @@ func (l *BufferList) nextID() uint64 {
 }
 
 func (l *BufferList) unqueue(b *FileBuffer) {
+	if b.state != BUF_CLEAN {
+		l.uncleanCount--
+	}
 	if b.state == BUF_DIRTY {
-		l.dirtyCount--
 		sp := l.helpers.PartNum(b.offset)
 		ep := l.helpers.PartNum(b.offset+b.length-1)
 		for i := sp; i < ep+1; i++ {
@@ -293,8 +295,10 @@ func (l *BufferList) queue(b *FileBuffer) {
 	if b.length == 0 {
 		panic("BUG: buffer length should never be 0")
 	}
+	if b.state != BUF_CLEAN {
+		l.uncleanCount++
+	}
 	if b.state == BUF_DIRTY {
-		l.dirtyCount++
 		if l.dirtyParts == nil {
 			l.dirtyParts = make(map[uint64]*dirtyPart)
 		}
@@ -312,8 +316,10 @@ func (l *BufferList) requeueSplit(left *FileBuffer) {
 	if left.length == 0 {
 		panic("BUG: buffer length should never be 0")
 	}
+	if left.state != BUF_CLEAN {
+		l.uncleanCount++
+	}
 	if left.state == BUF_DIRTY {
-		l.dirtyCount++
 		if l.dirtyParts == nil {
 			l.dirtyParts = make(map[uint64]*dirtyPart)
 		}
@@ -350,7 +356,7 @@ func (l *BufferList) SetState(offset, size uint64, ids map[uint64]bool, state Bu
 func (l *BufferList) SetFlushedClean() {
 	ascendChange(&l.at, 0, func(end uint64, b *FileBuffer) (cont bool, chg bool) {
 		if b.state == BUF_FL_CLEARED {
-			l.at.Delete(end)
+			l.delete(b)
 			return true, true
 		} else if b.state == BUF_FLUSHED_FULL || b.state == BUF_FLUSHED_CUT {
 			l.unqueue(b)
@@ -683,8 +689,8 @@ func (l *BufferList) SplitAt(offset uint64) {
 	})
 }
 
-func (l *BufferList) AnyDirty() (dirty bool) {
-	return l.dirtyCount > 0
+func (l *BufferList) AnyUnclean() bool {
+	return l.uncleanCount > 0
 }
 
 func (l *BufferList) AnyFlushed(offset, size uint64) (flushed bool) {
