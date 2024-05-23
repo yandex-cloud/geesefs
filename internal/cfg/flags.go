@@ -433,12 +433,19 @@ MISC OPTIONS:
 
 		cli.BoolFlag{
 			Name:  "enable-patch",
-			Usage: "Use PATCH method to upload object data changes to s3. Yandex only. (default: off)",
+			Usage: "Use PATCH method to upload object data changes to S3. All PATCH related flags are Yandex only. (default: off)",
 		},
 
 		cli.BoolFlag{
 			Name:  "drop-patch-conflicts",
 			Usage: "Drop local changes in case of conflicting concurrent PATCH updates. (default: off)",
+		},
+
+		cli.BoolFlag{
+			Name: "prefer-patch-uploads",
+			Usage: "When uploading new objects, prefer PATCH requests to standard multipart upload process." +
+				"This allows for changes to appear faster in exchange for slower upload speed due to limited parallelism." +
+				"Must be used with --enable-patch flag (default: off)",
 		},
 
 		cli.IntFlag{
@@ -860,6 +867,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		CacheFileMode:          os.FileMode(c.Int("cache-file-mode")),
 		UsePatch:               c.Bool("enable-patch"),
 		DropPatchConflicts:     c.Bool("drop-patch-conflicts"),
+		PreferPatchUploads:     c.Bool("prefer-patch-uploads"),
 
 		// Common Backend Config
 		Endpoint:               c.String("endpoint"),

@@ -103,6 +103,7 @@ type FlagStorage struct {
 	PartSizes             []PartSizeConfig
 	UsePatch              bool
 	DropPatchConflicts    bool
+	PreferPatchUploads    bool
 
 	// Debugging
 	DebugMain  bool
