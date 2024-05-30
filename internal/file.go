@@ -219,8 +219,8 @@ func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ign
 	// Add readahead & merge adjacent requests
 	readRanges = mergeRA(readRanges, readAheadSize, inode.fs.flags.ReadMergeKB*1024)
 	last := &readRanges[len(readRanges)-1]
-	if last.End > inode.Attributes.Size {
-		last.End = inode.Attributes.Size
+	if last.End > inode.knownSize {
+		last.End = inode.knownSize
 	}
 	// Split very large requests into smaller chunks to read in parallel
 	readRanges = splitRA(readRanges, inode.fs.flags.ReadAheadParallelKB*1024)
