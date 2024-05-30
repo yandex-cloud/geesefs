@@ -733,6 +733,33 @@ func (s *GoofysTest) TestMultipartWriteAndTruncate(t *C) {
 	fh.Release()
 }
 
+func (s *GoofysTest) TestReadExtendedFile(t *C) {
+	// Create a 8k file
+	fh := s.testCreateAndWrite(t, "test8k", 8*1024, 128*1024, true)
+	inode := fh.inode
+	err := inode.SyncFile()
+	t.Assert(err, IsNil)
+	fh.Release()
+	// Reset its cache to remove cached 8k
+	inode.mu.Lock()
+	inode.resetCache()
+	inode.mu.Unlock()
+	// Resize it to 10M while opened
+	fh, err = inode.OpenFile()
+	t.Assert(err, IsNil)
+	err = inode.SetAttributes(PUInt64(10*1024*1024), nil, nil, nil, nil)
+	t.Assert(err, IsNil)
+	// Read 1kb from the beginning - it was previously broken because readahead
+	// tried to extend read to 0..5M, beyond server-side EOF
+	oldAttempts := s.fs.flags.ReadRetryAttempts
+	s.fs.flags.ReadRetryAttempts = 1
+	_, nread, err := fh.ReadFile(0, 1024)
+	t.Assert(err, IsNil)
+	t.Assert(nread, Equals, 1024)
+	fh.Release()
+	s.fs.flags.ReadRetryAttempts = oldAttempts
+}
+
 func (s *GoofysTest) TestReadWriteMinimumMemory(t *C) {
 	// First part is fixed for "header hack", last part is "still written to"
 	s.fs.bufferPool.max = 20*1024*1024
