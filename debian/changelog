@@ -1,3 +1,10 @@
+geesefs (0.41.1) unstable; urgency=medium
+
+  * Fix reads possibly trying to read beyond server EOF of an extended file
+  * Add --prefer-patch-uploads option
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Thu, 30 May 2024 14:53:05 +0300
+
 geesefs (0.41.0) unstable; urgency=medium
 
   * Prevent some situations where a multipart upload could be not completed
