@@ -360,13 +360,21 @@ func (s *S3Backend) detectBucketLocationByHEAD() (err error, isAws bool) {
 }
 
 func (s *S3Backend) testBucket(key string) (err error) {
-	_, err = s.HeadBlob(&HeadBlobInput{Key: key})
+	oldAttempts := s.flags.ReadRetryAttempts
+	if oldAttempts == 0 {
+		// Never wait infinitely for init
+		s.flags.ReadRetryAttempts = 5
+	}
+	err = ReadBackoff(s.flags, func(attempt int) error {
+		_, err := s.HeadBlob(&HeadBlobInput{Key: key});
+		return err
+	})
 	if err != nil {
 		if mapAwsError(err) == syscall.ENOENT {
 			err = nil
 		}
 	}
-
+	s.flags.ReadRetryAttempts = oldAttempts
 	return
 }
 
