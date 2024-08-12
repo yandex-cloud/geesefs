@@ -393,6 +393,10 @@ func (s *S3Backend) Init(key string) error {
 	var isAws bool
 	var err error
 
+	if s.config.NoDetect {
+		return nil
+	}
+
 	if !s.config.RegionSet {
 		err, _ = s.detectBucketLocationByHEAD()
 		if err == nil {
@@ -1187,6 +1191,10 @@ func (s *S3Backend) MultipartBlobAbort(param *MultipartBlobCommitInput) (*Multip
 }
 
 func (s *S3Backend) MultipartExpire(param *MultipartExpireInput) (*MultipartExpireOutput, error) {
+	if s.config.NoExpireMultipart {
+		return &MultipartExpireOutput{}, nil
+	}
+
 	mpu, err := s.ListMultipartUploads(&s3.ListMultipartUploadsInput{
 		Bucket: &s.bucket,
 	})

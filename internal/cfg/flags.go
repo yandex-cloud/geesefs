@@ -254,6 +254,16 @@ MISC OPTIONS:
 			Value: "",
 		},
 
+		cli.BoolFlag{
+			Name:  "no-detect",
+			Usage: "Turn off bucket location and signature algorithm autodetection on start",
+		},
+
+		cli.BoolFlag{
+			Name:  "no-expire-multipart",
+			Usage: "Do not expire multipart uploads older than --multipart-age on start",
+		},
+
 		cli.StringFlag{
 			Name:  "multipart-age",
 			Usage: "Multipart uploads older than this value will be deleted on start",
@@ -946,6 +956,9 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.ListV2        = listType == "2"
 
 		config.MultipartCopyThreshold = uint64(c.Int("multipart-copy-threshold")) * 1024 * 1024
+
+		config.NoExpireMultipart = c.Bool("no-expire-multipart")
+		config.NoDetect = c.Bool("no-detect")
 
 		config.SDKMaxRetries = c.Int("sdk-max-retries")
 		config.SDKMinRetryDelay = c.Duration("sdk-min-retry-delay")

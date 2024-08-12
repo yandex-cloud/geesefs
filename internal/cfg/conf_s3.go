@@ -54,8 +54,11 @@ type S3Config struct {
 	ColdMinSize  uint64
 	MultipartAge time.Duration
 
+	NoExpireMultipart bool
+
 	MultipartCopyThreshold uint64
 
+	NoDetect   bool
 	UseSSE     bool
 	UseKMS     bool
 	KMSKeyID   string
