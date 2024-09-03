@@ -53,6 +53,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -2891,4 +2892,69 @@ func (s *GoofysTest) TestSlurpDisappear(t *C) {
 	t.Assert(in.dir, NotNil)
 	s.setS3(nil)
 	s.assertEntries(t, in, nil)
+}
+
+func (s *GoofysTest) TestListBeforeFlushRename(t *C) {
+	s.fs.flags.StatCacheTTL = 1 * time.Second
+	s.fs.flags.ReadRetryAttempts = 3
+
+	root := s.getRoot(t)
+
+	in, err := root.LookUp("file1", false)
+	t.Assert(err, IsNil)
+	fh, err := in.OpenFile()
+	t.Assert(err, IsNil)
+	err = fh.WriteFile(0, []byte("file1 old version"), true)
+	t.Assert(err, IsNil)
+	fh.Release()
+	err = in.SyncFile()
+	t.Assert(err, IsNil)
+
+	in, fh, err = root.Create("file1.new")
+	t.Assert(err, IsNil)
+	err = fh.WriteFile(0, []byte("hello world"), true)
+	t.Assert(err, IsNil)
+	fh.Release()
+	err = in.SyncFile()
+	t.Assert(err, IsNil)
+
+	// Pause flushing and rename file1.new -> file1
+	atomic.AddInt64(&s.fs.activeFlushers, s.fs.flags.MaxFlushers)
+	err = root.Rename("file1.new", root, "file1")
+	t.Assert(err, IsNil)
+
+	// Sleep 1 second to make file1 metadata cache expire and perform a listing
+	// Without renameInProgress in inode.SetFromBlobItem() it was detecting a conflict and
+	// rolling back the file state. Even worse, it looped forever in retryRead() without
+	// ReadRetryAttempts = 3, because it retries io.EOF...
+	time.Sleep(1 * time.Second)
+
+	// Check that file1 isn't rolled back to the old content
+	in, err = root.LookUp("file1", false)
+	t.Assert(err, IsNil)
+	fh, err = in.OpenFile()
+	t.Assert(err, IsNil)
+	bufs, nread, err := fh.ReadFile(0, 4096)
+	t.Assert(len(bufs), Equals, 1)
+	t.Assert(string(bufs[0]), Equals, "hello world")
+	t.Assert(nread, Equals, 11)
+	t.Assert(err, IsNil)
+	fh.Release()
+
+	// Resume flushing
+	atomic.AddInt64(&s.fs.activeFlushers, -s.fs.flags.MaxFlushers)
+	s.fs.WakeupFlusher()
+	err = in.SyncFile()
+	t.Assert(err, IsNil)
+
+	// Check again
+	time.Sleep(1 * time.Second)
+	fh, err = in.OpenFile()
+	t.Assert(err, IsNil)
+	bufs, nread, err = fh.ReadFile(0, 4096)
+	t.Assert(len(bufs), Equals, 1)
+	t.Assert(string(bufs[0]), Equals, "hello world")
+	t.Assert(nread, Equals, 11)
+	t.Assert(err, IsNil)
+	fh.Release()
 }
