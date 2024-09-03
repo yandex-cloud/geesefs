@@ -1,3 +1,11 @@
+geesefs (0.41.2) unstable; urgency=medium
+
+  * Pass FUSE -o group_id from setgid (related to #73)
+  * Fix conflicts incorrectly detected for renamed files leading to updates being thrown away
+  * Allow to disable optional initialization steps: --no-multipart-expire --no-detect
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Tue, 03 Sep 2024 13:17:29 +0300
+
 geesefs (0.41.1) unstable; urgency=medium
 
   * Fix reads possibly trying to read beyond server EOF of an extended file
