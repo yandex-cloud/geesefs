@@ -888,6 +888,11 @@ func convertFuseOptions(flags *cfg.FlagStorage) map[string]string {
 			optMap["user_id"] = fmt.Sprintf("%v", flags.Setuid)
 		}
 	}
+	if flags.Setgid > 0 {
+		if _, ok := optMap["group_id"]; !ok {
+			optMap["group_id"] = fmt.Sprintf("%v", flags.Setgid)
+		}
+	}
 	return optMap
 }
 
