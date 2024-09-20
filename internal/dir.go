@@ -1938,7 +1938,7 @@ func (parent *Inode) LookUpCached(name string) (inode *Inode, err error) {
 }
 
 func (parent *Inode) recheckInode(inode *Inode, name string) (newInode *Inode, err error) {
-	newInode, err = parent.LookUp(name, inode == nil)
+	newInode, err = parent.LookUp(name, inode == nil && !parent.fs.flags.NoPreloadDir)
 	if err != nil {
 		if inode != nil {
 			parent.removeChild(inode)

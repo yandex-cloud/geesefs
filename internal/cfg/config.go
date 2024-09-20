@@ -104,6 +104,7 @@ type FlagStorage struct {
 	UsePatch              bool
 	DropPatchConflicts    bool
 	PreferPatchUploads    bool
+	NoPreloadDir          bool
 
 	// Debugging
 	DebugMain  bool

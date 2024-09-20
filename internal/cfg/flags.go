@@ -348,6 +348,15 @@ MISC OPTIONS:
 		},
 
 		cli.BoolFlag{
+			Name:  "no-preload-dir",
+			Usage: "Disable directory listing pre-loading when you open individual files"+
+				" and don't do any READDIR calls. Default is to always pre-load listing"+
+				" which helps in a lot of cases, for example when you use rsync. Note"+
+				" that you should also enable --no-implicit-dir if you want to fully avoid"+
+				" ListObjects requests during file lookups.",
+		},
+
+		cli.BoolFlag{
 			Name:  "no-implicit-dir",
 			Usage: "Assume all directory objects (\"dir/\") exist (default: off)",
 		},
@@ -878,6 +887,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		UsePatch:               c.Bool("enable-patch"),
 		DropPatchConflicts:     c.Bool("drop-patch-conflicts"),
 		PreferPatchUploads:     c.Bool("prefer-patch-uploads"),
+		NoPreloadDir:           c.Bool("no-preload-dir"),
 
 		// Common Backend Config
 		Endpoint:               c.String("endpoint"),
