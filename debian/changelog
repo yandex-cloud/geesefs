@@ -1,3 +1,9 @@
+geesefs (0.41.3) unstable; urgency=medium
+
+  * Allow to disable directory listing pre-loading when looking up individual files
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 20 Sep 2024 12:38:50 +0300
+
 geesefs (0.41.2) unstable; urgency=medium
 
   * Pass FUSE -o group_id from setgid (related to #73)
