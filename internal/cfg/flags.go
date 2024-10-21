@@ -317,6 +317,11 @@ MISC OPTIONS:
 			Value: 300 * time.Second,
 			Usage: "Maximum delay for AWS SDK retries of throttled requests.",
 		},
+
+		cli.BoolFlag{
+			Name:  "no-verify-ssl",
+			Usage: "skip verify check ssl for s3",
+		},
 	}
 
 	tuningFlags := []cli.Flag{
@@ -888,6 +893,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		DropPatchConflicts:     c.Bool("drop-patch-conflicts"),
 		PreferPatchUploads:     c.Bool("prefer-patch-uploads"),
 		NoPreloadDir:           c.Bool("no-preload-dir"),
+		NoVerifySSL:            c.Bool("no-verify-ssl"),
 
 		// Common Backend Config
 		Endpoint:               c.String("endpoint"),
