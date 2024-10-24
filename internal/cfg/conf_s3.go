@@ -17,6 +17,7 @@ package cfg
 
 import (
 	"crypto/md5"
+	`crypto/tls`
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -104,11 +105,19 @@ func (c *S3Config) Init() *S3Config {
 }
 
 func (c *S3Config) ToAwsConfig(flags *FlagStorage) (*aws.Config, error) {
+	tr := &defaultHTTPTransport
+	if flags.NoVerifySSL {
+		if tr.TLSClientConfig != nil {
+			tr.TLSClientConfig.InsecureSkipVerify = true
+		} else {
+			tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		}
+	}
 	awsConfig := (&aws.Config{
 		Region: &c.Region,
 		Logger: GetLogger("s3"),
 	}).WithHTTPClient(&http.Client{
-		Transport: &defaultHTTPTransport,
+		Transport: tr,
 		Timeout:   flags.HTTPTimeout,
 	})
 	if flags.DebugS3 {
