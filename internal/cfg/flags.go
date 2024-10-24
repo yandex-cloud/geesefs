@@ -320,7 +320,7 @@ MISC OPTIONS:
 
 		cli.BoolFlag{
 			Name:  "no-verify-ssl",
-			Usage: "skip verify check ssl for s3",
+			Usage: "Skip verify check ssl for s3",
 		},
 	}
 
