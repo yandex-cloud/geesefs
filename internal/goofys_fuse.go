@@ -508,6 +508,20 @@ func (fs *GoofysFuse) SyncFile(
 	return
 }
 
+func (fs *GoofysFuse) SyncFS(
+	ctx context.Context,
+	op *fuseops.SyncFSOp) (err error) {
+
+	atomic.AddInt64(&fs.stats.metadataWrites, 1)
+
+	if !fs.flags.IgnoreFsync {
+		err = fs.SyncTree(nil)
+		err = mapAwsError(err)
+	}
+
+	return
+}
+
 func (fs *GoofysFuse) FlushFile(
 	ctx context.Context,
 	op *fuseops.FlushFileOp) (err error) {
