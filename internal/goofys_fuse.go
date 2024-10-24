@@ -557,7 +557,7 @@ func (fs *GoofysFuse) CreateFile(
 		return err
 	}
 
-	inode.setFileMode(op.Mode)
+	inode.SetAttributes(nil, &op.Mode, nil, &op.OpContext.Uid, &op.OpContext.Gid)
 
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
@@ -609,7 +609,7 @@ func (fs *GoofysFuse) MkNode(
 		fh.Release()
 	}
 	inode.Attributes.Rdev = op.Rdev
-	inode.setFileMode(op.Mode)
+	inode.SetAttributes(nil, &op.Mode, nil, &op.OpContext.Uid, &op.OpContext.Gid)
 
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
@@ -651,6 +651,7 @@ func (fs *GoofysFuse) MkDir(
 	} else {
 		inode.Attributes.Mode = os.ModeDir | fs.flags.DirMode
 	}
+	inode.SetAttributes(nil, nil, nil, &op.OpContext.Uid, &op.OpContext.Gid)
 
 	op.Entry.Child = inode.Id
 	op.Entry.Attributes = inode.InflateAttributes()
