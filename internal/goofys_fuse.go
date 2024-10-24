@@ -496,9 +496,9 @@ func (fs *GoofysFuse) SyncFile(
 		in := fs.getInodeOrDie(op.Inode)
 
 		if in.Id == fuseops.RootInodeID {
-			err = fs.SyncFS(nil)
+			err = fs.SyncTree(nil)
 		} else if in.isDir() {
-			err = fs.SyncFS(in)
+			err = fs.SyncTree(in)
 		} else {
 			err = in.SyncFile()
 		}

@@ -997,7 +997,7 @@ func (s *GoofysTest) TestRenameOpenedUnmodified(t *C) {
 
 	fh.Release()
 
-	err = s.fs.SyncFS(nil)
+	err = s.fs.SyncTree(nil)
 	t.Assert(err, IsNil)
 
 	// Check that the file is actually renamed

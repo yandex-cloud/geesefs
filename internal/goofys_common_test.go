@@ -345,7 +345,7 @@ func (s *GoofysTest) TearDownTest(t *C) {
 	}
 
 	if s.fs != nil {
-		s.fs.SyncFS(nil)
+		s.fs.SyncTree(nil)
 		s.fs.Shutdown()
 	}
 

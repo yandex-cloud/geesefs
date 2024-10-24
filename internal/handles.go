@@ -602,7 +602,7 @@ func (inode *Inode) setFileMode(newMode os.FileMode) (changed bool, err error) {
 		}
 	}
 	if inode.Attributes.Mode != defaultMode {
-		err = inode.setUserMeta(inode.fs.flags.FileModeAttr, []byte(fmt.Sprintf("%d", fuseops.ConvertGolangMode(inode.Attributes.Mode))))
+		err = inode.setUserMeta(inode.fs.flags.FileModeAttr, []byte(fmt.Sprintf("%d", fuseops.ConvertGoMode(inode.Attributes.Mode))))
 	} else {
 		err = inode.setUserMeta(inode.fs.flags.FileModeAttr, nil)
 	}
@@ -892,7 +892,7 @@ func (inode *Inode) DumpThis(withBuffers bool) (children []*Inode) {
 	}
 	if inode.isDir() && inode.Attributes.Mode != (os.ModeDir | fs.flags.DirMode) ||
 		!inode.isDir() && inode.Attributes.Mode != fs.flags.FileMode {
-		dataMap["mode"] = fuseops.ConvertGolangMode(inode.Attributes.Mode)
+		dataMap["mode"] = fuseops.ConvertGoMode(inode.Attributes.Mode)
 	}
 
 	dataMap["attrTime"] = inode.AttrTime.Unix()

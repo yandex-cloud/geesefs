@@ -1144,7 +1144,7 @@ func (fs *Goofys) completeInflightListing(id int) map[string]bool {
 	return m
 }
 
-func (fs *Goofys) SyncFS(parent *Inode) (err error) {
+func (fs *Goofys) SyncTree(parent *Inode) (err error) {
 	if parent == nil || parent.Id == fuseops.RootInodeID {
 		log.Infof("Flushing all changes")
 		parent = nil

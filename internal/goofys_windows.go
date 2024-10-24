@@ -421,7 +421,7 @@ func (fs *GoofysWin) Create(path string, flags int, mode uint32) (ret int, fhId 
 	}
 
 	if fs.flags.FlushFilename != "" && child == fs.flags.FlushFilename {
-		err = fs.SyncFS(parent)
+		err = fs.SyncTree(parent)
 		if err == nil {
 			err = syscall.ENOENT
 		}
@@ -473,7 +473,7 @@ func (fs *GoofysWin) Open(path string, flags int) (ret int, fhId uint64) {
 				return mapWinError(err), 0
 			}
 			if err == nil {
-				err = fs.SyncFS(parent)
+				err = fs.SyncTree(parent)
 			}
 			if err == nil {
 				err = syscall.ENOENT
@@ -526,7 +526,7 @@ func (fs *GoofysWin) Getattr(path string, stat *fuse.Stat_t, fh uint64) (ret int
 }
 
 func makeFuseAttributes(attr *fuseops.InodeAttributes, stat *fuse.Stat_t) {
-	stat.Mode = fuseops.ConvertGolangMode(attr.Mode)
+	stat.Mode = fuseops.ConvertGoMode(attr.Mode)
 	stat.Nlink = 1
 	stat.Uid = attr.Uid
 	stat.Gid = attr.Gid
@@ -693,9 +693,9 @@ func (fs *GoofysWin) Fsync(path string, datasync bool, fhId uint64) (ret int) {
 			}
 		}
 		if inode.Id == fuseops.RootInodeID {
-			err = fs.SyncFS(nil)
+			err = fs.SyncTree(nil)
 		} else if inode.isDir() {
-			err = fs.SyncFS(inode)
+			err = fs.SyncTree(inode)
 		} else {
 			err = inode.SyncFile()
 		}
