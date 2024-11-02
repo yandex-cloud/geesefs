@@ -909,6 +909,7 @@ func MountCluster(
 		ErrorLogger:             cfg.GetStdLogger(cfg.NewLogger("fuse"), logrus.ErrorLevel),
 		DisableWritebackCaching: true,
 		UseVectoredRead:         true,
+		FuseImpl:                fuse.FUSEImplMacFUSE,
 	}
 
 	if flags.DebugFuse {
