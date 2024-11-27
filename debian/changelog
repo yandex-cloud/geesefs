@@ -1,3 +1,9 @@
+geesefs (0.42.2) unstable; urgency=medium
+
+  * Fix Create on Windows not returning EEXIST for existing files
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Wed, 27 Nov 2024 17:18:53 +0300
+
 geesefs (0.42.1) unstable; urgency=medium
 
   * Disable new FUSE-T on macos (came from jacobsa/fuse library)
