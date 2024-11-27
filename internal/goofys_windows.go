@@ -122,6 +122,10 @@ func mapWinError(err error) int {
 	}
 	err = mapAwsError(err)
 	switch err {
+	case syscall.EACCES:
+		return -fuse.EACCES
+	case syscall.EAGAIN:
+		return -fuse.EAGAIN
 	case syscall.EBUSY:
 		return -fuse.EBUSY
 	case syscall.ECONNRESET:
@@ -130,44 +134,42 @@ func mapWinError(err error) int {
 		return -fuse.EEXIST
 	case syscall.EFBIG:
 		return -fuse.EFBIG
+	case syscall.EINTR:
+		return -fuse.EINTR
+	case syscall.EINVAL:
+		return -fuse.EINVAL
+	case syscall.EIO:
+		return -fuse.EIO
 	case syscall.EISDIR:
 		return -fuse.EISDIR
 	case syscall.ENODATA:
 		return -fuse.ENODATA
 	case syscall.ENODEV:
 		return -fuse.ENODEV
+	case syscall.ENOENT:
+		return -fuse.ENOENT
 	case syscall.ENOMEM:
 		return -fuse.ENOMEM
 	case syscall.ENOSYS:
 		return -fuse.ENOSYS
-	case syscall.ENOTEMPTY:
-		return -fuse.ENOTEMPTY
-	case syscall.ENXIO:
-		return -fuse.ENXIO
 	case syscall.ENOTDIR:
 		return -fuse.ENOTDIR
-	case syscall.EPERM:
-		return -fuse.EPERM
-	case syscall.EINVAL:
-		return -fuse.EINVAL
-	case syscall.EACCES:
-		return -fuse.EACCES
-	case syscall.ENOENT:
-		return -fuse.ENOENT
+	case syscall.ENOTEMPTY:
+		return -fuse.ENOTEMPTY
 	case syscall.ENOTSUP:
 		return -fuse.ENOTSUP
-	case syscall.EINTR:
-		return -fuse.EINTR
-	case syscall.ERANGE:
-		return -fuse.ERANGE
-	case syscall.EAGAIN:
-		return -fuse.EAGAIN
-	case syscall.ESTALE:
-		return -fuse.EINVAL
-	case syscall.ESPIPE:
-		return -fuse.ESPIPE
+	case syscall.ENXIO:
+		return -fuse.ENXIO
 	case syscall.EOPNOTSUPP:
 		return -fuse.EOPNOTSUPP
+	case syscall.EPERM:
+		return -fuse.EPERM
+	case syscall.ERANGE:
+		return -fuse.ERANGE
+	case syscall.ESPIPE:
+		return -fuse.ESPIPE
+	case syscall.ESTALE:
+		return -fuse.EINVAL
 	default:
 		return -fuse.EIO
 	}
