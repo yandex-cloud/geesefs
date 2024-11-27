@@ -122,6 +122,32 @@ func mapWinError(err error) int {
 	}
 	err = mapAwsError(err)
 	switch err {
+	case syscall.EBUSY:
+		return -fuse.EBUSY
+	case syscall.ECONNRESET:
+		return -fuse.ECONNRESET
+	case syscall.EEXIST:
+		return -fuse.EEXIST
+	case syscall.EFBIG:
+		return -fuse.EFBIG
+	case syscall.EISDIR:
+		return -fuse.EISDIR
+	case syscall.ENODATA:
+		return -fuse.ENODATA
+	case syscall.ENODEV:
+		return -fuse.ENODEV
+	case syscall.ENOMEM:
+		return -fuse.ENOMEM
+	case syscall.ENOSYS:
+		return -fuse.ENOSYS
+	case syscall.ENOTEMPTY:
+		return -fuse.ENOTEMPTY
+	case syscall.ENXIO:
+		return -fuse.ENXIO
+	case syscall.ENOTDIR:
+		return -fuse.ENOTDIR
+	case syscall.EPERM:
+		return -fuse.EPERM
 	case syscall.EINVAL:
 		return -fuse.EINVAL
 	case syscall.EACCES:
@@ -138,6 +164,8 @@ func mapWinError(err error) int {
 		return -fuse.EAGAIN
 	case syscall.ESTALE:
 		return -fuse.EINVAL
+	case syscall.ESPIPE:
+		return -fuse.ESPIPE
 	case syscall.EOPNOTSUPP:
 		return -fuse.EOPNOTSUPP
 	default:
@@ -436,7 +464,7 @@ func (fs *GoofysWin) Create(path string, flags int, mode uint32) (ret int, fhId 
 		return mapWinError(err), 0
 	}
 
-	inode, fh, err := parent.CreateOrOpen(child, true)
+	inode, fh, err := parent.Create(child)
 	if err != nil {
 		return mapWinError(err), 0
 	}
