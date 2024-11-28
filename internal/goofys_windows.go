@@ -990,7 +990,7 @@ func (fs *GoofysWin) Notify(notifications []interface{}) {
 			in.mu.Lock()
 			p := in.FullName()
 			in.mu.Unlock()
-			fs.host.Notify(p+"/"+child, op)
+			fs.host.Notify("/"+p+"/"+child, op)
 		}
 	}
 }
