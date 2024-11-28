@@ -106,6 +106,7 @@ type FlagStorage struct {
 	PreferPatchUploads    bool
 	NoPreloadDir          bool
 	NoVerifySSL           bool
+	WinRefreshDirs        bool
 
 	// Debugging
 	DebugMain  bool

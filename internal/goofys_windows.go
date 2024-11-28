@@ -76,6 +76,9 @@ func NewGoofysWin(fs *Goofys) *GoofysWin {
 	fs.NotifyCallback = func(notifications []interface{}) {
 		go fsint.Notify(notifications)
 	}
+	if fs.flags.WinRefreshDirs {
+		go fsint.WinDirRefresher()
+	}
 	return fsint
 }
 
@@ -991,6 +994,34 @@ func (fs *GoofysWin) Notify(notifications []interface{}) {
 			p := in.FullName()
 			in.mu.Unlock()
 			fs.host.Notify("/"+p+"/"+child, op)
+		}
+	}
+}
+
+func (fs *GoofysWin) WinDirRefresher() {
+	for atomic.LoadInt32(&fs.shutdown) == 0 {
+		select {
+		case <-time.After(1 * time.Second):
+		case <-fs.shutdownCh:
+			return
+		}
+		fs.mu.Lock()
+		var dirs []*Inode
+		for _, dh := range fs.dirHandles {
+			dirs = append(dirs, dh.inode)
+		}
+		fs.mu.Unlock()
+		expireUnix := time.Now().Add(-fs.flags.StatCacheTTL)
+		notifications := make(map[string]struct{})
+		for _, dir := range dirs {
+			dir.mu.Lock()
+			if dir.Parent != nil && dir.dir.DirTime.Before(expireUnix) {
+				notifications["/"+dir.FullName()] = struct{}{}
+			}
+			dir.mu.Unlock()
+		}
+		for dir := range notifications {
+			fs.host.Notify(dir, fuse.NOTIFY_CHMOD | fuse.NOTIFY_CHOWN | fuse.NOTIFY_UTIME | fuse.NOTIFY_CHFLAGS | fuse.NOTIFY_TRUNCATE)
 		}
 	}
 }

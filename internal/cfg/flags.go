@@ -140,6 +140,11 @@ MISC OPTIONS:
 			Value: gid,
 			Usage: "Drop root group and change to this group ID (defaults to --gid).",
 		},
+
+		cli.BoolFlag{
+			Name:  "refresh-dirs",
+			Usage: "Automatically refresh open directories using notifications under Windows",
+		},
 	}
 
 	s3Flags := []cli.Flag{
@@ -845,6 +850,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		Gid:                    uint32(c.Int("gid")),
 		Setuid:                 c.Int("setuid"),
 		Setgid:                 c.Int("setgid"),
+		WinRefreshDirs:         c.Bool("refresh-dirs"),
 
 		// Tuning,
 		MemoryLimit:            uint64(1024*1024*c.Int("memory-limit")),
