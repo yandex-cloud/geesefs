@@ -1,3 +1,10 @@
+geesefs (0.42.3) unstable; urgency=medium
+
+  * Add --refresh-dirs option for Windows as an ugly solution to refresh files
+    in Explorer :)
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 29 Nov 2024 15:09:09 +0300
+
 geesefs (0.42.2) unstable; urgency=medium
 
   * Fix Create on Windows not returning EEXIST for existing files
