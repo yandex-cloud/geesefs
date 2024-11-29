@@ -1421,15 +1421,15 @@ func (inode *Inode) resetCache() {
 }
 
 func (inode *Inode) abortMultipart() {
-		cloud, key := inode.cloud()
-		go func(mpu *MultipartBlobCommitInput) {
-			_, abortErr := cloud.MultipartBlobAbort(mpu)
-			if abortErr != nil {
-				log.Warnf("Failed to abort multi-part upload of object %v: %v", key, abortErr)
-			}
-		}(inode.mpu)
-		inode.mpu = nil
-	}
+	cloud, key := inode.cloud()
+	go func(mpu *MultipartBlobCommitInput) {
+		_, abortErr := cloud.MultipartBlobAbort(mpu)
+		if abortErr != nil {
+			log.Warnf("Failed to abort multi-part upload of object %v: %v", key, abortErr)
+		}
+	}(inode.mpu)
+	inode.mpu = nil
+}
 
 func (inode *Inode) flushSmallObject() {
 
