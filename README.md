@@ -150,6 +150,13 @@ You can also use a different path to the credentials file by adding `,--shared-c
 
 See also: [Instruction for Azure Blob Storage](https://github.com/yandex-cloud/geesefs/blob/master/README-azure.md).
 
+Systems with SELinux enabled automatically relabel mounted directories with the label 'fusefs_t.' To retain the original label, utilize the 'context' mount option:
+
+```
+bucket    /mnt/mountpoint    fuse.geesefs    context="system_u:object_r:<YOUR_LABEL>:s0",_netdev,allow_other,--file-mode=0666,--dir-mode=0777    0    0
+```
+
+
 ## Windows
 
 Everything is the same after installing [WinFSP](https://winfsp.dev) and GeeseFS, except that GeeseFS
