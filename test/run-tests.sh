@@ -11,6 +11,6 @@ fi
 . `dirname $0`/run-proxy.sh
 
 # run test in `go test` local mode so streaming output works
-cd internal
+cd core
 go test -v -timeout $TIMEOUT -check.vv $T
 exit $?

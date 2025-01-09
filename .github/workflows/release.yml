@@ -33,7 +33,7 @@ jobs:
       run: env CGO_ENABLED=0 GOOS=windows go build -o geesefs-win-x64.exe -v
 
     - name: Build tests
-      run: go test -c github.com/yandex-cloud/geesefs/internal -o geesefs-tests-linux-amd64
+      run: go test -c github.com/yandex-cloud/geesefs/core -o geesefs-tests-linux-amd64
 
     - name: Publish to S3
       run: |

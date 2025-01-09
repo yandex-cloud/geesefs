@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+option go_package = "github.com/yandex-cloud/geesefs/core/pb";
+
+service Recovery {
+    rpc Unmount(UnmountRequest) returns (UnmountResponse);
+}
+
+message UnmountRequest {
+    
+}
+
+message UnmountResponse {
+
+}
