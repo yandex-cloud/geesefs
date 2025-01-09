@@ -15,16 +15,16 @@
 
 // Tests for a mounted Windows WinFSP-FUSE FS
 
-// +build windows
+//go:build windows
 
 package core
 
 import (
 	"errors"
+	. "gopkg.in/check.v1"
 	"os"
 	"syscall"
 	"time"
-	. "gopkg.in/check.v1"
 )
 
 func (s *GoofysTest) SetUpSuite(t *C) {
@@ -58,7 +58,7 @@ func (s *GoofysTest) umount(t *C, mountPoint string) {
 }
 
 func FsyncDir(dir string) error {
-	fh, err := os.Create(dir+"/.fsyncdir")
+	fh, err := os.Create(dir + "/.fsyncdir")
 	if errors.Is(err, syscall.ENOENT) {
 		return nil
 	}

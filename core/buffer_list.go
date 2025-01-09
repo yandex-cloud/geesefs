@@ -78,8 +78,8 @@ type BufferList struct {
 
 type FileBuffer struct {
 	queueId uint64
-	offset uint64
-	length uint64
+	offset  uint64
+	length  uint64
 	// Chunk state: 1 = clean. 2 = dirty. 3 = part flushed, but not finalized
 	// 4 = flushed, not finalized, but removed from memory
 	state BufferState
@@ -194,7 +194,7 @@ func (l *BufferList) EvictFromMemory(buf *FileBuffer) (allocated int64, deleted 
 			prev.onDisk == buf.onDisk {
 			l.unqueue(buf)
 			l.unqueue(prev)
-			l.at.Delete(prev.offset+prev.length)
+			l.at.Delete(prev.offset + prev.length)
 			buf.length += prev.length
 			buf.offset = prev.offset
 			l.queue(buf)
@@ -202,7 +202,7 @@ func (l *BufferList) EvictFromMemory(buf *FileBuffer) (allocated int64, deleted 
 		}
 	} else if buf.state == BUF_CLEAN {
 		l.unqueue(buf)
-		l.at.Delete(buf.offset+buf.length)
+		l.at.Delete(buf.offset + buf.length)
 		deleted = true
 	} else if buf.state == BUF_FLUSHED_FULL {
 		// A flushed buffer can be removed at a cost of finalizing multipart upload
@@ -220,7 +220,7 @@ func (l *BufferList) EvictFromMemory(buf *FileBuffer) (allocated int64, deleted 
 		})
 		if prev != nil && prev.offset+prev.length == buf.offset && prev.state == buf.state {
 			l.unqueue(prev)
-			l.at.Delete(prev.offset+prev.length)
+			l.at.Delete(prev.offset + prev.length)
 			buf.length += prev.length
 			buf.offset = prev.offset
 			deleted = true
@@ -259,7 +259,7 @@ func (l *BufferList) unqueue(b *FileBuffer) {
 	}
 	if b.state == BUF_DIRTY {
 		sp := l.helpers.PartNum(b.offset)
-		ep := l.helpers.PartNum(b.offset+b.length-1)
+		ep := l.helpers.PartNum(b.offset + b.length - 1)
 		for i := sp; i < ep+1; i++ {
 			p := l.dirtyParts[i]
 			if p == nil || p.refcnt == 0 {
@@ -303,7 +303,7 @@ func (l *BufferList) queue(b *FileBuffer) {
 			l.dirtyParts = make(map[uint64]*dirtyPart)
 		}
 		sp := l.helpers.PartNum(b.offset)
-		ep := l.helpers.PartNum(b.offset+b.length-1)
+		ep := l.helpers.PartNum(b.offset + b.length - 1)
 		for i := sp; i <= ep; i++ {
 			l.referenceDirtyPart(i)
 		}
@@ -324,8 +324,8 @@ func (l *BufferList) requeueSplit(left *FileBuffer) {
 			l.dirtyParts = make(map[uint64]*dirtyPart)
 		}
 		// most refcounts don't change - except if splitting not at part boundary
-		lbound := l.helpers.PartNum(left.offset+left.length-1)
-		rbound := l.helpers.PartNum(left.offset+left.length)
+		lbound := l.helpers.PartNum(left.offset + left.length - 1)
+		rbound := l.helpers.PartNum(left.offset + left.length)
 		if lbound == rbound {
 			l.referenceDirtyPart(lbound)
 		}
@@ -377,7 +377,7 @@ func (l *BufferList) delete(b *FileBuffer) (allocated int64) {
 		b.ptr = nil
 		b.data = nil
 	}
-	l.at.Delete(b.offset+b.length)
+	l.at.Delete(b.offset + b.length)
 	l.unqueue(b)
 	return
 }
@@ -801,14 +801,14 @@ func mergeRA(rr []Range, readAhead uint64, readMerge uint64) []Range {
 			rr[prev].End = rr[i].End
 		} else {
 			prev++
-			sz := rr[i].End-rr[i].Start
+			sz := rr[i].End - rr[i].Start
 			if sz < readAhead {
 				sz = readAhead
 			}
-			rr[prev] = Range{Start: rr[i].Start, End: rr[i].Start+sz}
+			rr[prev] = Range{Start: rr[i].Start, End: rr[i].Start + sz}
 		}
 	}
-	return rr[0:prev+1]
+	return rr[0 : prev+1]
 }
 
 func splitRA(rr []Range, maxPart uint64) []Range {
@@ -821,7 +821,7 @@ func splitRA(rr []Range, maxPart uint64) []Range {
 				split = true
 			}
 			for off := rr[i].Start; off < rr[i].End; off += maxPart {
-				res = append(res, Range{Start: off, End: off+maxPart})
+				res = append(res, Range{Start: off, End: off + maxPart})
 			}
 			res[len(res)-1].End = rr[i].End
 		} else if split {

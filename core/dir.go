@@ -33,7 +33,7 @@ import (
 type SlurpGap struct {
 	// Gap is (start < key <= end)
 	start, end string
-	loadTime time.Time
+	loadTime   time.Time
 }
 
 type DirInodeData struct {
@@ -46,9 +46,9 @@ type DirInodeData struct {
 	DirTime         time.Time
 	ImplicitDir     bool
 
-	listMarker string
-	lastFromCloud *string
-	listDone bool
+	listMarker       string
+	lastFromCloud    *string
+	listDone         bool
 	forgetDuringList bool
 	// Time at which we started fetching child entries
 	// from cloud for this handle.
@@ -56,10 +56,10 @@ type DirInodeData struct {
 
 	ModifiedChildren int64
 
-	Children []*Inode
+	Children        []*Inode
 	DeletedChildren map[string]*Inode
-	Gaps []*SlurpGap
-	handles []*DirHandle
+	Gaps            []*SlurpGap
+	handles         []*DirHandle
 }
 
 // Returns the position of first char < '/' in `inp` after prefixLen + any continued '/' characters.
@@ -82,12 +82,12 @@ func locateLtSlash(inp string, prefixLen int) int {
 
 type DirHandle struct {
 	inode *Inode
-	mu sync.Mutex // everything below is protected by mu
+	mu    sync.Mutex // everything below is protected by mu
 	// readdir() is allowed either at zero (restart from the beginning)
 	// or from the previous offset
 	lastExternalOffset fuseops.DirOffset
 	lastInternalOffset int
-	lastName string
+	lastName           string
 }
 
 func NewDirHandle(inode *Inode) (dh *DirHandle) {
@@ -250,7 +250,7 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, sealEnd b
 	if startAfter != "" {
 		startWith = &startAfter
 	} else if key != "" {
-		startWith = PString(key+"/")
+		startWith = PString(key + "/")
 	}
 
 	myList := parent.fs.addInflightListing()
@@ -355,14 +355,14 @@ func (dir *DirInodeData) markGapLoaded(start, end string) {
 		dir.Gaps[endPos-1].start = end
 		endPos--
 	}
-	l := len(dir.Gaps)-(endPos-pos)
+	l := len(dir.Gaps) - (endPos - pos)
 	if pos == endPos {
 		dir.Gaps = append(dir.Gaps, nil)
 	}
 	copy(dir.Gaps[pos+1:], dir.Gaps[endPos:])
 	dir.Gaps[pos] = &SlurpGap{
-		start: start,
-		end: end,
+		start:    start,
+		end:      end,
 		loadTime: time.Now(),
 	}
 	dir.Gaps = dir.Gaps[0:l]
@@ -378,7 +378,7 @@ func (dir *DirInodeData) checkGapLoaded(key string, newerThan time.Time) bool {
 			return true
 		} else {
 			copy(dir.Gaps[pos:], dir.Gaps[pos+1:])
-			dir.Gaps = dir.Gaps[0:len(dir.Gaps)-1]
+			dir.Gaps = dir.Gaps[0 : len(dir.Gaps)-1]
 		}
 	}
 	return false
@@ -518,7 +518,7 @@ func intelligentListCut(resp *ListBlobsOutput, flags *cfg.FlagStorage, cloud Sto
 	}
 	isPrefix := 0
 	itemPos, prefixPos := len(resp.Items), len(resp.Prefixes)
-	count := itemPos+prefixPos
+	count := itemPos + prefixPos
 	lastName, isPrefix = maxName(resp, itemPos, prefixPos)
 	lastLtPos := locateLtSlash(lastName, len(prefix))
 	if lastLtPos >= 0 {
@@ -526,7 +526,7 @@ func intelligentListCut(resp *ListBlobsOutput, flags *cfg.FlagStorage, cloud Sto
 		ok := false
 		for itemPos+prefixPos > count/2 {
 			prefixPos -= isPrefix
-			itemPos -= (1-isPrefix)
+			itemPos -= (1 - isPrefix)
 			prev, isPrefix = maxName(resp, itemPos, prefixPos)
 			ltPos := locateLtSlash(prev, len(prefix))
 			if ltPos < 0 || prefixLarger(prev, name, ltPos) {
@@ -549,7 +549,7 @@ func intelligentListCut(resp *ListBlobsOutput, flags *cfg.FlagStorage, cloud Sto
 			// \xEF\xBF\xBD = 0xFFFD in UTF-8 = largest valid symbol of 2-byte UTF-8
 			// So, > xxx.\xEF\xBF\xBF is the same as >= xxx/
 			dirobj, err := RetryListBlobs(flags, cloud, &ListBlobsInput{
-				StartAfter: PString(lastName[0:lastLtPos]+".\xEF\xBF\xBD"),
+				StartAfter: PString(lastName[0:lastLtPos] + ".\xEF\xBF\xBD"),
 				MaxKeys:    PUInt32(1),
 			})
 			if err != nil {
@@ -558,7 +558,7 @@ func intelligentListCut(resp *ListBlobsOutput, flags *cfg.FlagStorage, cloud Sto
 			if len(dirobj.Items) > 0 {
 				checkedName := *dirobj.Items[0].Key
 				if len(checkedName) >= lastLtPos+1 && checkedName[0:lastLtPos+1] == lastName[0:lastLtPos]+"/" {
-					resp.Prefixes = append(resp.Prefixes, BlobPrefixOutput{Prefix: PString(checkedName[0:lastLtPos+1])})
+					resp.Prefixes = append(resp.Prefixes, BlobPrefixOutput{Prefix: PString(checkedName[0 : lastLtPos+1])})
 				}
 			}
 		}
@@ -735,7 +735,7 @@ func (dh *DirHandle) Seek(newOffset fuseops.DirOffset) {
 		dh.lastExternalOffset = newOffset
 		dh.lastInternalOffset = int(newOffset)
 		if dh.lastInternalOffset > 2+len(dh.inode.dir.Children) {
-			dh.lastInternalOffset = 2+len(dh.inode.dir.Children)
+			dh.lastInternalOffset = 2 + len(dh.inode.dir.Children)
 		}
 		if dh.lastInternalOffset == 1 {
 			dh.lastName = "."
@@ -785,8 +785,8 @@ func (parent *Inode) removeExpired(from string) {
 			childTmp.SetCacheState(ST_DEAD)
 			notifications = append(notifications, &fuseops.NotifyDelete{
 				Parent: parent.Id,
-				Child: childTmp.Id,
-				Name: childTmp.Name,
+				Child:  childTmp.Id,
+				Name:   childTmp.Name,
 			})
 			if childTmp.isDir() {
 				childTmp.removeAllChildrenUnlocked()
@@ -807,7 +807,7 @@ func (parent *Inode) removeExpired(from string) {
 func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 	parent := dh.inode
 	if parent.dir == nil {
-		panic("ReadDir non-directory "+parent.FullName())
+		panic("ReadDir non-directory " + parent.FullName())
 	}
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
@@ -858,7 +858,7 @@ func (dh *DirHandle) CloseDir() error {
 	for ; i < len(dh.inode.dir.handles) && dh.inode.dir.handles[i] != dh; i++ {
 	}
 	if i < len(dh.inode.dir.handles) {
-		dh.inode.dir.handles = append(dh.inode.dir.handles[0 : i], dh.inode.dir.handles[i+1 : ]...)
+		dh.inode.dir.handles = append(dh.inode.dir.handles[0:i], dh.inode.dir.handles[i+1:]...)
 		n := atomic.AddInt32(&dh.inode.fileHandles, -1)
 		if n == 0 {
 			dh.inode.Parent.addModified(-1)
@@ -1744,10 +1744,10 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	// Rename on-disk cache entry
 	if fromInode.OnDisk {
 		fs := fromInode.fs
-		oldFileName := fs.flags.CachePath+"/"+fromInode.FullName()
-		newDirName := fs.flags.CachePath+"/"+newParent.FullName()
+		oldFileName := fs.flags.CachePath + "/" + fromInode.FullName()
+		newDirName := fs.flags.CachePath + "/" + newParent.FullName()
 		newFileName := appendChildName(newDirName, to)
-		err := os.MkdirAll(newDirName, fs.flags.CacheFileMode | ((fs.flags.CacheFileMode & 0777) >> 2))
+		err := os.MkdirAll(newDirName, fs.flags.CacheFileMode|((fs.flags.CacheFileMode&0777)>>2))
 		if err == nil {
 			err = os.Rename(oldFileName, newFileName)
 		}
@@ -2000,7 +2000,7 @@ func (parent *Inode) LookUp(name string, doSlurp bool) (*Inode, error) {
 	parent.mu.Lock()
 	skipListing := parent.fs.completeInflightListing(myList)
 	if skipListing == nil || !skipListing[*blob.Key] {
-		parent.insertSubTree((*blob.Key)[prefixLen : ], blob, dirs)
+		parent.insertSubTree((*blob.Key)[prefixLen:], blob, dirs)
 	}
 	inode := parent.findChildUnlocked(name)
 	parent.mu.Unlock()
@@ -2028,11 +2028,11 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 			results <- 1
 		}()
 		if cloud.Capabilities().DirBlob {
-			<- results
+			<-results
 			break
 		}
 		if parent.fs.flags.Cheap {
-			<- results
+			<-results
 			if mapAwsError(objectError) != syscall.ENOENT {
 				break
 			}
@@ -2041,11 +2041,11 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		if !parent.fs.flags.NoDirObject {
 			n++
 			go func() {
-				dirObject, dirError = cloud.HeadBlob(&HeadBlobInput{Key: key+"/"})
+				dirObject, dirError = cloud.HeadBlob(&HeadBlobInput{Key: key + "/"})
 				results <- 2
 			}()
 			if parent.fs.flags.Cheap {
-				<- results
+				<-results
 				if mapAwsError(dirError) != syscall.ENOENT {
 					break
 				}
@@ -2058,12 +2058,12 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 				prefixList, prefixError = RetryListBlobs(parent.fs.flags, cloud, &ListBlobsInput{
 					Delimiter: PString("/"),
 					MaxKeys:   PUInt32(1),
-					Prefix:    PString(key+"/"),
+					Prefix:    PString(key + "/"),
 				})
 				results <- 3
 			}()
 			if parent.fs.flags.Cheap {
-				<- results
+				<-results
 			}
 		}
 
@@ -2073,7 +2073,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 	for n > 0 {
 		n--
 		if !cloud.Capabilities().DirBlob && !parent.fs.flags.Cheap {
-			<- results
+			<-results
 		}
 		if object != nil {
 			return &object.BlobItemOutput, nil
@@ -2083,11 +2083,11 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		}
 		if prefixList != nil && (len(prefixList.Prefixes) != 0 || len(prefixList.Items) != 0) {
 			if len(prefixList.Items) != 0 && (*prefixList.Items[0].Key == key ||
-				(*prefixList.Items[0].Key)[0 : len(key)+1] == key+"/") {
+				(*prefixList.Items[0].Key)[0:len(key)+1] == key+"/") {
 				return &prefixList.Items[0], nil
 			}
 			return &BlobItemOutput{
-				Key: PString(key+"/"),
+				Key: PString(key + "/"),
 			}, nil
 		}
 	}

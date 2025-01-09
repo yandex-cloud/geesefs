@@ -17,7 +17,7 @@ package cfg
 
 import (
 	"crypto/md5"
-	`crypto/tls`
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"net/http"

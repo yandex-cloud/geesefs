@@ -28,13 +28,13 @@ import (
 )
 
 type FileHandle struct {
-	inode *Inode
-	lastReadEnd uint64
-	seqReadSize uint64
+	inode         *Inode
+	lastReadEnd   uint64
+	seqReadSize   uint64
 	lastReadCount uint64
 	lastReadTotal uint64
 	lastReadSizes []uint64
-	lastReadIdx int
+	lastReadIdx   int
 }
 
 // On Linux and MacOS, IOV_MAX = 1024
@@ -76,7 +76,7 @@ func (fs *Goofys) partRange(num uint64) (offset uint64, size uint64) {
 	n := uint64(0)
 	start := uint64(0)
 	for _, s := range fs.flags.PartSizes {
-		if num < n + s.PartCount {
+		if num < n+s.PartCount {
 			return start + (num-n)*s.PartSize, s.PartSize
 		}
 		start += s.PartSize * s.PartCount
@@ -134,7 +134,7 @@ func (inode *Inode) checkPauseWriters() {
 func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err error) {
 	fh.inode.logFuse("WriteFile", offset, len(data))
 
-	end := uint64(offset)+uint64(len(data))
+	end := uint64(offset) + uint64(len(data))
 
 	if end > fh.inode.fs.getMaxFileSize() {
 		// File offset too large
@@ -197,8 +197,8 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 func (inode *Inode) OpenCacheFD() error {
 	fs := inode.fs
 	if inode.DiskCacheFD == nil {
-		cacheFileName := fs.flags.CachePath+"/"+inode.FullName()
-		os.MkdirAll(path.Dir(cacheFileName), fs.flags.CacheFileMode | ((fs.flags.CacheFileMode & 0777) >> 2))
+		cacheFileName := fs.flags.CachePath + "/" + inode.FullName()
+		os.MkdirAll(path.Dir(cacheFileName), fs.flags.CacheFileMode|((fs.flags.CacheFileMode&0777)>>2))
 		var err error
 		inode.DiskCacheFD, err = os.OpenFile(cacheFileName, os.O_RDWR|os.O_CREATE, fs.flags.CacheFileMode)
 		if err != nil {
@@ -248,7 +248,7 @@ func (inode *Inode) loadFromDisk(diskRanges []Range) (allocated int64, err error
 		return
 	}
 	for _, rr := range diskRanges {
-		readSize := rr.End-rr.Start
+		readSize := rr.End - rr.Start
 		data := make([]byte, readSize)
 		_, err = inode.DiskCacheFD.ReadAt(data, int64(rr.Start))
 		if err == nil {
@@ -267,14 +267,14 @@ func (inode *Inode) LoadRange(offset, size uint64, readAheadSize uint64, ignoreM
 		return
 	}
 	if offset+size >= inode.Attributes.Size {
-		size = inode.Attributes.Size-offset
+		size = inode.Attributes.Size - offset
 	}
 	raSize := size
 	if raSize < readAheadSize {
 		raSize = readAheadSize
 	}
 	if offset+raSize > inode.Attributes.Size {
-		raSize = inode.Attributes.Size-offset
+		raSize = inode.Attributes.Size - offset
 	}
 
 	// Collect requests to the server and disk
@@ -389,7 +389,7 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 		buf := make([]byte, bs)
 		done := uint64(0)
 		for done < bs {
-			n, err := resp.Body.Read(buf[done :])
+			n, err := resp.Body.Read(buf[done:])
 			done += uint64(n)
 			if err != nil && (err != io.EOF || done < bs) {
 				return allocated, totalDone, err
@@ -417,8 +417,8 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 // an overwrite would reset the reference count and break locking
 func (inode *Inode) LockRange(offset uint64, size uint64, flushing bool) {
 	inode.readRanges = append(inode.readRanges, ReadRange{
-		Offset: offset,
-		Size: size,
+		Offset:   offset,
+		Size:     size,
 		Flushing: flushing,
 	})
 }
@@ -429,7 +429,7 @@ func (inode *Inode) UnlockRange(offset uint64, size uint64, flushing bool) {
 			// append(inode.readRanges[0 : i], inode.readRanges[i+1 : ]...) was leading to corruption?..
 			// reproduced in TestReadWriteMinimumMemory
 			copy(inode.readRanges[i:], inode.readRanges[i+1:])
-			inode.readRanges = inode.readRanges[0:len(inode.readRanges)-1]
+			inode.readRanges = inode.readRanges[0 : len(inode.readRanges)-1]
 			break
 		}
 	}
@@ -495,24 +495,24 @@ func (fh *FileHandle) trackRead(offset, size uint64) {
 			fh.lastReadSizes[fh.lastReadIdx] = fh.seqReadSize
 			fh.lastReadTotal += fh.lastReadSizes[fh.lastReadIdx]
 			fh.lastReadCount++
-			fh.lastReadIdx = (fh.lastReadIdx+1) % len(fh.lastReadSizes)
+			fh.lastReadIdx = (fh.lastReadIdx + 1) % len(fh.lastReadSizes)
 		}
 		fh.seqReadSize = size
 	}
-	fh.lastReadEnd = offset+size
+	fh.lastReadEnd = offset + size
 }
 
 func (fh *FileHandle) getReadAhead() uint64 {
-	ra := fh.inode.fs.flags.ReadAheadKB*1024
+	ra := fh.inode.fs.flags.ReadAheadKB * 1024
 	if fh.seqReadSize >= fh.inode.fs.flags.LargeReadCutoffKB*1024 {
 		// Use larger readahead with 'pipelining'
-		ra = fh.inode.fs.flags.ReadAheadLargeKB*1024
+		ra = fh.inode.fs.flags.ReadAheadLargeKB * 1024
 	} else if fh.lastReadCount > 0 {
 		// Disable readahead if last N read requests are smaller than X on average
 		avg := (fh.seqReadSize + fh.lastReadTotal) / (1 + fh.lastReadCount)
 		if avg <= fh.inode.fs.flags.SmallReadCutoffKB*1024 {
 			// Use smaller readahead
-			ra = fh.inode.fs.flags.ReadAheadSmallKB*1024
+			ra = fh.inode.fs.flags.ReadAheadSmallKB * 1024
 		}
 	}
 	return ra
@@ -542,7 +542,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 		return
 	}
 	if offset+size > fh.inode.Attributes.Size {
-		size = fh.inode.Attributes.Size-offset
+		size = fh.inode.Attributes.Size - offset
 	}
 
 	// Guard buffers against eviction
@@ -578,7 +578,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	// Don't exceed IOV_MAX-1 for writev.
 	if len(data) > IOV_MAX-1 {
 		var tail []byte
-		for i := IOV_MAX-2; i < len(data); i++ {
+		for i := IOV_MAX - 2; i < len(data); i++ {
 			tail = append(tail, data[i]...)
 		}
 		data = append(data[0:IOV_MAX-2], tail)
@@ -603,7 +603,7 @@ func (fh *FileHandle) Release() {
 
 func (inode *Inode) getMultiReader(offset, size uint64) (reader *MultiReader, ids map[uint64]bool, err error) {
 	inode.buffers.SplitAt(offset)
-	inode.buffers.SplitAt(offset+size)
+	inode.buffers.SplitAt(offset + size)
 	data, ids, err := inode.buffers.GetData(offset, size, true)
 	if err != nil {
 		return nil, nil, err
@@ -969,25 +969,25 @@ func (inode *Inode) sendStartMultipart() {
 }
 
 func (inode *Inode) beginMultipartUpload(cloud StorageBackend, key string) {
-		params := &MultipartBlobBeginInput{
-			Key: key,
-			ContentType: inode.fs.flags.GetMimeType(key),
-		}
-		if inode.userMetadataDirty != 0 {
-			params.Metadata = escapeMetadata(inode.userMetadata)
-			// userMetadataDirty == 1 indicates that metadata wasn't changed
-			// since the multipart upload was initiated
-			inode.userMetadataDirty = 1
-		}
-		resp, err := cloud.MultipartBlobBegin(params)
-		inode.mu.Lock()
-		inode.recordFlushError(err)
-		if err != nil {
-			log.Warnf("Failed to initiate multipart upload for %v: %v", key, err)
-		} else {
-			log.Debugf("Started multi-part upload of object %v", key)
-			inode.mpu = resp
-		}
+	params := &MultipartBlobBeginInput{
+		Key:         key,
+		ContentType: inode.fs.flags.GetMimeType(key),
+	}
+	if inode.userMetadataDirty != 0 {
+		params.Metadata = escapeMetadata(inode.userMetadata)
+		// userMetadataDirty == 1 indicates that metadata wasn't changed
+		// since the multipart upload was initiated
+		inode.userMetadataDirty = 1
+	}
+	resp, err := cloud.MultipartBlobBegin(params)
+	inode.mu.Lock()
+	inode.recordFlushError(err)
+	if err != nil {
+		log.Warnf("Failed to initiate multipart upload for %v: %v", key, err)
+	} else {
+		log.Debugf("Started multi-part upload of object %v", key)
+		inode.mpu = resp
+	}
 }
 
 func (inode *Inode) sendUploadParts(priority int) (bool, bool) {
@@ -1014,7 +1014,7 @@ func (inode *Inode) sendUploadParts(priority int) (bool, bool) {
 			shouldComplete = false
 			return true
 		}
-		partEnd := partOffset+partSize
+		partEnd := partOffset + partSize
 		var partDirty, partEvicted, partZero, partNonZero bool
 		var lastBufferEnd uint64
 		inode.buffers.Ascend(partOffset+1, func(end uint64, buf *FileBuffer) (cont bool, changed bool) {
@@ -1283,7 +1283,7 @@ func (inode *Inode) patchFromBuffers(bufs []*FileBuffer, partSize uint64) {
 	// If bufs is a contiguous range of buffers then we can send them as PATCH immediately,
 	// otherwise we need to read missing ranges first.
 	var (
-		reader io.ReadSeeker
+		reader    io.ReadSeeker
 		dirtyBufs map[uint64]bool
 	)
 	if contiguous {
@@ -1404,7 +1404,7 @@ func (inode *Inode) resetCache() {
 			inode.DiskCacheFD = nil
 			inode.fs.diskFdQueue.DeleteFD(inode)
 		}
-		cacheFileName := inode.fs.flags.CachePath+"/"+inode.FullName()
+		cacheFileName := inode.fs.flags.CachePath + "/" + inode.FullName()
 		err := os.Remove(cacheFileName)
 		if err != nil {
 			log.Errorf("Couldn't remove %v: %v", cacheFileName, err)
@@ -1530,7 +1530,7 @@ func (inode *Inode) flushSmallObject() {
 }
 
 func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
-	maxMerge := inode.fs.flags.MaxMergeCopyMB * 1024*1024
+	maxMerge := inode.fs.flags.MaxMergeCopyMB * 1024 * 1024
 
 	// First collect ranges to be unaffected by sudden parallel changes
 	var ranges []uint64
@@ -1538,7 +1538,7 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 	var startOffset, endOffset uint64
 	for i := uint64(0); i < numParts; i++ {
 		partOffset, partSize := inode.fs.partRange(i)
-		partEnd := partOffset+partSize
+		partEnd := partOffset + partSize
 		if partEnd > inode.Attributes.Size {
 			partEnd = inode.Attributes.Size
 		}
@@ -1588,7 +1588,7 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 						offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key)
 					resp, requestErr := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
 						Commit:     mpu,
-						PartNumber: uint32(partNum+1),
+						PartNumber: uint32(partNum + 1),
 						CopySource: key,
 						Offset:     offset,
 						Size:       size,
@@ -1602,7 +1602,7 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 					}
 				}
 				wg.Done()
-				<- guard
+				<-guard
 			}(uint64(ranges[i]), uint64(ranges[i+1]), uint64(ranges[i+2]))
 		}
 		wg.Wait()
@@ -1627,7 +1627,7 @@ func (inode *Inode) flushPart(part uint64) {
 
 	// Last part may be shorter
 	if inode.Attributes.Size < partOffset+partSize {
-		partSize = inode.Attributes.Size-partOffset
+		partSize = inode.Attributes.Size - partOffset
 	}
 
 	// Load part from the server if we have to read-modify-write it
@@ -1658,7 +1658,7 @@ func (inode *Inode) flushPart(part uint64) {
 			return
 		}
 		if inode.Attributes.Size < partOffset+partSize {
-			partSize = inode.Attributes.Size-partOffset
+			partSize = inode.Attributes.Size - partOffset
 		}
 	}
 
@@ -1676,7 +1676,7 @@ func (inode *Inode) flushPart(part uint64) {
 	bufLen := bufReader.Len()
 	partInput := MultipartBlobAddInput{
 		Commit:     inode.mpu,
-		PartNumber: uint32(part+1),
+		PartNumber: uint32(part + 1),
 		Body:       bufReader,
 		Size:       bufLen,
 		Offset:     partOffset,

@@ -27,12 +27,12 @@ import (
 )
 
 type PartSizeConfig struct {
-	PartSize uint64
+	PartSize  uint64
 	PartCount uint64
 }
 
 type NodeConfig struct {
-	Id uint64
+	Id      uint64
 	Address string
 }
 
@@ -56,57 +56,57 @@ type FlagStorage struct {
 	Backend        interface{}
 
 	// Tuning
-	MemoryLimit           uint64
-	EntryLimit            int
-	GCInterval            uint64
-	Cheap                 bool
-	ExplicitDir           bool
-	NoDirObject           bool
-	MaxFlushers           int64
-	MaxParallelParts      int
-	MaxParallelCopy       int
-	StatCacheTTL          time.Duration
-	HTTPTimeout           time.Duration
-	ReadRetryInterval     time.Duration
-	ReadRetryMultiplier   float64
-	ReadRetryMax          time.Duration
-	ReadRetryAttempts     int
-	RetryInterval         time.Duration
-	ReadAheadKB           uint64
-	SmallReadCount        uint64
-	SmallReadCutoffKB     uint64
-	ReadAheadSmallKB      uint64
-	LargeReadCutoffKB     uint64
-	ReadAheadLargeKB      uint64
-	ReadAheadParallelKB   uint64
-	ReadMergeKB           uint64
-	SinglePartMB          uint64
-	MaxMergeCopyMB        uint64
-	IgnoreFsync           bool
-	FsyncOnClose          bool
-	EnablePerms           bool
-	EnableSpecials        bool
-	EnableMtime           bool
-	DisableXattr          bool
-	UidAttr               string
-	GidAttr               string
-	FileModeAttr          string
-	RdevAttr              string
-	MtimeAttr             string
-	SymlinkAttr           string
-	RefreshAttr           string
-	RefreshFilename       string
-	FlushFilename         string
-	CachePath             string
-	MaxDiskCacheFD        int64
-	CacheFileMode         os.FileMode
-	PartSizes             []PartSizeConfig
-	UsePatch              bool
-	DropPatchConflicts    bool
-	PreferPatchUploads    bool
-	NoPreloadDir          bool
-	NoVerifySSL           bool
-	WinRefreshDirs        bool
+	MemoryLimit         uint64
+	EntryLimit          int
+	GCInterval          uint64
+	Cheap               bool
+	ExplicitDir         bool
+	NoDirObject         bool
+	MaxFlushers         int64
+	MaxParallelParts    int
+	MaxParallelCopy     int
+	StatCacheTTL        time.Duration
+	HTTPTimeout         time.Duration
+	ReadRetryInterval   time.Duration
+	ReadRetryMultiplier float64
+	ReadRetryMax        time.Duration
+	ReadRetryAttempts   int
+	RetryInterval       time.Duration
+	ReadAheadKB         uint64
+	SmallReadCount      uint64
+	SmallReadCutoffKB   uint64
+	ReadAheadSmallKB    uint64
+	LargeReadCutoffKB   uint64
+	ReadAheadLargeKB    uint64
+	ReadAheadParallelKB uint64
+	ReadMergeKB         uint64
+	SinglePartMB        uint64
+	MaxMergeCopyMB      uint64
+	IgnoreFsync         bool
+	FsyncOnClose        bool
+	EnablePerms         bool
+	EnableSpecials      bool
+	EnableMtime         bool
+	DisableXattr        bool
+	UidAttr             string
+	GidAttr             string
+	FileModeAttr        string
+	RdevAttr            string
+	MtimeAttr           string
+	SymlinkAttr         string
+	RefreshAttr         string
+	RefreshFilename     string
+	FlushFilename       string
+	CachePath           string
+	MaxDiskCacheFD      int64
+	CacheFileMode       os.FileMode
+	PartSizes           []PartSizeConfig
+	UsePatch            bool
+	DropPatchConflicts  bool
+	PreferPatchUploads  bool
+	NoPreloadDir        bool
+	NoVerifySSL         bool
+	WinRefreshDirs      bool
 
 	// Debugging
 	DebugMain  bool
@@ -120,10 +120,10 @@ type FlagStorage struct {
 	StatsInterval time.Duration
 
 	// Cluster Mode
-	ClusterMode    bool
+	ClusterMode           bool
 	ClusterGrpcReflection bool
-	ClusterMe      *NodeConfig
-	ClusterPeers   []*NodeConfig
+	ClusterMe             *NodeConfig
+	ClusterPeers          []*NodeConfig
 }
 
 func (flags *FlagStorage) GetMimeType(fileName string) (retMime *string) {

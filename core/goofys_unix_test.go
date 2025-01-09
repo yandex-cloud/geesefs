@@ -15,7 +15,7 @@
 
 // Tests for a mounted UNIX (but not Windows) FUSE FS
 
-// +build !windows
+//go:build !windows
 
 package core
 
@@ -32,9 +32,9 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/sys/unix"
 	"github.com/pkg/xattr"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 	. "gopkg.in/check.v1"
 
 	"github.com/jacobsa/fuse/fuseops"
@@ -54,7 +54,7 @@ func (s *GoofysTest) mountCommon(t *C, mountPoint string, sameProc bool) {
 
 		region := ""
 		if os.Getenv("REGION") != "" {
-			region = " --region \""+os.Getenv("REGION")+"\""
+			region = " --region \"" + os.Getenv("REGION") + "\""
 		}
 		exe := os.Getenv("GEESEFS_BINARY")
 		if exe == "" {
@@ -62,11 +62,11 @@ func (s *GoofysTest) mountCommon(t *C, mountPoint string, sameProc bool) {
 		}
 		c := exec.Command("/bin/bash", "-c",
 			exe+" --debug_fuse --debug_s3"+
-			" --stat-cache-ttl "+s.fs.flags.StatCacheTTL.String()+
-			" --log-file \"mount_"+t.TestName()+".log\""+
-			" --endpoint \""+s.fs.flags.Endpoint+"\""+
-			region+
-			" "+s.fs.bucket+" "+mountPoint)
+				" --stat-cache-ttl "+s.fs.flags.StatCacheTTL.String()+
+				" --log-file \"mount_"+t.TestName()+".log\""+
+				" --endpoint \""+s.fs.flags.Endpoint+"\""+
+				region+
+				" "+s.fs.bucket+" "+mountPoint)
 		err = c.Run()
 		t.Assert(err, IsNil)
 
@@ -524,7 +524,7 @@ func (s *GoofysTest) testNotifyRefresh(t *C, testInSubdir bool, testRefreshDir b
 
 	// Create file
 	_, err := s.cloud.PutBlob(&PutBlobInput{
-		Key:  subdir+"testnotify",
+		Key:  subdir + "testnotify",
 		Body: bytes.NewReader([]byte("foo")),
 		Size: PUInt64(3),
 	})
@@ -538,19 +538,19 @@ func (s *GoofysTest) testNotifyRefresh(t *C, testInSubdir bool, testRefreshDir b
 
 	t.Assert(containsFile(testdir, "testnotify"), Equals, true)
 
-	buf, err := ioutil.ReadFile(testdir+"/testnotify")
+	buf, err := ioutil.ReadFile(testdir + "/testnotify")
 	t.Assert(err, IsNil)
 	t.Assert(string(buf), Equals, "foo")
 
 	// Update file
 	_, err = s.cloud.PutBlob(&PutBlobInput{
-		Key:  subdir+"testnotify",
+		Key:  subdir + "testnotify",
 		Body: bytes.NewReader([]byte("baur")),
 		Size: PUInt64(4),
 	})
 	t.Assert(err, IsNil)
 
-	buf, err = ioutil.ReadFile(testdir+"/testnotify")
+	buf, err = ioutil.ReadFile(testdir + "/testnotify")
 	t.Assert(err, IsNil)
 	t.Assert(string(buf), Equals, "foo")
 
@@ -559,17 +559,17 @@ func (s *GoofysTest) testNotifyRefresh(t *C, testInSubdir bool, testRefreshDir b
 	t.Assert(err, IsNil)
 	time.Sleep(500 * time.Millisecond)
 
-	buf, err = ioutil.ReadFile(testdir+"/testnotify")
+	buf, err = ioutil.ReadFile(testdir + "/testnotify")
 	t.Assert(err, IsNil)
 	t.Assert(string(buf), Equals, "baur")
 
 	// Delete file
 	_, err = s.cloud.DeleteBlob(&DeleteBlobInput{
-		Key: subdir+"testnotify",
+		Key: subdir + "testnotify",
 	})
 	t.Assert(err, IsNil)
 
-	buf, err = ioutil.ReadFile(testdir+"/testnotify")
+	buf, err = ioutil.ReadFile(testdir + "/testnotify")
 	t.Assert(err, IsNil)
 	t.Assert(string(buf), Equals, "baur")
 
@@ -580,7 +580,7 @@ func (s *GoofysTest) testNotifyRefresh(t *C, testInSubdir bool, testRefreshDir b
 	// Refresh is done asynchronously (it needs kernel locks), so wait a bit
 	time.Sleep(500 * time.Millisecond)
 
-	_, err = os.Open(testdir+"/testnotify")
+	_, err = os.Open(testdir + "/testnotify")
 	t.Assert(os.IsNotExist(err), Equals, true)
 
 	t.Assert(containsFile(testdir, "testnotify"), Equals, false)

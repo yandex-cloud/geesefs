@@ -1,5 +1,4 @@
-// +build !windows
-// +build !linux
+//go:build !windows && !linux
 
 // Copyright 2021 Yandex LLC
 //

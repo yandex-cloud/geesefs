@@ -400,7 +400,7 @@ func (r *FileHandleReader) Read(p []byte) (nread int, err error) {
 	r.offset += int64(nread)
 	off := 0
 	for _, buf := range bufs {
-		copy(p[off : ], buf)
+		copy(p[off:], buf)
 		off += len(buf)
 	}
 	return
@@ -681,7 +681,7 @@ func (s *GoofysTest) TestMultipartOverwrite(t *C) {
 	_, err := s.cloud.CopyBlob(&CopyBlobInput{
 		Source:      "test%d0%b0",
 		Destination: "test%d0%b0",
-		Metadata:    map[string]*string{
+		Metadata: map[string]*string{
 			"foo": aws.String("bar"),
 		},
 	})
@@ -763,7 +763,7 @@ func (s *GoofysTest) TestReadExtendedFile(t *C) {
 
 func (s *GoofysTest) TestReadWriteMinimumMemory(t *C) {
 	// First part is fixed for "header hack", last part is "still written to"
-	s.fs.bufferPool.max = 20*1024*1024
+	s.fs.bufferPool.max = 20 * 1024 * 1024
 	s.fs.flags.ReadAheadLargeKB = s.fs.flags.ReadAheadKB
 	s.testWriteFile(t, "testLargeFile", 21*1024*1024, 128*1024)
 }
@@ -819,7 +819,7 @@ func (s *GoofysTest) TestMkDir(t *C) {
 
 	inode, err := s.fs.LookupPath(dirName)
 	if err == nil {
-		_, err := s.fs.LookupPath(dirName+"/"+fileName)
+		_, err := s.fs.LookupPath(dirName + "/" + fileName)
 		if err == nil {
 			err := inode.Unlink(fileName)
 			t.Assert(err, IsNil)
@@ -845,7 +845,7 @@ func (s *GoofysTest) TestMkDir(t *C) {
 	err = fh.inode.SyncFile()
 	t.Assert(err, IsNil)
 
-	_, err = s.fs.LookupPath(dirName+"/"+fileName)
+	_, err = s.fs.LookupPath(dirName + "/" + fileName)
 	t.Assert(err, IsNil)
 }
 
@@ -1054,7 +1054,7 @@ func (s *GoofysTest) TestBackendListPagination(t *C) {
 					// anything we didn't cleanup
 					// will be handled by teardown
 					_, _ = s.cloud.DeleteBlob(&DeleteBlobInput{key})
-					<- SmallActionsGate
+					<-SmallActionsGate
 					wg.Done()
 				}(b)
 			}
@@ -1290,7 +1290,7 @@ func (s *GoofysTest) TestRename(t *C) {
 
 	from, to = "file3", "new_file2"
 	dir, _ := s.fs.LookupPath("dir1")
-	_, err = s.fs.LookupPath("dir1/"+from)
+	_, err = s.fs.LookupPath("dir1/" + from)
 	t.Assert(err, IsNil)
 	_, err = s.fs.LookupPath(to)
 	if err != nil {
@@ -1618,7 +1618,7 @@ func (s *GoofysTest) TestXAttrGet(t *C) {
 	}
 	if len(names) == 2 {
 		// STANDARD storage-class may be present or not
-		expectedXattrs = []string{ xattrPrefix + "etag", "user.name" }
+		expectedXattrs = []string{xattrPrefix + "etag", "user.name"}
 	}
 	t.Assert(names, DeepEquals, expectedXattrs)
 
@@ -1681,7 +1681,7 @@ func (s *GoofysTest) TestXAttrGet(t *C) {
 	}
 	if len(names) == 2 {
 		// STANDARD storage-class may be present or not
-		expectedXattrs = []string{ xattrPrefix + "etag", "user.name" }
+		expectedXattrs = []string{xattrPrefix + "etag", "user.name"}
 	}
 	t.Assert(names, DeepEquals, expectedXattrs)
 
@@ -2116,7 +2116,7 @@ func (s *GoofysTest) TestSlurpFileAndDir(t *C) {
 
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
 
-	in, err := s.fs.LookupPath(prefix[0:len(prefix)-1])
+	in, err := s.fs.LookupPath(prefix[0 : len(prefix)-1])
 	t.Assert(err, IsNil)
 	t.Assert(in.dir, NotNil)
 
@@ -2135,7 +2135,7 @@ func (s *GoofysTest) TestSlurpFileAndDir(t *C) {
 	// lookup must _not_ talk to S3 again because otherwise we may
 	// decide it's a file again because of S3 race
 	s.disableS3()
-	in, err = s.fs.LookupPath(prefix+"fileAndDir")
+	in, err = s.fs.LookupPath(prefix + "fileAndDir")
 	t.Assert(err, IsNil)
 
 	s.assertEntries(t, in, []string{"a"})
@@ -2545,14 +2545,14 @@ func (s *GoofysTest) TestMountsError(t *C) {
 		}, "errprefix2", false},
 	})
 
-	errfile, err := s.fs.LookupPath("dir4/newerror/"+INIT_ERR_BLOB)
+	errfile, err := s.fs.LookupPath("dir4/newerror/" + INIT_ERR_BLOB)
 	t.Assert(err, IsNil)
 	t.Assert(errfile.isDir(), Equals, false)
 
 	_, err = s.fs.LookupPath("dir4/newerror/not_there")
 	t.Assert(err, Equals, syscall.ENOENT)
 
-	errfile, err = s.fs.LookupPath("dir4/initerror/"+INIT_ERR_BLOB)
+	errfile, err = s.fs.LookupPath("dir4/initerror/" + INIT_ERR_BLOB)
 	t.Assert(err, IsNil)
 	t.Assert(errfile.isDir(), Equals, false)
 

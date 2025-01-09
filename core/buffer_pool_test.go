@@ -17,9 +17,9 @@ package core
 
 import (
 	"bytes"
+	. "gopkg.in/check.v1"
 	"io"
 	"time"
-	. "gopkg.in/check.v1"
 )
 
 type BufferTest struct {

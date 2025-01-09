@@ -153,11 +153,11 @@ func (t *GoofysTest) deleteBlobsParallelly(cloud StorageBackend, blobs []string)
 // groupByDecresingDepths takes a slice of path strings and returns the paths as
 // groups where each group has the same `depth` - depth(a/b/c)=2, depth(a/b/)=1
 // The groups are returned in decreasing order of depths.
-// - Inp: [] Out: []
-// - Inp: ["a/b1/", "a/b/c1", "a/b2", "a/b/c2"]
-//   Out: [["a/b/c1", "a/b/c2"], ["a/b1/", "a/b2"]]
-// - Inp: ["a/b1/", "z/a/b/c1", "a/b2", "z/a/b/c2"]
-//   Out:	[["z/a/b/c1", "z/a/b/c2"], ["a/b1/", "a/b2"]
+//   - Inp: [] Out: []
+//   - Inp: ["a/b1/", "a/b/c1", "a/b2", "a/b/c2"]
+//     Out: [["a/b/c1", "a/b/c2"], ["a/b1/", "a/b2"]]
+//   - Inp: ["a/b1/", "z/a/b/c1", "a/b2", "z/a/b/c2"]
+//     Out: [["z/a/b/c1", "z/a/b/c2"], ["a/b1/", "a/b2"]
 func groupByDecresingDepths(items []string) [][]string {
 	depthToGroup := map[int][]string{}
 	for _, item := range items {
@@ -258,18 +258,18 @@ func (s *GoofysTest) waitForEmulator(t *C, addr string) {
 		port := "80"
 		p := strings.Index(addr, "://")
 		if p >= 0 {
-			addr = addr[p+3 : ]
-			if strings.ToLower(addr[0 : p]) == "https" {
+			addr = addr[p+3:]
+			if strings.ToLower(addr[0:p]) == "https" {
 				port = "443"
 			}
 		}
 		p = strings.Index(addr, "/")
 		if p >= 0 {
-			addr = addr[0 : p]
+			addr = addr[0:p]
 		}
 		p = strings.Index(addr, ":")
 		if p < 0 {
-			addr = addr+":"+port
+			addr = addr + ":" + port
 		}
 		err := waitFor(t, addr)
 		t.Assert(err, IsNil)
@@ -302,7 +302,7 @@ func (s *GoofysTest) deleteBucket(cloud StorageBackend) error {
 					// ADLV{1|2} and AZBlob (sometimes) supports directories. => dir can be removed only
 					// after the dir is empty. So we will remove the blobs in reverse depth order via
 					// DeleteADLBlobs after this for loop.
-				azureKeysToRemove = append(azureKeysToRemove, keysToRemove...)
+					azureKeysToRemove = append(azureKeysToRemove, keysToRemove...)
 				default:
 					_, err = cloud.DeleteBlobs(&DeleteBlobsInput{Items: keysToRemove})
 					if err != nil {
@@ -442,17 +442,17 @@ func (s *GoofysTest) setupBlobs(cloud StorageBackend, t *C, env map[string]*stri
 
 func (s *GoofysTest) setupDefaultEnv(t *C, prefix string) {
 	s.env = map[string]*string{
-		prefix+"file1":           nil,
-		prefix+"file2":           nil,
-		prefix+"dir1/file3":      nil,
-		prefix+"dir2/":           nil,
-		prefix+"dir2/dir3/":      nil,
-		prefix+"dir2/dir3/file4": nil,
-		prefix+"dir4/":           nil,
-		prefix+"dir4/file5":      nil,
-		prefix+"empty_dir/":      nil,
-		prefix+"empty_dir2/":     nil,
-		prefix+"zero":            PString(""),
+		prefix + "file1":           nil,
+		prefix + "file2":           nil,
+		prefix + "dir1/file3":      nil,
+		prefix + "dir2/":           nil,
+		prefix + "dir2/dir3/":      nil,
+		prefix + "dir2/dir3/file4": nil,
+		prefix + "dir4/":           nil,
+		prefix + "dir4/file5":      nil,
+		prefix + "empty_dir/":      nil,
+		prefix + "empty_dir2/":     nil,
+		prefix + "zero":            PString(""),
 	}
 
 	s.setupBlobs(s.cloud, t, s.env)
@@ -498,10 +498,10 @@ func (s *GoofysTest) SetUpTest(t *C) {
 	flags := cfg.DefaultFlags()
 	if strings.Index(t.TestName(), "Mem20M") >= 0 {
 		// has to be set before create FS
-		flags.MemoryLimit = 20*1024*1024
+		flags.MemoryLimit = 20 * 1024 * 1024
 	} else if strings.Index(t.TestName(), "Mem100M") >= 0 {
 		// has to be set before create FS
-		flags.MemoryLimit = 100*1024*1024
+		flags.MemoryLimit = 100 * 1024 * 1024
 	}
 	if hasEnv("DEBUG") {
 		flags.DebugS3 = true
@@ -682,7 +682,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 func (s *GoofysTest) clearPrefix(t *C, cloud StorageBackend, prefix string) {
 	for {
 		res, err := cloud.ListBlobs(&ListBlobsInput{
-			Prefix: PString(prefix+"/"),
+			Prefix: PString(prefix + "/"),
 		})
 		t.Assert(err, IsNil)
 		if len(res.Items) == 0 {

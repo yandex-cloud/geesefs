@@ -16,30 +16,30 @@
 package core
 
 import (
+	"github.com/shirou/gopsutil/mem"
 	"github.com/yandex-cloud/geesefs/core/cfg"
 	"runtime"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"github.com/shirou/gopsutil/mem"
 )
 
 var bufferLog = cfg.GetLogger("buffer")
 
 // BufferPool tracks memory used by cache buffers
 type BufferPool struct {
-	mu   sync.Mutex
+	mu sync.Mutex
 
 	curDirtyID uint64
 
-	cur int64
-	max int64
-	limit int64
+	cur         int64
+	max         int64
+	limit       int64
 	cgroupLimit uint64
 
-	requested uint64
-	gcPrev uint64
+	requested  uint64
+	gcPrev     uint64
 	gcInterval uint64
 
 	FreeSomeCleanBuffers func(size int64) (int64, bool)
@@ -64,8 +64,8 @@ func NewBufferPool(limit int64, gcInterval uint64) *BufferPool {
 	}
 
 	pool := BufferPool{
-		limit: limit,
-		max: limit,
+		limit:      limit,
+		max:        limit,
 		gcInterval: gcInterval,
 	}
 
@@ -79,7 +79,7 @@ func (pool *BufferPool) recomputeBufferLimit() {
 	runtime.ReadMemStats(&ms)
 
 	log.Debugf("limit: %v MB, buffers: %v MB, metadata: %v MB, system: %v MB",
-		pool.limit >> 20, usedMem >> 20, (ms.Alloc-uint64(usedMem)) >> 20, ms.Sys >> 20)
+		pool.limit>>20, usedMem>>20, (ms.Alloc-uint64(usedMem))>>20, ms.Sys>>20)
 }
 
 func (pool *BufferPool) Use(size int64, ignoreMemoryLimit bool) (err error) {

@@ -54,20 +54,20 @@ type S3Backend struct {
 	gcs      bool
 	v2Signer bool
 
-	iam bool
-	iamToken atomic.Value
+	iam                bool
+	iamToken           atomic.Value
 	iamTokenExpiration time.Time
-	iamRefreshTimer *time.Timer
+	iamRefreshTimer    *time.Timer
 }
 
 func NewS3(bucket string, flags *cfg.FlagStorage, config *cfg.S3Config) (*S3Backend, error) {
 	if config.MultipartCopyThreshold == 0 {
-		config.MultipartCopyThreshold = 128*1024*1024
+		config.MultipartCopyThreshold = 128 * 1024 * 1024
 	}
 
 	if config.ProjectId != "" {
 		log.Infof("Using Ceph multitenancy format bucket naming: %s", bucket)
-		bucket = config.ProjectId+":"+bucket
+		bucket = config.ProjectId + ":" + bucket
 	}
 
 	awsConfig, err := config.ToAwsConfig(flags)
@@ -105,15 +105,15 @@ func NewS3(bucket string, flags *cfg.FlagStorage, config *cfg.S3Config) (*S3Back
 }
 
 type IMDSv1Response struct {
-	Code string
-	Token string
+	Code       string
+	Token      string
 	Expiration time.Time
 }
 
 type GCPCredResponse struct {
 	AccessToken string `json:"access_token"`
-	TokenType string `json:"token_type"`
-	ExpiresIn int `json:"expires_in"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int    `json:"expires_in"`
 }
 
 func (s *S3Backend) TryIAM() (err error) {
@@ -366,7 +366,7 @@ func (s *S3Backend) testBucket(key string) (err error) {
 		s.flags.ReadRetryAttempts = 5
 	}
 	err = ReadBackoff(s.flags, func(attempt int) error {
-		_, err := s.HeadBlob(&HeadBlobInput{Key: key});
+		_, err := s.HeadBlob(&HeadBlobInput{Key: key})
 		return err
 	})
 	if err != nil {
@@ -699,7 +699,7 @@ func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId strin
 	wg.SetLimit(s.flags.MaxParallelParts)
 
 	var startOffset int64
-	var partIdx     int
+	var partIdx int
 	for _, cfg := range partSizes {
 		for i := 0; i < int(cfg.PartCount) && startOffset < size; i++ {
 			endOffset := MinInt64(startOffset+int64(cfg.PartSize), size)
@@ -1103,7 +1103,7 @@ func (s *S3Backend) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBl
 
 	return &MultipartBlobAddOutput{
 		RequestId: s.getRequestId(req),
-		PartId: resp.ETag,
+		PartId:    resp.ETag,
 	}, nil
 }
 
@@ -1112,7 +1112,7 @@ func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*Multipart
 		Bucket:     &s.bucket,
 		Key:        param.Commit.Key,
 		PartNumber: aws.Int64(int64(param.PartNumber)),
-		CopySource: aws.String(pathEscape(s.bucket+"/"+param.CopySource)),
+		CopySource: aws.String(pathEscape(s.bucket + "/" + param.CopySource)),
 		UploadId:   param.Commit.UploadId,
 	}
 	if param.Size != 0 {
@@ -1134,7 +1134,7 @@ func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*Multipart
 
 	return &MultipartBlobCopyOutput{
 		RequestId: s.getRequestId(req),
-		PartId: resp.CopyPartResult.ETag,
+		PartId:    resp.CopyPartResult.ETag,
 	}, nil
 }
 

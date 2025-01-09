@@ -67,8 +67,8 @@ type Goofys struct {
 	// from per-inode locks). Should be always taken after any inode locks.
 	mu sync.RWMutex
 
-	flusherMu sync.Mutex
-	flusherCond *sync.Cond
+	flusherMu    sync.Mutex
+	flusherCond  *sync.Cond
 	flushPending int32
 
 	// The next inode ID to hand out. We assume that this will never overflow,
@@ -94,17 +94,17 @@ type Goofys struct {
 	// Inflight changes are tracked to skip them in parallel listings
 	// Required because we don't have guarantees about listing & change ordering
 	inflightListingId int
-	inflightListings map[int]map[string]bool
-	inflightChanges map[string]int
+	inflightListings  map[int]map[string]bool
+	inflightChanges   map[string]int
 
 	nextHandleID fuseops.HandleID
 	dirHandles   map[fuseops.HandleID]*DirHandle
 
 	fileHandles map[fuseops.HandleID]*FileHandle
 
-	activeFlushers int64
-	flushRetrySet int32
-	hasNewWrites uint64
+	activeFlushers  int64
+	flushRetrySet   int32
+	hasNewWrites    uint64
 	flushPriorities []int64
 
 	forgotCnt uint32
@@ -122,15 +122,15 @@ type Goofys struct {
 }
 
 type OpStats struct {
-	reads int64
-	readHits int64
-	writes int64
-	flushes int64
-	metadataReads int64
+	reads          int64
+	readHits       int64
+	writes         int64
+	flushes        int64
+	metadataReads  int64
 	metadataWrites int64
-	noops int64
-	evicts int64
-	ts time.Time
+	noops          int64
+	evicts         int64
+	ts             time.Time
 }
 
 var s3Log = cfg.GetLogger("s3")
@@ -288,12 +288,12 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 	newBackend func(string, *cfg.FlagStorage) (StorageBackend, error)) (*Goofys, error) {
 	// Set up the basic struct.
 	fs := &Goofys{
-		bucket: bucket,
-		flags: flags,
-		umask: 0122,
-		shutdownCh: make(chan struct{}),
-		zeroBuf: make([]byte, 1048576),
-		inflightChanges: make(map[string]int),
+		bucket:           bucket,
+		flags:            flags,
+		umask:            0122,
+		shutdownCh:       make(chan struct{}),
+		zeroBuf:          make([]byte, 1048576),
+		inflightChanges:  make(map[string]int),
 		inflightListings: make(map[int]map[string]bool),
 		stats: OpStats{
 			ts: time.Now(),
@@ -342,7 +342,7 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 		debug.SetGCPercent(20)
 	}
 
-	fs.bufferPool = NewBufferPool(int64(flags.MemoryLimit), uint64(flags.GCInterval) << 20)
+	fs.bufferPool = NewBufferPool(int64(flags.MemoryLimit), uint64(flags.GCInterval)<<20)
 	fs.bufferPool.FreeSomeCleanBuffers = func(size int64) (int64, bool) {
 		return fs.FreeSomeCleanBuffers(size)
 	}
@@ -488,15 +488,15 @@ func (fs *Goofys) StatPrinter() {
 		}
 		log.Infof(
 			"I/O: %.2f read/s, %.2f %% hits, %.2f write/s; metadata: %.2f read/s, %.2f write/s, %.2f noop/s, %v alive, %.2f evict/s; %.2f flush/s",
-			float64(reads) / d,
+			float64(reads)/d,
 			float64(readHits)/readsOr1*100,
-			float64(writes) / d,
-			float64(metadataReads) / d,
-			float64(metadataWrites) / d,
-			float64(noops) / d,
+			float64(writes)/d,
+			float64(metadataReads)/d,
+			float64(metadataWrites)/d,
+			float64(noops)/d,
 			inodeCount,
-			float64(evicts) / d,
-			float64(flushes) / d,
+			float64(evicts)/d,
+			float64(flushes)/d,
 		)
 	}
 }
@@ -514,7 +514,7 @@ func (fs *Goofys) FreeSomeCleanBuffers(origSize int64) (int64, bool) {
 	// Free at least 5 MB
 	size := origSize
 	if size < 5*1024*1024 {
-		size = 5*1024*1024
+		size = 5 * 1024 * 1024
 	}
 	var inode *Inode
 	var cleanEnd, cleanQueueID uint64
@@ -607,19 +607,18 @@ func (fs *Goofys) ScheduleRetryFlush() {
 
 // Flusher goroutine.
 // Overall algorithm:
-// 1) File opened => reads and writes just populate cache
-// 2) File closed => flush it
-//    Created or fully overwritten =>
-//      Less than 5 MB => upload in a single part
-//      More than 5 MB => upload using multipart
-//    Updated =>
-//      CURRENTLY:
-//      Less than 5 MB => upload in a single part
-//      More than 5 MB => update using multipart copy
-//      Also we can't update less than 5 MB because it's the minimal part size
-// 3) Fsync triggered => intermediate full flush (same algorithm)
-// 4) Dirty memory limit reached => without on-disk cache we have to flush the whole object.
-//    With on-disk cache we can unload some dirty buffers to disk.
+//  1. File opened => reads and writes just populate cache
+//  2. File closed => flush it
+//     Created or fully overwritten =>
+//     => Less than 5 MB => upload in a single part
+//     => More than 5 MB => upload using multipart
+//     Updated => CURRENTLY:
+//     => Less than 5 MB => upload in a single part
+//     => More than 5 MB => update using multipart copy
+//     Also we can't update less than 5 MB because it's the minimal part size
+//  3. Fsync triggered => intermediate full flush (same algorithm)
+//  4. Dirty memory limit reached => without on-disk cache we have to flush the whole object.
+//     With on-disk cache we can unload some dirty buffers to disk.
 func (fs *Goofys) Flusher() {
 	var inodeID, nextQueueID uint64
 	priority := 1
@@ -745,14 +744,14 @@ func (fs *Goofys) MetaEvictor() {
 		// Try to keep the number of cached inodes under control %)
 		fs.mu.RLock()
 		totalInodes := len(fs.inodes)
-		toEvict := (totalInodes-fs.flags.EntryLimit)*2
+		toEvict := (totalInodes - fs.flags.EntryLimit) * 2
 		if toEvict < 0 {
 			fs.mu.RUnlock()
 			retry = false
 			continue
 		}
 		if toEvict < fs.flags.EntryLimit/100 {
-			toEvict = fs.flags.EntryLimit/100
+			toEvict = fs.flags.EntryLimit / 100
 		}
 		if toEvict < 10 {
 			toEvict = 10
@@ -937,7 +936,7 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 				// Delete notifications are sent by ReadDir() itself
 				notifications = append(notifications, &fuseops.NotifyInvalEntry{
 					Parent: inode.Id,
-					Name: en.Name,
+					Name:   en.Name,
 				})
 			}
 			dh.Next(en.Name)
@@ -954,13 +953,13 @@ func (fs *Goofys) RefreshInodeCache(inode *Inode) error {
 	if mappedErr == syscall.ENOENT {
 		notifications = append(notifications, &fuseops.NotifyDelete{
 			Parent: parentId,
-			Child: inodeId,
-			Name: name,
+			Child:  inodeId,
+			Name:   name,
 		})
 	} else {
 		notifications = append(notifications, &fuseops.NotifyInvalEntry{
 			Parent: parentId,
-			Name: name,
+			Name:   name,
 		})
 	}
 	if fs.NotifyCallback != nil {

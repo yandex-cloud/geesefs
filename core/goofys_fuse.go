@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !windows
+//go:build !windows
 
 package core
 
@@ -42,7 +42,7 @@ func init() {
    -o allow_other  allow all users (including root) to access files
    -o allow_root   allow root and filesystem owner to access files
    -o rootmode=M   set file mode of the filesystem's root (octal)
-`;
+`
 }
 
 type GoofysFuse struct {
@@ -342,7 +342,7 @@ func makeDirEntry(inode *Inode, offset fuseops.DirOffset) fuseutil.Dirent {
 		Name:   name,
 		Type:   dt,
 		Inode:  inode.Id,
-		Offset: offset+1,
+		Offset: offset + 1,
 	}
 }
 
@@ -595,8 +595,8 @@ func (fs *GoofysFuse) MkNode(
 
 	atomic.AddInt64(&fs.stats.metadataWrites, 1)
 
-	if (op.Mode & os.ModeType) != os.ModeDir &&
-		(op.Mode & os.ModeType) != 0 &&
+	if (op.Mode&os.ModeType) != os.ModeDir &&
+		(op.Mode&os.ModeType) != 0 &&
 		!fs.flags.EnableSpecials {
 		return syscall.ENOTSUP
 	}
@@ -846,7 +846,7 @@ func (fs *GoofysFuse) Fallocate(
 			if op.Offset > inode.Attributes.Size {
 				op.Offset = inode.Attributes.Size
 			}
-			op.Length = inode.Attributes.Size-op.Offset
+			op.Length = inode.Attributes.Size - op.Offset
 		}
 	}
 
@@ -872,7 +872,7 @@ func (fs *GoofysFuse) SetConnection(conn *fuse.Connection) {
 
 type FuseMfsWrapper struct {
 	*fuse.MountedFileSystem
-	fs *Goofys
+	fs         *Goofys
 	mountPoint string
 }
 
@@ -957,8 +957,8 @@ func mountFuseFS(fs *Goofys) (mfs MountedFS, err error) {
 
 	mfs = &FuseMfsWrapper{
 		MountedFileSystem: fuseMfs,
-		fs: fs,
-		mountPoint: fs.flags.MountPoint,
+		fs:                fs,
+		mountPoint:        fs.flags.MountPoint,
 	}
 
 	return

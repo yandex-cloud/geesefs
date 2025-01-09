@@ -30,7 +30,7 @@ import (
 // GCS variant of S3
 type GCS3 struct {
 	*S3Backend
-	gcs *storage.Client
+	gcs          *storage.Client
 	jsonCredFile string
 }
 
@@ -102,12 +102,12 @@ func (s *GCS3) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 			})
 		} else {
 			items = append(items, BlobItemOutput{
-				Key: &attrs.Name,
-				ETag: &attrs.Etag,
+				Key:          &attrs.Name,
+				ETag:         &attrs.Etag,
 				LastModified: &attrs.Updated,
-				Size: uint64(attrs.Size),
+				Size:         uint64(attrs.Size),
 				StorageClass: &attrs.StorageClass,
-				Metadata: PMetadata(attrs.Metadata),
+				Metadata:     PMetadata(attrs.Metadata),
 			})
 		}
 		n++

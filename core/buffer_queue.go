@@ -22,7 +22,7 @@ import (
 
 type QueuedBuffer struct {
 	inode *Inode
-	end uint64
+	end   uint64
 }
 
 type BufferQueue struct {
@@ -38,7 +38,7 @@ func (l *BufferQueue) Add(inode *Inode, b *FileBuffer) {
 	l.mu.Lock()
 	l.curQueueID++
 	b.queueId = l.curQueueID
-	l.cleanQueue.Set(b.queueId, QueuedBuffer{inode, b.offset+b.length})
+	l.cleanQueue.Set(b.queueId, QueuedBuffer{inode, b.offset + b.length})
 	l.mu.Unlock()
 }
 
@@ -56,7 +56,7 @@ func (l *BufferQueue) NextClean(minQueueId uint64) (inode *Inode, end, nextQueue
 	l.cleanQueue.Ascend(minQueueId, func(queueId uint64, b QueuedBuffer) bool {
 		inode = b.inode
 		end = b.end
-		nextQueueId = queueId+1
+		nextQueueId = queueId + 1
 		return false
 	})
 	l.mu.Unlock()
@@ -96,7 +96,7 @@ func (l *InodeQueue) Next(minQueueID uint64) (inodeID, nextQueueID uint64) {
 	l.mu.Lock()
 	l.dirtyQueue.Ascend(minQueueID, func(queueID uint64, ino uint64) bool {
 		inodeID = ino
-		nextQueueID = queueID+1
+		nextQueueID = queueID + 1
 		return false
 	})
 	l.mu.Unlock()

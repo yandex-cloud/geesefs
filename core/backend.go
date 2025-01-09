@@ -26,7 +26,7 @@ import (
 )
 
 type Capabilities struct {
-	MaxMultipartSize    uint64
+	MaxMultipartSize uint64
 	// indicates that the blob store has native support for directories
 	DirBlob bool
 	Name    string
@@ -43,7 +43,7 @@ type BlobItemOutput struct {
 	Size         uint64
 	StorageClass *string
 	// may be nil in list responses for backends that don't return metadata in listings
-	Metadata     map[string]*string
+	Metadata map[string]*string
 }
 
 type HeadBlobOutput struct {
@@ -194,7 +194,7 @@ type MultipartBlobAddInput struct {
 
 type MultipartBlobAddOutput struct {
 	RequestId string
-	PartId *string
+	PartId    *string
 }
 
 type MultipartBlobCopyInput struct {
@@ -207,7 +207,7 @@ type MultipartBlobCopyInput struct {
 
 type MultipartBlobCopyOutput struct {
 	RequestId string
-	PartId *string
+	PartId    *string
 }
 
 type MultipartBlobCommitOutput struct {
@@ -243,13 +243,13 @@ type MakeBucketOutput struct {
 	RequestId string
 }
 
-/// Implementations of all the functions here are expected to be
-/// concurrency-safe, except for
-///
-/// Init() is called exactly once before any other functions are
-/// called.
-///
-/// Capabilities()/Bucket() are expected to be const
+// Implementations of all the functions here are expected to be
+// concurrency-safe, except for:
+//
+// Init() is called exactly once before any other functions are
+// called.
+//
+// Capabilities()/Bucket() are expected to be const
 type StorageBackend interface {
 	Init(key string) error
 	Capabilities() *Capabilities

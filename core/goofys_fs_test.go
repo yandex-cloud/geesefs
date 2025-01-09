@@ -622,11 +622,11 @@ func (s *GoofysTest) TestListParallelExpireNoCloud(t *C) {
 			} else if p == "" && d == "" && a == "testdir/" {
 				var o []BlobItemOutput
 				for i := 0; i < 100; i++ {
-					o = append(o, BlobItemOutput{Key: PString("testdir/f"+fmt.Sprintf("%04d", i))})
+					o = append(o, BlobItemOutput{Key: PString("testdir/f" + fmt.Sprintf("%04d", i))})
 				}
 				return &ListBlobsOutput{
 					IsTruncated: true,
-					Items: o,
+					Items:       o,
 				}, nil
 			} else if p == "testdir/" && d == "/" {
 				pos := 0
@@ -635,11 +635,11 @@ func (s *GoofysTest) TestListParallelExpireNoCloud(t *C) {
 					pos++
 					t.Assert(err, IsNil)
 					t.Assert(n, Equals, 1)
-					t.Assert((pos % 100) == 0 && pos <= testCount-100, Equals, true)
+					t.Assert((pos%100) == 0 && pos <= testCount-100, Equals, true)
 				}
 				var o []BlobItemOutput
 				for i := 0; i < 100; i++ {
-					o = append(o, BlobItemOutput{Key: PString("testdir/f"+fmt.Sprintf("%04d", i + pos))})
+					o = append(o, BlobItemOutput{Key: PString("testdir/f" + fmt.Sprintf("%04d", i+pos))})
 				}
 				if (rand.Int() % 30) == 0 {
 					// Add some pauses to trigger eviction
@@ -647,7 +647,7 @@ func (s *GoofysTest) TestListParallelExpireNoCloud(t *C) {
 				}
 				return &ListBlobsOutput{
 					IsTruncated: pos < testCount-100,
-					Items: o,
+					Items:       o,
 				}, nil
 			}
 			return nil, syscall.ENOSYS
@@ -702,44 +702,44 @@ func (s *GoofysTest) TestListSlurpExpireNoCloud(t *C) {
 				return &ListBlobsOutput{
 					IsTruncated: true,
 					Items: []BlobItemOutput{
-						{Key: PString(a+"/")},
+						{Key: PString(a + "/")},
 					},
 				}, nil
 			} else if p == "" && d == "" && (a == "testdir/" || a == "testdir/g/" || a == "testdir/h/" || a == "testdir/i/") {
 				var o []BlobItemOutput
 				if a <= "testdir/" {
 					for i := 0; i < 100; i++ {
-						o = append(o, BlobItemOutput{Key: PString("testdir/f"+fmt.Sprintf("%04d", i))})
+						o = append(o, BlobItemOutput{Key: PString("testdir/f" + fmt.Sprintf("%04d", i))})
 					}
 					o = append(o, BlobItemOutput{Key: PString("testdir/g/")})
 				}
 				if a <= "testdir/g/" {
 					for i := 0; i < 100; i++ {
-						o = append(o, BlobItemOutput{Key: PString("testdir/g/gf"+fmt.Sprintf("%04d", i))})
+						o = append(o, BlobItemOutput{Key: PString("testdir/g/gf" + fmt.Sprintf("%04d", i))})
 					}
 					o = append(o, BlobItemOutput{Key: PString("testdir/h/")})
 				}
 				if a <= "testdir/h/" {
 					for i := 0; i < 100; i++ {
-						o = append(o, BlobItemOutput{Key: PString("testdir/h/hf"+fmt.Sprintf("%04d", i))})
+						o = append(o, BlobItemOutput{Key: PString("testdir/h/hf" + fmt.Sprintf("%04d", i))})
 					}
 					o = append(o, BlobItemOutput{Key: PString("testdir/i/")})
 				}
 				for i := 0; i < 100; i++ {
-					o = append(o, BlobItemOutput{Key: PString("testdir/i/if"+fmt.Sprintf("%04d", i))})
+					o = append(o, BlobItemOutput{Key: PString("testdir/i/if" + fmt.Sprintf("%04d", i))})
 				}
 				return &ListBlobsOutput{
 					IsTruncated: a < "testdir/i/",
-					Items: o,
+					Items:       o,
 				}, nil
 			} else if p == "testdir/" && d == "/" && a == "" {
 				var o []BlobItemOutput
 				for i := 0; i < 100; i++ {
-					o = append(o, BlobItemOutput{Key: PString("testdir/f"+fmt.Sprintf("%04d", i))})
+					o = append(o, BlobItemOutput{Key: PString("testdir/f" + fmt.Sprintf("%04d", i))})
 				}
 				return &ListBlobsOutput{
 					IsTruncated: true,
-					Items: o,
+					Items:       o,
 					Prefixes: []BlobPrefixOutput{
 						{Prefix: PString("testdir/g/")},
 						{Prefix: PString("testdir/h/")},
@@ -749,11 +749,11 @@ func (s *GoofysTest) TestListSlurpExpireNoCloud(t *C) {
 			} else if p == "testdir/" && d == "/" && a == "testdir/i/" {
 				var o []BlobItemOutput
 				for i := 0; i < 100; i++ {
-					o = append(o, BlobItemOutput{Key: PString("testdir/j"+fmt.Sprintf("%04d", i))})
+					o = append(o, BlobItemOutput{Key: PString("testdir/j" + fmt.Sprintf("%04d", i))})
 				}
 				return &ListBlobsOutput{
 					IsTruncated: false,
-					Items: o,
+					Items:       o,
 				}, nil
 			}
 			return nil, syscall.ENOSYS

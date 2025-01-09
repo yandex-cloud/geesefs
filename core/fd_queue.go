@@ -21,10 +21,10 @@ import (
 )
 
 type FDQueue struct {
-	mu sync.Mutex
-	cond *sync.Cond
-	q btree.Map[uint64, *Inode]
-	maxCount int
+	mu         sync.Mutex
+	cond       *sync.Cond
+	q          btree.Map[uint64, *Inode]
+	maxCount   int
 	curQueueID uint64
 }
 
@@ -80,7 +80,7 @@ func (l *FDQueue) CloseExtra() {
 	for l.maxCount > 0 && l.q.Len() > l.maxCount {
 		l.q.Ascend(nextQueueId, func(queueId uint64, i *Inode) bool {
 			inode = i
-			nextQueueId = queueId+1
+			nextQueueId = queueId + 1
 			return false
 		})
 		if inode == nil {

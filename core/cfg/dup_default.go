@@ -1,5 +1,4 @@
-// +build !linux !arm64
-// +build !windows
+//go:build (!linux || !arm64) && !windows
 
 // Copyright 2021 Yandex LLC
 //

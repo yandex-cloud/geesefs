@@ -38,11 +38,11 @@ import (
 )
 
 const (
-	ST_CACHED int32 = 0
-	ST_DEAD int32 = 1
-	ST_CREATED int32 = 2
+	ST_CACHED   int32 = 0
+	ST_DEAD     int32 = 1
+	ST_CREATED  int32 = 2
 	ST_MODIFIED int32 = 3
-	ST_DELETED int32 = 4
+	ST_DELETED  int32 = 4
 )
 
 type NodeId uint64
@@ -67,16 +67,16 @@ type InodeAttributes struct {
 }
 
 type ReadRange struct {
-	Offset uint64
-	Size uint64
+	Offset   uint64
+	Size     uint64
 	Flushing bool
 }
 
 type MPUPart struct {
-	Num uint32
+	Num    uint32
 	Offset uint64
-	Size uint64
-	ETag string
+	Size   uint64
+	ETag   string
 }
 
 type Inode struct {
@@ -92,11 +92,11 @@ type Inode struct {
 	// - Time object will have Time::monotonic bit set (until the year 2157) => the time
 	//   comparision just compares Time::ext field
 	// Ref: https://github.com/golang/go/blob/e42ae65a8507/src/time/time.go#L12:L56
-	AttrTime time.Time
+	AttrTime   time.Time
 	ExpireTime time.Time
 
-	mu sync.Mutex // everything below is protected by mu
-	readCond *sync.Cond
+	mu           sync.Mutex // everything below is protected by mu
+	readCond     *sync.Cond
 	pauseWriters int
 
 	// We are not very consistent about enforcing locks for `Parent` because, the
@@ -106,25 +106,25 @@ type Inode struct {
 
 	dir *DirInodeData
 
-	fileHandles int32
+	fileHandles  int32
 	lastWriteEnd uint64
 
 	// cached/buffered data
-	CacheState int32
-	dirtyQueueId uint64
-	buffers BufferList
-	readRanges []ReadRange
-	DiskFDQueueID uint64
-	DiskCacheFD *os.File
-	OnDisk bool
-	forceFlush bool
-	IsFlushing int
-	flushError error
+	CacheState     int32
+	dirtyQueueId   uint64
+	buffers        BufferList
+	readRanges     []ReadRange
+	DiskFDQueueID  uint64
+	DiskCacheFD    *os.File
+	OnDisk         bool
+	forceFlush     bool
+	IsFlushing     int
+	flushError     error
 	flushErrorTime time.Time
-	readError error
+	readError      error
 	// renamed from: parent, name
 	oldParent *Inode
-	oldName string
+	oldName   string
 	// is already being renamed to the current name
 	renamingTo bool
 
@@ -132,8 +132,8 @@ type Inode struct {
 	mpu *MultipartBlobCommitInput
 
 	userMetadataDirty int
-	userMetadata map[string][]byte
-	s3Metadata   map[string][]byte
+	userMetadata      map[string][]byte
+	s3Metadata        map[string][]byte
 
 	// last known size and etag from the cloud
 	knownSize uint64
@@ -157,12 +157,12 @@ func NewInode(fs *Goofys, parent *Inode, name string) (inode *Inode) {
 	}
 
 	inode = &Inode{
-		Name:       name,
-		fs:         fs,
+		Name: name,
+		fs:   fs,
 		Attributes: InodeAttributes{
-			Uid:    fs.flags.Uid,
-			Gid:    fs.flags.Gid,
-			Mode:   fs.flags.FileMode,
+			Uid:  fs.flags.Uid,
+			Gid:  fs.flags.Gid,
+			Mode: fs.flags.FileMode,
 		},
 		AttrTime:   time.Now(),
 		Parent:     parent,
@@ -331,10 +331,10 @@ func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 
 	if inode.dir != nil {
 		attr.Nlink = 2
-		attr.Mode = attr.Mode & os.ModePerm | os.ModeDir
+		attr.Mode = attr.Mode&os.ModePerm | os.ModeDir
 	} else if inode.userMetadata != nil && inode.userMetadata[inode.fs.flags.SymlinkAttr] != nil {
 		attr.Nlink = 1
-		attr.Mode = attr.Mode & os.ModePerm | os.ModeSymlink
+		attr.Mode = attr.Mode&os.ModePerm | os.ModeSymlink
 	} else {
 		attr.Nlink = 1
 	}
@@ -558,11 +558,11 @@ func (inode *Inode) setMetadata(metadata map[string]*string) {
 					if inode.fs.flags.EnablePerms {
 						mask = os.ModePerm
 					}
-					if inode.fs.flags.EnableSpecials && (inode.Attributes.Mode & os.ModeType) == 0 {
+					if inode.fs.flags.EnableSpecials && (inode.Attributes.Mode&os.ModeType) == 0 {
 						mask = mask | os.ModeType
 					}
 					rmMask := (os.ModePerm | os.ModeType) ^ mask
-					inode.Attributes.Mode = inode.Attributes.Mode & rmMask | (fm & mask)
+					inode.Attributes.Mode = inode.Attributes.Mode&rmMask | (fm & mask)
 					if (inode.Attributes.Mode & os.ModeDevice) != 0 {
 						rdev, _ := strconv.ParseUint(string(inode.userMetadata[inode.fs.flags.RdevAttr]), 0, 32)
 						inode.Attributes.Rdev = uint32(rdev)
@@ -890,7 +890,7 @@ func (inode *Inode) DumpThis(withBuffers bool) (children []*Inode) {
 	if inode.Attributes.Rdev != 0 {
 		dataMap["rdev"] = inode.Attributes.Rdev
 	}
-	if inode.isDir() && inode.Attributes.Mode != (os.ModeDir | fs.flags.DirMode) ||
+	if inode.isDir() && inode.Attributes.Mode != (os.ModeDir|fs.flags.DirMode) ||
 		!inode.isDir() && inode.Attributes.Mode != fs.flags.FileMode {
 		dataMap["mode"] = fuseops.ConvertGoMode(inode.Attributes.Mode)
 	}
@@ -903,7 +903,7 @@ func (inode *Inode) DumpThis(withBuffers bool) (children []*Inode) {
 	if inode.oldParent != nil {
 		oldPath := inode.oldName
 		if inode.oldParent.Id != fuseops.RootInodeID {
-			oldPath = inode.oldParent.FullName()+"/"+oldPath
+			oldPath = inode.oldParent.FullName() + "/" + oldPath
 		}
 		dataMap["oldPath"] = oldPath
 		if inode.renamingTo {
@@ -1019,8 +1019,8 @@ func (inode *Inode) DumpThis(withBuffers bool) (children []*Inode) {
 	dump := string(dumpBuf)
 	if withBuffers && inode.buffers.Count() > 0 {
 		b := inode.buffers.Dump(0, 0xffffffffffffffff)
-		b = b[0:len(b)-1]
-		dump += "\n"+b
+		b = b[0 : len(b)-1]
+		dump += "\n" + b
 	}
 	log.Error(dump)
 

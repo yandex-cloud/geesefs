@@ -18,13 +18,13 @@ package core
 
 type TestBackend struct {
 	StorageBackend
-	ListBlobsFunc func(param *ListBlobsInput) (*ListBlobsOutput, error)
-	HeadBlobFunc func(param *HeadBlobInput) (*HeadBlobOutput, error)
-	MultipartBlobAddFunc func(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error)
-	MultipartBlobCopyFunc func(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error)
+	ListBlobsFunc           func(param *ListBlobsInput) (*ListBlobsOutput, error)
+	HeadBlobFunc            func(param *HeadBlobInput) (*HeadBlobOutput, error)
+	MultipartBlobAddFunc    func(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error)
+	MultipartBlobCopyFunc   func(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error)
 	MultipartBlobCommitFunc func(param *MultipartBlobCommitInput) (*MultipartBlobCommitOutput, error)
-	capabilities *Capabilities
-	err error
+	capabilities            *Capabilities
+	err                     error
 }
 
 func (s *TestBackend) Init(bucket string) error {

@@ -221,7 +221,7 @@ func (b *AZBlob) refreshToken() (*azblob.ContainerURL, error) {
 		// our token totally expired, renew inline before using it
 		b.mu.Unlock()
 		b.tokenRenewGate <- 1
-		defer func() { <- b.tokenRenewGate } ()
+		defer func() { <-b.tokenRenewGate }()
 
 		b.mu.Lock()
 		// check again, because in the mean time maybe it's renewed
@@ -247,7 +247,7 @@ func (b *AZBlob) refreshToken() (*azblob.ContainerURL, error) {
 				if err != nil {
 					azbLog.Errorf("Unable to refresh token: %v", err)
 				}
-				<- b.tokenRenewGate
+				<-b.tokenRenewGate
 			}()
 
 			// if we cannot renew token, treat it as a
@@ -664,7 +664,7 @@ func (b *AZBlob) DeleteBlobs(param *DeleteBlobsInput) (ret *DeleteBlobsOutput, d
 
 		go func(key string) {
 			defer func() {
-				<- SmallActionsGate
+				<-SmallActionsGate
 				wg.Done()
 			}()
 

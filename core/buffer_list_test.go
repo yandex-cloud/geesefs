@@ -119,7 +119,7 @@ func (s *BufferListTest) TestGetHolesEvicted(t *C) {
 	t.Assert(flcl, Equals, true)
 	// Now check previous part - it should have a hole, but no FL_CLEARED
 	holes, loading, flcl = l.GetHoles(5*1024, 5*1024)
-	t.Assert(holes, DeepEquals, []Range{{8*1024, 10*1024}})
+	t.Assert(holes, DeepEquals, []Range{{8 * 1024, 10 * 1024}})
 	t.Assert(loading, Equals, false)
 	t.Assert(flcl, Equals, false)
 }
@@ -162,7 +162,7 @@ func (s *BufferListTest) TestSplitDirtyQueue(t *C) {
 	// Now check dirty list - it should be empty
 	// With incorrect refcounting it would either be non-empty or the code would panic()
 	numDirty := 0
-	l.IterateDirtyParts(func(partNum uint64) bool { numDirty++; return true; })
+	l.IterateDirtyParts(func(partNum uint64) bool { numDirty++; return true })
 	t.Assert(numDirty, Equals, 0)
 }
 
