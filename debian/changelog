@@ -1,3 +1,9 @@
+geesefs (0.42.4) unstable; urgency=medium
+
+  * Disable PATCH of empty files
+
+ -- Vitaliy Filippov <vitaliff@yandex-team.ru>  Fri, 10 Jan 2025 01:41:00 +0300
+
 geesefs (0.42.3) unstable; urgency=medium
 
   * Add --refresh-dirs option for Windows as an ugly solution to refresh files
