@@ -690,6 +690,8 @@ func (inode *Inode) sendUpload(priority int) bool {
 		// In current implemetation we should not patch big simple objects. Reupload them as multiparts first.
 		// If current ETag is unknown, try patching anyway, so that we don't trigger an unecessary mpu.
 		(inode.uploadedAsMultipart() || inode.knownETag == "" || smallFile) &&
+		// Current PATCH works incorrectly when updating an empty file. Do not update the empty file using PATCH.
+		inode.knownSize > 0 &&
 		// Currently PATCH does not support truncates. If the file was truncated, reupload it.
 		inode.knownSize <= inode.Attributes.Size
 
