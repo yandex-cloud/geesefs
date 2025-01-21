@@ -261,7 +261,7 @@ MISC OPTIONS:
 
 		cli.BoolFlag{
 			Name:  "no-detect",
-			Usage: "Turn off bucket location and signature algorithm autodetection on start",
+			Usage: "Turn off autodetection of anonymous access, bucket location and signature algorithm on start",
 		},
 
 		cli.BoolFlag{
