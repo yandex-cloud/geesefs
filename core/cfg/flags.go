@@ -610,36 +610,6 @@ MISC OPTIONS:
 		},
 
 		cli.IntFlag{
-			Name:  "cache-popular-threshold",
-			Value: 3,
-			Usage: "Value of the read counter after which a cached file is started being treated as 'popular'",
-		},
-
-		cli.IntFlag{
-			Name:  "cache-max-hits",
-			Value: 6,
-			Usage: "Maximum value of the cache read counter for a file",
-		},
-
-		cli.IntFlag{
-			Name:  "cache-age-interval",
-			Value: 4096,
-			Usage: "Number of reads after which read counters are decremented for all files",
-		},
-
-		cli.IntFlag{
-			Name:  "cache-age-decrement",
-			Value: 1,
-			Usage: "Decrement amount",
-		},
-
-		cli.IntFlag{
-			Name:  "cache-to-disk-hits",
-			Value: 2,
-			Usage: "Minimum value of the read counter to cache file on disk",
-		},
-
-		cli.IntFlag{
 			Name:  "max-disk-cache-fd",
 			Value: 512,
 			Usage: "Simultaneously opened cache file descriptor limit",
