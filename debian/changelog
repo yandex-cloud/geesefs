@@ -1,3 +1,10 @@
+geesefs (0.43.0) unstable; urgency=medium
+
+  * Do not return ENOMEM to readers by default, allow them to exceed the memory limit. May be turned back with --use-enomem
+  * Do not enable anonymous access when --iam is used
+
+ -- Vitaliy Filippov <vitalif@yourcmc.ru>  Fri, 07 Mar 2025 19:01:28 +0300
+
 geesefs (0.42.4) unstable; urgency=medium
 
   * Disable PATCH of empty files
