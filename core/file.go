@@ -146,16 +146,20 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 	}
 
 	// Try to reserve space without the inode lock
-	err = fh.inode.fs.bufferPool.Use(int64(len(data)), false)
-	if err != nil {
-		return err
+	if fh.inode.fs.flags.UseEnomem {
+		err = fh.inode.fs.bufferPool.Use(int64(len(data)), false)
+		if err != nil {
+			return err
+		}
 	}
 
 	fh.inode.mu.Lock()
 
 	if fh.inode.CacheState == ST_DELETED || fh.inode.CacheState == ST_DEAD {
 		// Oops, it's a deleted file. We don't support changing invisible files
-		fh.inode.fs.bufferPool.Use(-int64(len(data)), false)
+		if fh.inode.fs.flags.UseEnomem {
+			fh.inode.fs.bufferPool.Use(-int64(len(data)), false)
+		}
 		fh.inode.mu.Unlock()
 		return syscall.ENOENT
 	}
@@ -187,7 +191,9 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 	fh.inode.mu.Unlock()
 
 	// Correct memory usage
-	if allocated != int64(len(data)) {
+	if !fh.inode.fs.flags.UseEnomem {
+		fh.inode.fs.bufferPool.Use(allocated, true)
+	} else if allocated != int64(len(data)) {
 		err = fh.inode.fs.bufferPool.Use(allocated-int64(len(data)), true)
 	}
 
@@ -330,15 +336,17 @@ func (inode *Inode) LoadRange(offset, size uint64, readAheadSize uint64, ignoreM
 
 func (inode *Inode) retryRead(cloud StorageBackend, key string, offset, size uint64, ignoreMemoryLimit bool) {
 	// Maybe free some buffers first
-	err := inode.fs.bufferPool.Use(int64(size), ignoreMemoryLimit)
-	if err != nil {
-		log.Errorf("Error reading %v +%v of %v: %v", offset, size, key, err)
-		inode.mu.Lock()
-		inode.readError = err
-		inode.buffers.RemoveLoading(offset, size)
-		inode.mu.Unlock()
-		inode.readCond.Broadcast()
-		return
+	if inode.fs.flags.UseEnomem {
+		err := inode.fs.bufferPool.Use(int64(size), ignoreMemoryLimit)
+		if err != nil {
+			log.Errorf("Error reading %v +%v of %v: %v", offset, size, key, err)
+			inode.mu.Lock()
+			inode.readError = err
+			inode.buffers.RemoveLoading(offset, size)
+			inode.mu.Unlock()
+			inode.readCond.Broadcast()
+			return
+		}
 	}
 	inode.mu.Lock()
 	inode.LockRange(offset, size, false)
@@ -348,7 +356,7 @@ func (inode *Inode) retryRead(cloud StorageBackend, key string, offset, size uin
 	// is temporarily unavailable (err would be io.EOF in that case)
 	allocated := int64(0)
 	curOffset, curSize := offset, size
-	err = ReadBackoff(inode.fs.flags, func(attempt int) error {
+	err := ReadBackoff(inode.fs.flags, func(attempt int) error {
 		alloc, done, err := inode.sendRead(cloud, key, curOffset, curSize)
 		if err != nil && shouldRetry(err) {
 			s3Log.Warnf("Error reading %v +%v of %v (attempt %v): %v", curOffset, curSize, key, attempt, err)
@@ -358,7 +366,9 @@ func (inode *Inode) retryRead(cloud StorageBackend, key string, offset, size uin
 		allocated += alloc
 		return err
 	})
-	if allocated != int64(size) {
+	if !inode.fs.flags.UseEnomem {
+		inode.fs.bufferPool.Use(int64(allocated), true)
+	} else if allocated != int64(size) {
 		inode.fs.bufferPool.Use(int64(allocated)-int64(size), true)
 	}
 	inode.mu.Lock()

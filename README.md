@@ -204,10 +204,12 @@ GeeseFS uses RAM for two purposes:
 
    However, that means that more than 10 processes trying to read large files
    at the same time may exceed the memory limit by requesting more than 1000 MB
-   of buffers and in that case GeeseFS will return ENOMEM errors to some of them.
+   of buffers. Starting with v0.43.0, GeeseFS allows it, but you may turn this
+   off by using mount option `--use-enomem`, which will make GeeseFS prevent
+   exceeding memory limit and return ENOMEM errors to some of the processes instead.
 
-   You can overcome this problem by either raising `--memory-limit` (for example
-   to 4 GB) or lowering `--read-ahead-large` (for example to 20 MB).
+   The other way to overcome this problem is to either raise `--memory-limit` (for
+   example to 4 GB) or reduce `--read-ahead-large` (for example to 20 MB).
 
 ## Maximizing Throughput
 

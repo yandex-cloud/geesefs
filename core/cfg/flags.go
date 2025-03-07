@@ -340,6 +340,11 @@ MISC OPTIONS:
 			Value: 1000,
 		},
 
+		cli.BoolFlag{
+			Name:  "use-enomem",
+			Usage: "Return ENOMEM errors to applications when trying to read too many large files in parallel",
+		},
+
 		cli.IntFlag{
 			Name:  "entry-limit",
 			Usage: "Maximum metadata entries to cache in memory (1 entry uses ~1 KB of memory)",
@@ -824,6 +829,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 		// Tuning,
 		MemoryLimit:         uint64(1024 * 1024 * c.Int("memory-limit")),
+		UseEnomem:           c.Bool("use-enomem"),
 		EntryLimit:          c.Int("entry-limit"),
 		GCInterval:          uint64(1024 * 1024 * c.Int("gc-interval")),
 		Cheap:               c.Bool("cheap"),
