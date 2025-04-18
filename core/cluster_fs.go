@@ -152,6 +152,9 @@ func (fs *ClusterFs) createSymlink(parent *Inode, name string, target string) (
 	}
 
 	child := fs.createChild(parent, name, fs.Flags.FileMode|iofs.ModeSymlink)
+	if fs.Flags.SymlinkZeroed {
+		child.Attributes.Size = 0
+	}
 
 	child.userMetadata[fs.Flags.SymlinkAttr] = []byte(target)
 	child.userMetadataDirty = 2

@@ -587,6 +587,15 @@ func (s *S3Backend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 		prefixes = append(prefixes, BlobPrefixOutput{Prefix: p.Prefix})
 	}
 	for _, i := range resp.Contents {
+
+		if s.flags.SymlinkZeroed && *i.Size == 0 {
+			head, err := s.HeadBlob(&HeadBlobInput{Key: *i.Key})
+			if err != nil {
+				return nil, err
+			}
+			i.UserMetadata = head.Metadata
+		}
+
 		items = append(items, BlobItemOutput{
 			Key:          i.Key,
 			ETag:         i.ETag,
