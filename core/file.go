@@ -532,6 +532,11 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	offset := uint64(sOffset)
 	size := uint64(sLen)
 
+	hash := fh.inode.userMetadata[fh.inode.fs.flags.HashAttr]
+	if hash != nil {
+		log.Infof("hash: %v", string(hash))
+	}
+
 	fh.inode.logFuse("ReadFile", offset, size)
 	defer func() {
 		fh.inode.logFuse("< ReadFile", bytesRead, err)

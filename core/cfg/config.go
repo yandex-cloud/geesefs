@@ -96,6 +96,7 @@ type FlagStorage struct {
 	MtimeAttr           string
 	SymlinkAttr         string
 	SymlinkZeroed       bool
+	HashAttr            string
 	RefreshAttr         string
 	RefreshFilename     string
 	FlushFilename       string
