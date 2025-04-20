@@ -1019,6 +1019,7 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 		if err != nil {
 			return nil, err
 		}
+		log.Infof("COMPUTED hash: %v", hash)
 		param.Metadata[s.flags.HashAttr] = &hash
 	}
 
