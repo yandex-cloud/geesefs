@@ -566,6 +566,12 @@ MISC OPTIONS:
 				" You can use --symlink-zeroed flag to make additional HEAD requests as a workaround.",
 		},
 
+		cli.StringFlag{
+			Name:  "hash-attr",
+			Value: "--content-sha1",
+			Usage: "Hash attribute name",
+		},
+
 		cli.BoolFlag{
 			Name: "symlink-zeroed",
 			Usage: "Strip content when creating symlink files and make an additional" +
@@ -1079,9 +1085,9 @@ func DefaultFlags() *FlagStorage {
 		FileModeAttr:        "mode",
 		RdevAttr:            "rdev",
 		MtimeAttr:           "mtime",
+		HashAttr:            "--content-sha1",
 		SymlinkAttr:         "--symlink-target",
 		SymlinkZeroed:       false,
-		HashAttr:            "--content-md5",
 		RefreshAttr:         ".invalidate",
 		StatCacheTTL:        30 * time.Second,
 		HTTPTimeout:         30 * time.Second,

@@ -978,7 +978,6 @@ func getDate(resp *http.Response) *time.Time {
 
 func (s *S3Backend) computeHash(body io.ReadSeeker) (string, error) {
 	hasher := sha256.New()
-
 	const bufferSize = 4096
 	buffer := make([]byte, bufferSize)
 
@@ -1012,15 +1011,6 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 		Body:         param.Body,
 		StorageClass: storageClass,
 		ContentType:  param.ContentType,
-	}
-
-	if s.flags.HashAttr != "" {
-		hash, err := s.computeHash(param.Body)
-		if err != nil {
-			return nil, err
-		}
-		log.Infof("COMPUTED hash: %v", hash)
-		param.Metadata[s.flags.HashAttr] = &hash
 	}
 
 	if s.config.UseSSE {

@@ -16,6 +16,8 @@
 package core
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -1535,6 +1537,12 @@ func (inode *Inode) flushSmallObject() {
 				inode.SetCacheState(ST_MODIFIED)
 			}
 		}
+
+		// Compute hash of file and store it in user metadata
+		err = inode.finalizeAndHash()
+		if err != nil {
+			log.Warnf("Failed to finalize and hash object %v: %v", key, err)
+		}
 	}
 
 	inode.UnlockRange(0, sz, true)
@@ -1789,6 +1797,13 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 		}
 	} else {
 		log.Debugf("Finalized multi-part upload of object %v: etag=%v, size=%v", key, NilStr(resp.ETag), finalSize)
+
+		// Compute hash of file and store it in user metadata
+		err := inode.finalizeAndHash()
+		if err != nil {
+			log.Warnf("Failed to finalize and hash object %v: %v", key, err)
+		}
+
 		if inode.userMetadataDirty == 1 {
 			inode.userMetadataDirty = 0
 		}
@@ -1803,6 +1818,35 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 			}
 		}
 	}
+}
+
+func (inode *Inode) finalizeAndHash() error {
+	if inode.fs.flags.HashAttr == "" {
+		return nil
+	}
+
+	// Assume the inode is locked and multipart upload is already finalized
+	reader, _, err := inode.getMultiReader(0, inode.Attributes.Size)
+	if err != nil {
+		return err
+	}
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, reader); err != nil {
+		return err
+	}
+	hash := hex.EncodeToString(hasher.Sum(nil))
+
+	log.Debugf("Computed and stored hash of content(%v): %v", inode.FullName(), hash)
+
+	if inode.userMetadata == nil {
+		inode.userMetadata = make(map[string][]byte)
+	}
+
+	inode.userMetadata[inode.fs.flags.HashAttr] = []byte(hash)
+	inode.sendUpdateMeta()
+
+	return nil
 }
 
 func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *time.Time, storageClass *string) {
