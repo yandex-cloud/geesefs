@@ -534,11 +534,6 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	offset := uint64(sOffset)
 	size := uint64(sLen)
 
-	hash := fh.inode.userMetadata[fh.inode.fs.flags.HashAttr]
-	if hash != nil {
-		log.Infof("hash: %v", string(hash))
-	}
-
 	fh.inode.logFuse("ReadFile", offset, size)
 	defer func() {
 		fh.inode.logFuse("< ReadFile", bytesRead, err)
@@ -565,6 +560,14 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	// Guard buffers against eviction
 	fh.inode.LockRange(offset, size, false)
 	defer fh.inode.UnlockRange(offset, size, false)
+
+	// Try to read from cache
+	hash, ok := fh.inode.userMetadata[fh.inode.fs.flags.HashAttr]
+	if ok {
+		log.Infof("Hash of file '%s': %s", fh.inode.FullName(), string(hash))
+		// TODO: since we have the hash of the file, we can try loading this specific part of the file
+		// from the cache client
+	}
 
 	// Check if anything requires to be loaded from the server
 	ra := fh.getReadAhead()
@@ -1837,7 +1840,7 @@ func (inode *Inode) finalizeAndHash() error {
 	}
 	hash := hex.EncodeToString(hasher.Sum(nil))
 
-	log.Debugf("Computed and stored hash of content(%v): %v", inode.FullName(), hash)
+	log.Debugf("Computed and stored hash of file '%s': %s", inode.FullName(), hash)
 
 	if inode.userMetadata == nil {
 		inode.userMetadata = make(map[string][]byte)
