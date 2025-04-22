@@ -16,6 +16,9 @@
 package core
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -41,6 +44,8 @@ type FileHandle struct {
 const IOV_MAX = 1024
 const READ_BUF_SIZE = 128 * 1024
 const MAX_FLUSH_PRIORITY = 3
+
+var errContentNotFound = errors.New("content not found")
 
 // NewFileHandle returns a new file handle for the given `inode`
 func NewFileHandle(inode *Inode) *FileHandle {
@@ -228,12 +233,15 @@ func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ign
 	if last.End > inode.knownSize {
 		last.End = inode.knownSize
 	}
+
 	// Split very large requests into smaller chunks to read in parallel
 	readRanges = splitRA(readRanges, inode.fs.flags.ReadAheadParallelKB*1024)
+
 	// Mark new ranges as being loaded from the server
 	for _, rr := range readRanges {
 		inode.buffers.AddLoading(rr.Start, rr.End-rr.Start)
 	}
+
 	// Send requests
 	if inode.readCond == nil {
 		inode.readCond = sync.NewCond(&inode.mu)
@@ -243,6 +251,7 @@ func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ign
 		_, key = inode.oldParent.cloud()
 		key = appendChildName(key, inode.oldName)
 	}
+
 	for _, rr := range readRanges {
 		go inode.retryRead(cloud, key, rr.Start, rr.End-rr.Start, ignoreMemoryLimit)
 	}
@@ -264,11 +273,32 @@ func (inode *Inode) loadFromDisk(diskRanges []Range) (allocated int64, err error
 	return
 }
 
+func (inode *Inode) loadFromExternalCache(offset uint64, size uint64, hash string) (allocated int64, totalDone uint64, err error) {
+	buf, err := inode.fs.flags.ExternalCacheClient.GetContent(string(hash), int64(offset), int64(size), struct{ RoutingKey string }{RoutingKey: hash})
+	if err != nil || buf == nil {
+		if err.Error() == errContentNotFound.Error() {
+			inode.fs.CacheFileInExternalCache(inode)
+		}
+
+		return 0, 0, err
+	}
+
+	totalDone = uint64(len(buf))
+
+	// Cache the result
+	inode.mu.Lock()
+	allocated += inode.buffers.Add(offset, buf, BUF_CLEAN, false)
+	inode.mu.Unlock()
+
+	// Notify waiting readers
+	inode.readCond.Broadcast()
+	return allocated, totalDone, nil
+}
+
 // Load some inode data into memory
 // Must be called with inode.mu taken
 // Loaded range should be guarded against eviction by adding it into inode.readRanges
 func (inode *Inode) LoadRange(offset, size uint64, readAheadSize uint64, ignoreMemoryLimit bool) (miss bool, err error) {
-
 	if offset >= inode.Attributes.Size {
 		return
 	}
@@ -351,26 +381,44 @@ func (inode *Inode) retryRead(cloud StorageBackend, key string, offset, size uin
 	inode.mu.Lock()
 	inode.LockRange(offset, size, false)
 	inode.mu.Unlock()
+
 	// We want to retry all errors and sometimes even OK states because S3 may
 	// sometimes return 200 or 206 and then drop the connection if some data
 	// is temporarily unavailable (err would be io.EOF in that case)
 	allocated := int64(0)
 	curOffset, curSize := offset, size
 	err := ReadBackoff(inode.fs.flags, func(attempt int) error {
-		alloc, done, err := inode.sendRead(cloud, key, curOffset, curSize)
+		hash, hashFound := inode.userMetadata[inode.fs.flags.HashAttr]
+
+		var alloc int64 = 0
+		var done uint64 = 0
+		var err error = nil
+
+		if inode.fs.flags.ExternalCacheClient != nil && hashFound {
+			alloc, done, err = inode.loadFromExternalCache(curOffset, curSize, string(hash))
+			if err != nil {
+				alloc, done, err = inode.sendRead(cloud, key, curOffset, curSize)
+			}
+		} else {
+			alloc, done, err = inode.sendRead(cloud, key, curOffset, curSize)
+		}
+
 		if err != nil && shouldRetry(err) {
 			s3Log.Warnf("Error reading %v +%v of %v (attempt %v): %v", curOffset, curSize, key, attempt, err)
 		}
+
 		curOffset += done
 		curSize -= done
 		allocated += alloc
 		return err
 	})
+
 	if !inode.fs.flags.UseEnomem {
 		inode.fs.bufferPool.Use(int64(allocated), true)
 	} else if allocated != int64(size) {
 		inode.fs.bufferPool.Use(int64(allocated)-int64(size), true)
 	}
+
 	inode.mu.Lock()
 	inode.buffers.RemoveLoading(offset, size)
 	inode.UnlockRange(offset, size, false)
@@ -390,6 +438,7 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 	if err != nil {
 		return 0, 0, err
 	}
+
 	for size > 0 {
 		// Read the result in smaller parts so parallelism can be utilized better
 		bs := size
@@ -405,6 +454,7 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 				return allocated, totalDone, err
 			}
 		}
+
 		// Cache part of the result
 		inode.mu.Lock()
 		if inode.userMetadata == nil {
@@ -541,6 +591,18 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 			}
 		}
 	}()
+
+	if fh.inode.fs.flags.ExternalCacheClient != nil && fh.inode.userMetadata == nil && !fh.inode.isDir() {
+		fh.inode.mu.Lock()
+		cloud, path := fh.inode.cloud()
+		head, err := cloud.HeadBlob(&HeadBlobInput{Key: path})
+		if err != nil {
+			log.Errorf("Error getting head blob: %v", err)
+		}
+
+		fh.inode.setMetadata(head.Metadata)
+		fh.inode.mu.Unlock()
+	}
 
 	// Lock inode
 	fh.inode.mu.Lock()
@@ -1530,6 +1592,13 @@ func (inode *Inode) flushSmallObject() {
 				inode.SetCacheState(ST_MODIFIED)
 			}
 		}
+
+		// Compute hash of file and store it in user metadata
+		err = inode.finalizeAndHash()
+		if err != nil {
+			log.Warnf("Failed to finalize and hash object %v: %v", key, err)
+		}
+
 	}
 
 	inode.UnlockRange(0, sz, true)
@@ -1784,6 +1853,13 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 		}
 	} else {
 		log.Debugf("Finalized multi-part upload of object %v: etag=%v, size=%v", key, NilStr(resp.ETag), finalSize)
+
+		// Compute hash of file and store it in user metadata
+		err := inode.finalizeAndHash()
+		if err != nil {
+			log.Warnf("Failed to finalize and hash object %v: %v", key, err)
+		}
+
 		if inode.userMetadataDirty == 1 {
 			inode.userMetadataDirty = 0
 		}
@@ -1798,6 +1874,41 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 			}
 		}
 	}
+}
+
+func (inode *Inode) finalizeAndHash() error {
+	if inode.isDir() {
+		return nil
+	}
+
+	if inode.fs.flags.HashAttr == "" {
+		return nil
+	}
+
+	// Assume the inode is locked and multipart upload is already finalized
+	reader, _, err := inode.getMultiReader(0, inode.Attributes.Size)
+	if err != nil {
+		return err
+	}
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, reader); err != nil {
+		return err
+	}
+	hash := hex.EncodeToString(hasher.Sum(nil))
+
+	log.Debugf("Computed and stored hash of file '%s': %s", inode.FullName(), hash)
+
+	if inode.userMetadata == nil {
+		inode.userMetadata = make(map[string][]byte)
+	}
+
+	inode.userMetadata[inode.fs.flags.HashAttr] = []byte(hash)
+	inode.sendUpdateMeta()
+
+	inode.fs.CacheFileInExternalCache(inode)
+
+	return nil
 }
 
 func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *time.Time, storageClass *string) {

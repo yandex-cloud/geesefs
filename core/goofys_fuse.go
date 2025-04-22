@@ -18,6 +18,9 @@
 package core
 
 import (
+	"os/exec"
+
+	"github.com/moby/sys/mountinfo"
 	"github.com/yandex-cloud/geesefs/core/cfg"
 
 	"context"
@@ -955,6 +958,15 @@ func mountFuseFS(fs *Goofys) (mfs MountedFS, err error) {
 		return
 	}
 
+	// Update read_ahead_kb on the mount point if set
+	if fs.flags.FuseReadAheadKB > 0 {
+		err = updateFuseReadAheadKB(fs.flags.MountPoint, int(fs.flags.FuseReadAheadKB))
+		if err != nil {
+			log.Warnf("Failed to update read_ahead_kb: %v", err)
+			err = nil
+		}
+	}
+
 	mfs = &FuseMfsWrapper{
 		MountedFileSystem: fuseMfs,
 		fs:                fs,
@@ -962,6 +974,37 @@ func mountFuseFS(fs *Goofys) (mfs MountedFS, err error) {
 	}
 
 	return
+}
+
+// updateFuseReadAheadKB updates the read_ahead_kb value for the mount point
+func updateFuseReadAheadKB(mountPoint string, valueKB int) error {
+	mounts, err := mountinfo.GetMounts(nil)
+	if err != nil {
+		return fmt.Errorf("failed to get mount info: %w", err)
+	}
+
+	var deviceID string
+	for _, mount := range mounts {
+		if mount.Mountpoint == mountPoint {
+			deviceID = fmt.Sprintf("%d:%d", mount.Major, mount.Minor)
+			break
+		}
+	}
+
+	if deviceID == "" {
+		return fmt.Errorf("mount point %s not found", mountPoint)
+	}
+
+	// Construct path to read_ahead_kb
+	readAheadPath := fmt.Sprintf("/sys/class/bdi/%s/read_ahead_kb", deviceID)
+
+	// Update read_ahead_kb
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("echo %d > %s", valueKB, readAheadPath))
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to update read_ahead_kb: %w read_ahead_path: %s", err, readAheadPath)
+	}
+
+	return nil
 }
 
 func TryUnmount(mountPoint string) (err error) {

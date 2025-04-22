@@ -1,0 +1,13 @@
+dev:
+  geesefs:
+    image: registry.localhost:5000/geesefs:latest
+    command: ["/workspace/bin/hotreload.sh"]
+    sync:
+      - ../:/workspace
+    environment:
+      DEFAULT_NAMESPACE: ${OKTETO_NAMESPACE}
+      BUILD_COMMAND: "cd /workspace && go build -ldflags \"-X main.Version=`git rev-parse HEAD`\" -o /workspace/bin/geesefs"
+      BUILD_BINARY_PATH: "/workspace/bin/geesefs"
+      CONFIG_PATH: "/workspace/config.yaml"
+    persistentVolume:
+      enabled: false

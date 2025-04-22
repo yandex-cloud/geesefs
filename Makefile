@@ -1,4 +1,5 @@
 export CGO_ENABLED=0
+tag := latest
 
 run-test: s3proxy.jar
 	./test/run-tests.sh
@@ -18,6 +19,13 @@ get-deps: s3proxy.jar
 
 build:
 	go build -ldflags "-X main.Version=`git rev-parse HEAD`"
+
+build-docker:
+	docker build . --target build -f ./Dockerfile -t localhost:5001/geesefs:$(tag)
+	docker push localhost:5001/geesefs:$(tag)
+
+start:
+	cd hack && okteto up -f okteto.yaml
 
 install:
 	go install -ldflags "-X main.Version=`git rev-parse HEAD`"

@@ -55,6 +55,9 @@ type FlagStorage struct {
 	Endpoint       string
 	Backend        interface{}
 
+	// External Caching
+	ExternalCacheClient ContentCache
+
 	// Tuning
 	MemoryLimit         uint64
 	UseEnomem           bool
@@ -73,6 +76,7 @@ type FlagStorage struct {
 	ReadRetryMax        time.Duration
 	ReadRetryAttempts   int
 	RetryInterval       time.Duration
+	FuseReadAheadKB     uint64
 	ReadAheadKB         uint64
 	SmallReadCount      uint64
 	SmallReadCutoffKB   uint64
@@ -96,6 +100,7 @@ type FlagStorage struct {
 	MtimeAttr           string
 	SymlinkAttr         string
 	SymlinkZeroed       bool
+	HashAttr            string
 	RefreshAttr         string
 	RefreshFilename     string
 	FlushFilename       string

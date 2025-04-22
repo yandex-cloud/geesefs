@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: geesefs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: geesefs
+  template:
+    metadata:
+      labels:
+        app: geesefs
+    spec:
+      containers:
+        - name: geesefs
+          image: registry.localhost:5000/geesefs:latest
+          command: ["tail", "-f", "/dev/null"]
+          securityContext:
+            privileged: true

@@ -48,7 +48,12 @@ import (
 // does not have a on disk data cache, and consistency model is
 // close-to-open.
 
+type cacheEvent struct {
+	inode *Inode
+}
+
 type Goofys struct {
+	ctx    context.Context
 	bucket string
 
 	flags *cfg.FlagStorage
@@ -119,6 +124,10 @@ type Goofys struct {
 	stats OpStats
 
 	NotifyCallback func(notifications []interface{})
+
+	cacheEventChan  chan cacheEvent
+	cachingStatus   map[string]bool
+	cachingStatusMu sync.Mutex
 }
 
 type OpStats struct {
@@ -212,6 +221,7 @@ func NewGoofys(ctx context.Context, bucketName string, flags *cfg.FlagStorage) (
 	if flags.DebugS3 {
 		cfg.SetCloudLogLevel(logrus.DebugLevel)
 	}
+
 	if flags.Backend == nil {
 		if spec, err := ParseBucketSpec(bucketName); err == nil {
 			switch spec.Scheme {
@@ -286,8 +296,10 @@ func NewGoofys(ctx context.Context, bucketName string, flags *cfg.FlagStorage) (
 
 func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 	newBackend func(string, *cfg.FlagStorage) (StorageBackend, error)) (*Goofys, error) {
+
 	// Set up the basic struct.
 	fs := &Goofys{
+		ctx:              ctx,
 		bucket:           bucket,
 		flags:            flags,
 		umask:            0122,
@@ -299,6 +311,9 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 			ts: time.Now(),
 		},
 		flushPriorities: make([]int64, MAX_FLUSH_PRIORITY+1),
+		cacheEventChan:  make(chan cacheEvent, 10000),
+		cachingStatus:   make(map[string]bool),
+		cachingStatusMu: sync.Mutex{},
 	}
 
 	var prefix string
@@ -381,8 +396,91 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 	}
 
 	go fs.MetaEvictor()
+	go fs.processCacheEvents()
 
 	return fs, nil
+}
+
+func (fs *Goofys) processCacheEvents() {
+	for {
+		select {
+		case <-fs.shutdownCh:
+			return
+		case cacheEvent := <-fs.cacheEventChan:
+			log.Debugf("Processing cache event for inode: %v", cacheEvent.inode.FullName())
+
+			inode := cacheEvent.inode
+			flags := inode.fs.flags
+
+			knownHash, ok := inode.userMetadata[flags.HashAttr]
+			if !ok {
+				log.Errorf("No hash found for inode, not caching inode in external cache: %v", inode.FullName())
+				continue
+			}
+
+			s3, ok := flags.Backend.(*cfg.S3Config)
+			if !ok {
+				log.Errorf("Backend is not S3, not caching inode in external cache: %v", inode.FullName())
+				continue
+			}
+
+			if inode.Attributes.Size > 0 {
+				hash, err := fs.flags.ExternalCacheClient.StoreContentFromS3(struct {
+					Path        string
+					BucketName  string
+					Region      string
+					EndpointURL string
+					AccessKey   string
+					SecretKey   string
+				}{
+					Path:        inode.FullName(),
+					BucketName:  fs.bucket,
+					Region:      s3.Region,
+					EndpointURL: flags.Endpoint,
+					AccessKey:   s3.AccessKey,
+					SecretKey:   s3.SecretKey,
+				}, struct {
+					RoutingKey string
+					Lock       bool
+				}{RoutingKey: string(knownHash), Lock: true})
+				if err != nil {
+					log.Debugf("Failed to store content from source: %v", err)
+				} else if hash != string(knownHash) {
+					log.Debugf("Hash mismatch for inode: %v", inode.FullName())
+					continue
+				}
+
+				fs.clearCachingStatus(inode.FullName())
+				log.Debugf("Successfully cached inode: %v", inode.FullName())
+			}
+		}
+	}
+}
+
+func (fs *Goofys) CacheFileInExternalCache(inode *Inode) {
+	hash, ok := inode.userMetadata[fs.flags.HashAttr]
+	if !ok {
+		log.Errorf("No hash found for inode, not caching inode in external cache: %v", inode.FullName())
+		return
+	}
+
+	// Check and update caching status
+	fs.cachingStatusMu.Lock()
+	if fs.cachingStatus[string(hash)] {
+		fs.cachingStatusMu.Unlock()
+		return // File is already being cached or has been cached
+	}
+	fs.cachingStatus[string(hash)] = true
+	fs.cachingStatusMu.Unlock()
+
+	// Submit cache event
+	fs.cacheEventChan <- cacheEvent{inode: inode}
+}
+
+func (fs *Goofys) clearCachingStatus(path string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	delete(fs.cachingStatus, path)
 }
 
 func (fs *Goofys) Shutdown() {

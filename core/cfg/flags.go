@@ -566,6 +566,14 @@ MISC OPTIONS:
 				" You can use --symlink-zeroed flag to make additional HEAD requests as a workaround.",
 		},
 
+		cli.StringFlag{
+			Name:  "hash-attr",
+			Value: "--content-sha256",
+			Usage: "Hash metadata attribute name." +
+				" If this attribute is present, the hash will be computed on the client side and pushed to user metadata." +
+				" It can then be retrieved with HEAD requests.",
+		},
+
 		cli.BoolFlag{
 			Name: "symlink-zeroed",
 			Usage: "Strip content when creating symlink files and make an additional" +
@@ -873,6 +881,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		FileModeAttr:        c.String("mode-attr"),
 		RdevAttr:            c.String("rdev-attr"),
 		MtimeAttr:           c.String("mtime-attr"),
+		HashAttr:            c.String("hash-attr"),
 		SymlinkAttr:         c.String("symlink-attr"),
 		SymlinkZeroed:       c.Bool("symlink-zeroed"),
 		RefreshAttr:         c.String("refresh-attr"),
@@ -1078,6 +1087,7 @@ func DefaultFlags() *FlagStorage {
 		FileModeAttr:        "mode",
 		RdevAttr:            "rdev",
 		MtimeAttr:           "mtime",
+		HashAttr:            "--content-sha256",
 		SymlinkAttr:         "--symlink-target",
 		SymlinkZeroed:       false,
 		RefreshAttr:         ".invalidate",
@@ -1092,5 +1102,6 @@ func DefaultFlags() *FlagStorage {
 			{PartSize: 25 * 1024 * 1024, PartCount: 1000},
 			{PartSize: 125 * 1024 * 1024, PartCount: 8000},
 		},
+		ExternalCacheClient: nil,
 	}
 }
