@@ -56,7 +56,9 @@ type FlagStorage struct {
 	Backend        interface{}
 
 	// External Caching
-	ExternalCacheClient ContentCache
+	ExternalCacheClient  ContentCache
+	HashAttr             string
+	MinFileSizeForHashKB uint64
 
 	// Tuning
 	MemoryLimit         uint64
@@ -100,7 +102,6 @@ type FlagStorage struct {
 	MtimeAttr           string
 	SymlinkAttr         string
 	SymlinkZeroed       bool
-	HashAttr            string
 	RefreshAttr         string
 	RefreshFilename     string
 	FlushFilename       string
