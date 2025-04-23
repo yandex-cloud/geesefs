@@ -612,6 +612,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	}()
 
 	if fh.shouldRetrieveHash() {
+		fh.inode.mu.Lock()
 		cloud, path := fh.inode.cloud()
 		head, err := cloud.HeadBlob(&HeadBlobInput{Key: path})
 		if err != nil {
