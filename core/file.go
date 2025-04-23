@@ -578,6 +578,25 @@ func (fh *FileHandle) getReadAhead() uint64 {
 	return ra
 }
 
+// shouldRetrieveHash returns true if we should retrieve the hash of the file
+// from the server -- this costs an extra HEAD request, so we only do it for
+// large files where the hash is not already present in user metadata.
+func (fh *FileHandle) shouldRetrieveHash() bool {
+	if fh.inode.userMetadata != nil {
+		return false
+	}
+
+	if fh.inode.Attributes.Size < fh.inode.fs.flags.MinFileSizeForHashKB*1024 {
+		return false
+	}
+
+	if fh.inode.isDir() {
+		return false
+	}
+
+	return true
+}
+
 func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesRead int, err error) {
 	offset := uint64(sOffset)
 	size := uint64(sLen)
@@ -592,8 +611,7 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 		}
 	}()
 
-	if fh.inode.fs.flags.ExternalCacheClient != nil && fh.inode.userMetadata == nil && !fh.inode.isDir() {
-		fh.inode.mu.Lock()
+	if fh.shouldRetrieveHash() {
 		cloud, path := fh.inode.cloud()
 		head, err := cloud.HeadBlob(&HeadBlobInput{Key: path})
 		if err != nil {
@@ -1878,6 +1896,10 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 
 func (inode *Inode) finalizeAndHash() error {
 	if inode.isDir() {
+		return nil
+	}
+
+	if inode.Attributes.Size < inode.fs.flags.MinFileSizeForHashKB*1024 {
 		return nil
 	}
 
