@@ -16,6 +16,7 @@
 package core
 
 import (
+	blobcache "github.com/beam-cloud/blobcache-v2/pkg"
 	"github.com/yandex-cloud/geesefs/core/cfg"
 
 	"context"
@@ -425,24 +426,16 @@ func (fs *Goofys) processCacheEvents() {
 			}
 
 			if inode.Attributes.Size > 0 {
-				hash, err := fs.flags.ExternalCacheClient.StoreContentFromS3(struct {
-					Path        string
-					BucketName  string
-					Region      string
-					EndpointURL string
-					AccessKey   string
-					SecretKey   string
-				}{
+				hash, err := fs.flags.ExternalCacheClient.StoreContentFromS3(blobcache.ContentSourceS3{
 					Path:        inode.FullName(),
 					BucketName:  fs.bucket,
 					Region:      s3.Region,
 					EndpointURL: flags.Endpoint,
 					AccessKey:   s3.AccessKey,
 					SecretKey:   s3.SecretKey,
-				}, struct {
-					RoutingKey string
-					Lock       bool
-				}{RoutingKey: string(knownHash), Lock: true})
+					// This is how this option is set in the ToAWSConfig method (conf_s3.go)
+					ForcePathStyle: !s3.Subdomain,
+				}, blobcache.StoreContentOptions{RoutingKey: string(knownHash), Lock: true})
 				if err != nil {
 					log.Debugf("Failed to store content from source: %v", err)
 				} else if hash != string(knownHash) {
