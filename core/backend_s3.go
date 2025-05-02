@@ -828,8 +828,7 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 
 	// Copy into the same object is used to just update metadata
 	// and should be very quick regardless of parameters
-	if param.Source != param.Destination {
-
+	if param.Source != param.Destination || *param.Size > s.config.MultipartCopyThreshold {
 		// FIXME Remove additional HEAD query
 		if param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
 			(param.Metadata == nil || param.StorageClass == nil)) {

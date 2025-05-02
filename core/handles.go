@@ -18,8 +18,11 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"hash"
+	"io"
 	"net/url"
 	"os"
 	"sort"
@@ -149,6 +152,12 @@ type Inode struct {
 	ownerTerm  uint64
 	owner      NodeId
 	readyOwner bool
+
+	// hash state for multipart uploads
+	hashLock         sync.Mutex
+	hashInProgress   hash.Hash
+	hashOffset       uint64
+	pendingHashParts map[uint64][]byte // key: offset, value: data
 }
 
 func NewInode(fs *Goofys, parent *Inode, name string) (inode *Inode) {
@@ -1025,4 +1034,42 @@ func (inode *Inode) DumpThis(withBuffers bool) (children []*Inode) {
 	log.Error(dump)
 
 	return children
+}
+
+func (inode *Inode) hashFlushedPart(partOffset, partSize uint64) error {
+	bufReader, _, err := inode.getMultiReader(partOffset, partSize)
+	if err != nil {
+		return err
+	}
+	data, err := io.ReadAll(bufReader)
+	if err != nil {
+		return err
+	}
+
+	inode.hashLock.Lock()
+	defer inode.hashLock.Unlock()
+
+	if inode.hashInProgress == nil {
+		inode.hashInProgress = sha256.New()
+		inode.hashOffset = 0
+		inode.pendingHashParts = make(map[uint64][]byte)
+	}
+
+	if partOffset == inode.hashOffset {
+		inode.hashInProgress.Write(data)
+		inode.hashOffset += uint64(len(data))
+		for {
+			next, ok := inode.pendingHashParts[inode.hashOffset]
+			if !ok {
+				break
+			}
+			inode.hashInProgress.Write(next)
+			inode.hashOffset += uint64(len(next))
+			delete(inode.pendingHashParts, inode.hashOffset-uint64(len(next)))
+		}
+	} else {
+		// out of order, buffer part until the next caller aligns with this offset
+		inode.pendingHashParts[partOffset] = data
+	}
+	return nil
 }

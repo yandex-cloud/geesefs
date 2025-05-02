@@ -753,6 +753,7 @@ func (inode *Inode) TryFlush(priority int) bool {
 }
 
 func (inode *Inode) sendUpload(priority int) bool {
+
 	if inode.oldParent != nil && inode.IsFlushing == 0 && inode.mpu == nil {
 		// Rename file
 		inode.sendRename()
@@ -1089,6 +1090,7 @@ func (inode *Inode) sendUploadParts(priority int) (bool, bool) {
 	var partlyZero []uint64
 	var fullyZero []uint64
 	anyEvicted := false
+
 	// Dirty parts should be flushed in the following order:
 	// 1) completely filled non-zero non-RMW-evicted parts
 	// 2) only when there are no more (priority 1) parts: partly filled non-RMW parts
@@ -1711,7 +1713,6 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) flushPart(part uint64) {
-
 	partOffset, partSize := inode.fs.partRange(part)
 	partFullSize := partSize
 
@@ -1808,6 +1809,13 @@ func (inode *Inode) flushPart(part uint64) {
 		}
 		log.Debugf("Flushed part %v of object %v", part, key)
 		inode.buffers.SetState(partOffset, partSize, bufIds, doneState)
+
+		// Only hash in chunks if it's a multipart upload
+		if inode.mpu != nil {
+			if err := inode.hashFlushedPart(partOffset, partSize); err != nil {
+				log.Warnf("Failed to hash flushed part %v of object %v: %v", part, key, err)
+			}
+		}
 	}
 }
 
@@ -1908,7 +1916,32 @@ func (inode *Inode) finalizeAndHash() error {
 		return nil
 	}
 
-	// Assume the inode is locked and multipart upload is already finalized
+	// If this was a multipart upload, use the incremental hash
+	if inode.mpu != nil && inode.hashInProgress != nil {
+		inode.hashLock.Lock()
+		defer inode.hashLock.Unlock()
+
+		if inode.hashOffset != inode.Attributes.Size {
+			return fmt.Errorf("not all parts have been hashed: hashed %d, expected %d", inode.hashOffset, inode.Attributes.Size)
+		}
+
+		hash := hex.EncodeToString(inode.hashInProgress.Sum(nil))
+		log.Debugf("Computed and stored hash of file '%s': %s", inode.FullName(), hash)
+
+		if inode.userMetadata == nil {
+			inode.userMetadata = make(map[string][]byte)
+		}
+		inode.userMetadata[inode.fs.flags.HashAttr] = []byte(hash)
+		inode.sendUpdateMeta()
+		inode.fs.CacheFileInExternalCache(inode)
+
+		// Clean up
+		inode.hashInProgress = nil
+		inode.pendingHashParts = nil
+		return nil
+	}
+
+	// For small files, just hash the whole file at once (we're already locking the range so no evictions can happen before this call)
 	reader, _, err := inode.getMultiReader(0, inode.Attributes.Size)
 	if err != nil {
 		return err
