@@ -753,6 +753,15 @@ func (inode *Inode) TryFlush(priority int) bool {
 }
 
 func (inode *Inode) sendUpload(priority int) bool {
+	smallFile := inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024
+
+	log.Infof("sendUpload: inode.oldParent = %v, inode.IsFlushing = %v, inode.mpu = %v", inode.oldParent, inode.IsFlushing, inode.mpu)
+	log.Infof("sendUpload: inode.CacheState = %v, inode.userMetadataDirty = %v", inode.CacheState, inode.userMetadataDirty)
+	log.Infof("sendUpload: inode.Attributes.Size = %v, inode.fs.flags.SinglePartMB = %v", inode.Attributes.Size, inode.fs.flags.SinglePartMB)
+	log.Infof("sendUpload: inode.fs.flags.UsePatch = %v, inode.fs.flags.PreferPatchUploads = %v", inode.fs.flags.UsePatch, inode.fs.flags.PreferPatchUploads)
+	log.Infof("sendUpload: inode.uploadedAsMultipart() = %v, inode.knownETag = %v, smallFile = %v", inode.uploadedAsMultipart(), inode.knownETag, smallFile)
+	log.Infof("sendUpload: inode.knownSize = %v, inode.Attributes.Size = %v", inode.knownSize, inode.Attributes.Size)
+
 	if inode.oldParent != nil && inode.IsFlushing == 0 && inode.mpu == nil {
 		// Rename file
 		inode.sendRename()
@@ -774,7 +783,6 @@ func (inode *Inode) sendUpload(priority int) bool {
 		return false
 	}
 
-	smallFile := inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024
 	canPatch := inode.fs.flags.UsePatch &&
 		// Can only patch modified inodes with completed MPUs.
 		inode.CacheState == ST_MODIFIED && inode.mpu == nil &&
@@ -1907,6 +1915,16 @@ func (inode *Inode) finalizeAndHash() error {
 	if inode.fs.flags.HashAttr == "" {
 		return nil
 	}
+
+	// // Lock the entire file range to prevent eviction during hashing
+	// inode.LockRange(0, inode.Attributes.Size, false)
+	// defer inode.UnlockRange(0, inode.Attributes.Size, false)
+
+	// // Ensure all data is loaded into memory
+	// _, err := inode.LoadRange(0, inode.Attributes.Size, 0, true)
+	// if err != nil {
+	// 	return err
+	// }
 
 	// Assume the inode is locked and multipart upload is already finalized
 	reader, _, err := inode.getMultiReader(0, inode.Attributes.Size)
