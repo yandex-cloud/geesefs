@@ -153,6 +153,8 @@ type Inode struct {
 	owner      NodeId
 	readyOwner bool
 
+	// hash state for multipart uploads
+	hashLock         sync.Mutex
 	hashInProgress   hash.Hash
 	hashOffset       uint64
 	pendingHashParts map[uint64][]byte // key: offset, value: data
@@ -1035,7 +1037,6 @@ func (inode *Inode) DumpThis(withBuffers bool) (children []*Inode) {
 }
 
 func (inode *Inode) hashFlushedPart(partOffset, partSize uint64) error {
-	// Read the part's data
 	bufReader, _, err := inode.getMultiReader(partOffset, partSize)
 	if err != nil {
 		return err
@@ -1045,19 +1046,18 @@ func (inode *Inode) hashFlushedPart(partOffset, partSize uint64) error {
 		return err
 	}
 
+	inode.hashLock.Lock()
+	defer inode.hashLock.Unlock()
+
 	if inode.hashInProgress == nil {
 		inode.hashInProgress = sha256.New()
 		inode.hashOffset = 0
 		inode.pendingHashParts = make(map[uint64][]byte)
 	}
 
-	// Store or hash in order
 	if partOffset == inode.hashOffset {
-		// Hash this part
 		inode.hashInProgress.Write(data)
 		inode.hashOffset += uint64(len(data))
-
-		// Now check for any buffered parts that can be hashed
 		for {
 			next, ok := inode.pendingHashParts[inode.hashOffset]
 			if !ok {
@@ -1068,7 +1068,7 @@ func (inode *Inode) hashFlushedPart(partOffset, partSize uint64) error {
 			delete(inode.pendingHashParts, inode.hashOffset-uint64(len(next)))
 		}
 	} else {
-		// Out of order, buffer it
+		// out of order, buffer part until the next caller aligns with this offset
 		inode.pendingHashParts[partOffset] = data
 	}
 	return nil
