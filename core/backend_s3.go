@@ -826,6 +826,23 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 
 	from := s.bucket + "/" + param.Source
 
+	// If the source and destination are the same, and the size is greater than the multipart copy threshold, use multipart copy
+	if param.Source == param.Destination && *param.Size > s.config.MultipartCopyThreshold {
+		log.Infof("Copying metadata for %v using Multipart Copy", param.Source)
+
+		if param.StorageClass == nil {
+			param.StorageClass = s.selectStorageClass(param.Size)
+		}
+
+		if !s.gcs && *param.Size > s.config.MultipartCopyThreshold {
+			reqId, err := s.copyObjectMultipart(int64(*param.Size), from, param.Destination, "", param.ETag, param.Metadata, param.StorageClass)
+			if err != nil {
+				return nil, err
+			}
+			return &CopyBlobOutput{reqId}, nil
+		}
+	}
+
 	// Copy into the same object is used to just update metadata
 	// and should be very quick regardless of parameters
 	if param.Source != param.Destination {
