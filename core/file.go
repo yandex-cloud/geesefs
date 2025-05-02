@@ -755,7 +755,7 @@ func (inode *Inode) TryFlush(priority int) bool {
 func (inode *Inode) sendUpload(priority int) bool {
 	smallFile := inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024
 
-	log.Infof("sendUpload: inode.oldParent = %v, inode.IsFlushing = %v, inode.mpu = %v", inode.oldParent, inode.IsFlushing, inode.mpu)
+	// log.Infof("sendUpload: inode.oldParent = %v, inode.IsFlushing = %v, inode.mpu = %v", inode.oldParent, inode.IsFlushing, inode.mpu)
 	log.Infof("sendUpload: inode.CacheState = %v, inode.userMetadataDirty = %v", inode.CacheState, inode.userMetadataDirty)
 	log.Infof("sendUpload: inode.Attributes.Size = %v, inode.fs.flags.SinglePartMB = %v", inode.Attributes.Size, inode.fs.flags.SinglePartMB)
 	log.Infof("sendUpload: inode.fs.flags.UsePatch = %v, inode.fs.flags.PreferPatchUploads = %v", inode.fs.flags.UsePatch, inode.fs.flags.PreferPatchUploads)
@@ -1816,6 +1816,13 @@ func (inode *Inode) flushPart(part uint64) {
 		}
 		log.Debugf("Flushed part %v of object %v", part, key)
 		inode.buffers.SetState(partOffset, partSize, bufIds, doneState)
+
+		// Only hash in chunks for multipart uploads
+		if inode.mpu != nil {
+			if err := inode.hashFlushedPart(partOffset, partSize); err != nil {
+				log.Warnf("Failed to hash flushed part %v of object %v: %v", part, key, err)
+			}
+		}
 	}
 }
 
@@ -1916,17 +1923,29 @@ func (inode *Inode) finalizeAndHash() error {
 		return nil
 	}
 
-	// // Lock the entire file range to prevent eviction during hashing
-	// inode.LockRange(0, inode.Attributes.Size, false)
-	// defer inode.UnlockRange(0, inode.Attributes.Size, false)
+	// If this was a multipart upload, use the incremental hash
+	if inode.mpu != nil && inode.hashInProgress != nil {
+		if inode.hashOffset != inode.Attributes.Size {
+			return fmt.Errorf("not all parts have been hashed: hashed %d, expected %d", inode.hashOffset, inode.Attributes.Size)
+		}
+		hash := hex.EncodeToString(inode.hashInProgress.Sum(nil))
 
-	// // Ensure all data is loaded into memory
-	// _, err := inode.LoadRange(0, inode.Attributes.Size, 0, true)
-	// if err != nil {
-	// 	return err
-	// }
+		log.Debugf("Computed and stored hash of file '%s': %s", inode.FullName(), hash)
 
-	// Assume the inode is locked and multipart upload is already finalized
+		if inode.userMetadata == nil {
+			inode.userMetadata = make(map[string][]byte)
+		}
+		inode.userMetadata[inode.fs.flags.HashAttr] = []byte(hash)
+		inode.sendUpdateMeta()
+		inode.fs.CacheFileInExternalCache(inode)
+
+		// Clean up
+		inode.hashInProgress = nil
+		inode.pendingHashParts = nil
+		return nil
+	}
+
+	// For small files, hash as before
 	reader, _, err := inode.getMultiReader(0, inode.Attributes.Size)
 	if err != nil {
 		return err
