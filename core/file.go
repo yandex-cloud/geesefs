@@ -276,7 +276,7 @@ func (inode *Inode) loadFromDisk(diskRanges []Range) (allocated int64, err error
 func (inode *Inode) loadFromExternalCache(offset uint64, size uint64, hash string) (allocated int64, totalDone uint64, err error) {
 	buf, err := inode.fs.flags.ExternalCacheClient.GetContent(string(hash), int64(offset), int64(size), struct{ RoutingKey string }{RoutingKey: hash})
 	if err != nil || buf == nil {
-		if err.Error() == errContentNotFound.Error() {
+		if err != nil && err.Error() == errContentNotFound.Error() {
 			inode.fs.CacheFileInExternalCache(inode)
 		}
 
