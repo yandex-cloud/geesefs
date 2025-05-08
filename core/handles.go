@@ -124,7 +124,7 @@ func (stagedFile *StagedFile) Cleanup() {
 
 	err := os.RemoveAll(fullPath)
 	if err != nil {
-		log.Warnf("Failed to remove staging file: %v", err)
+		log.Warnf("Failed to remove staged file: %v", err)
 	}
 
 	if fh.inode.fs.flags.StagedWriteUploadCallback != nil {

@@ -915,7 +915,7 @@ func (fs *Goofys) flushStagedFile(inode *Inode) {
 			fh := stagedFile.FH
 			err = fh.WriteFile(offset, buf[:n], true)
 			if err != nil {
-				log.Errorf("Error staging data for flush: %v", err)
+				log.Errorf("Error writing staged data data for flush: %v", err)
 				inode.UnlockRange(uint64(offset), chunkSize, true)
 				break
 			}

@@ -786,6 +786,7 @@ func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuI
 	}
 
 	partSizes := s.defaultCopyPartSizes(size)
+
 	// Preserve original part sizes if patch is enabled.
 	if s.flags.UsePatch {
 		partSizes = s.flags.PartSizes
