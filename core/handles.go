@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash"
@@ -82,6 +83,57 @@ type MPUPart struct {
 	ETag   string
 }
 
+type StagedFile struct {
+	FH          *FileHandle
+	FD          *os.File
+	mu          sync.Mutex
+	lastWriteAt time.Time
+	lastReadAt  time.Time
+	shouldFlush bool
+	flushing    bool
+	debounce    time.Duration
+}
+
+func (stagedFile *StagedFile) ReadyToFlush() bool {
+	stagedFile.mu.Lock()
+	defer stagedFile.mu.Unlock()
+
+	if stagedFile.flushing {
+		return false
+	}
+
+	if time.Since(stagedFile.lastWriteAt) < stagedFile.debounce {
+		return false
+	}
+
+	if time.Since(stagedFile.lastReadAt) < stagedFile.debounce {
+		return false
+	}
+
+	return true
+}
+
+func (stagedFile *StagedFile) Cleanup() {
+	log.Debugf("Cleaning up staged file: %s", stagedFile.FH.inode.FullName())
+
+	stagedFile.mu.Lock()
+	fh := stagedFile.FH
+	fullPath := stagedFile.FD.Name()
+	stagedFile.FD.Close()
+	stagedFile.mu.Unlock()
+
+	err := os.RemoveAll(fullPath)
+	if err != nil {
+		log.Warnf("Failed to remove staging file: %v", err)
+	}
+
+	if fh.inode.fs.flags.StagedWriteUploadCallback != nil {
+		fh.inode.fs.flags.StagedWriteUploadCallback(fh.inode.FullName(), int64(fh.inode.Attributes.Size))
+	}
+
+	log.Debugf("Removed staged file: %s", fh.inode.FullName())
+}
+
 type Inode struct {
 	Id         fuseops.InodeID
 	Name       string
@@ -119,6 +171,7 @@ type Inode struct {
 	readRanges     []ReadRange
 	DiskFDQueueID  uint64
 	DiskCacheFD    *os.File
+	StagedFile     *StagedFile
 	OnDisk         bool
 	forceFlush     bool
 	IsFlushing     int
@@ -177,6 +230,7 @@ func NewInode(fs *Goofys, parent *Inode, name string) (inode *Inode) {
 		Parent:     parent,
 		s3Metadata: make(map[string][]byte),
 		refcnt:     0,
+		StagedFile: nil,
 	}
 
 	inode.buffers.helpers = inode
@@ -1036,6 +1090,31 @@ func (inode *Inode) DumpThis(withBuffers bool) (children []*Inode) {
 	return children
 }
 
+func (inode *Inode) waitForHashToComplete(size uint64) (string, error) {
+	timeout := time.After(inode.fs.flags.HashTimeout)
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	// Clean up
+	defer func() {
+		inode.hashInProgress = nil
+		inode.pendingHashParts = nil
+	}()
+
+	for {
+		select {
+		case <-timeout:
+			return "", fmt.Errorf("timeout waiting for hash to complete")
+		case <-ticker.C:
+			if inode.hashOffset == size && len(inode.pendingHashParts) == 0 {
+				hash := hex.EncodeToString(inode.hashInProgress.Sum(nil))
+				return hash, nil
+			}
+		}
+	}
+}
+
 func (inode *Inode) hashFlushedPart(partOffset, partSize uint64) error {
 	bufReader, _, err := inode.getMultiReader(partOffset, partSize)
 	if err != nil {
@@ -1071,5 +1150,6 @@ func (inode *Inode) hashFlushedPart(partOffset, partSize uint64) error {
 		// out of order, buffer part until the next caller aligns with this offset
 		inode.pendingHashParts[partOffset] = data
 	}
+
 	return nil
 }

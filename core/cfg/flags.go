@@ -1097,6 +1097,7 @@ func DefaultFlags() *FlagStorage {
 		RdevAttr:             "rdev",
 		MtimeAttr:            "mtime",
 		HashAttr:             "--content-sha256",
+		HashTimeout:          60 * time.Second,
 		MinFileSizeForHashKB: 1024 * 10,
 		SymlinkAttr:          "--symlink-target",
 		SymlinkZeroed:        false,
@@ -1112,6 +1113,13 @@ func DefaultFlags() *FlagStorage {
 			{PartSize: 25 * 1024 * 1024, PartCount: 1000},
 			{PartSize: 125 * 1024 * 1024, PartCount: 8000},
 		},
-		ExternalCacheClient: nil,
+		ExternalCacheClient:         nil,
+		StagedWriteModeEnabled:      false,
+		StagedWritePath:             "",
+		StagedWriteDebounce:         30 * time.Second,
+		StagedWriteFlushSize:        16 * 1024 * 1024,
+		StagedWriteFlushInterval:    5 * time.Second,
+		StagedWriteFlushConcurrency: 8,
+		StagedWriteUploadCallback:   nil,
 	}
 }

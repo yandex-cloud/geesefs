@@ -1636,6 +1636,7 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 	if fromInode.isDir() {
 		fromFullName += "/"
 		toFullName += "/"
+
 		// List all objects and rename them in cache (keeping the lock)
 		var next string
 		var err error
@@ -1646,8 +1647,31 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 				return mapAwsError(err)
 			}
 		}
+
 		renameRecursive(fromInode, newParent, to)
 	} else {
+		// Handle staged file renames
+		if fromInode.StagedFile != nil && fromInode.StagedFile.FD != nil {
+			fs := fromInode.fs
+
+			oldStagedPath := fromInode.StagedFile.FD.Name()
+			newStagedDir := fs.flags.StagedWritePath + "/" + newParent.FullName()
+			newStagedPath := appendChildName(newStagedDir, to)
+
+			if err := os.MkdirAll(newStagedDir, fs.flags.DirMode); err == nil {
+				err := os.Rename(oldStagedPath, newStagedPath)
+				if err == nil {
+					// Reopen the file descriptor at the new path
+					newFD, openErr := os.OpenFile(newStagedPath, os.O_RDWR, fs.flags.FileMode)
+					if openErr == nil {
+						oldFD := fromInode.StagedFile.FD
+						fromInode.StagedFile.FD = newFD
+						oldFD.Close()
+					}
+				}
+			}
+		}
+
 		renameInCache(fromInode, newParent, to)
 	}
 

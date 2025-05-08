@@ -543,6 +543,11 @@ func (fs *GoofysFuse) ReleaseFileHandle(
 
 	fs.mu.Lock()
 	fh := fs.fileHandles[op.Handle]
+	if fh == nil {
+		fs.mu.Unlock()
+		return nil
+	}
+
 	fh.Release()
 	atomic.AddInt64(&fs.stats.noops, 1)
 	fuseLog.Debugln("ReleaseFileHandle", fh.inode.FullName(), op.Handle, fh.inode.Id)
@@ -550,10 +555,13 @@ func (fs *GoofysFuse) ReleaseFileHandle(
 	fs.mu.Unlock()
 
 	if fh.inode.fs.flags.FsyncOnClose {
-		return fh.inode.SyncFile()
+		err = fh.inode.SyncFile()
+		if err != nil {
+			return err
+		}
 	}
 
-	return
+	return nil
 }
 
 func (fs *GoofysFuse) CreateFile(
@@ -583,6 +591,16 @@ func (fs *GoofysFuse) CreateFile(
 	inode.SetExpireLocked(op.Entry.AttributesExpiration)
 
 	op.Handle = fs.AddFileHandle(fh)
+
+	if fs.flags.StagedWriteModeEnabled {
+		_, ok := fs.stagedFiles.Load(inode.Id)
+		if !ok {
+			err = fh.getOrCreateStagedFile()
+			if err != nil {
+				return err
+			}
+		}
+	}
 
 	inode.logFuse("<-- CreateFile")
 
@@ -731,12 +749,17 @@ func (fs *GoofysFuse) WriteFile(
 	atomic.AddInt64(&fs.stats.writes, 1)
 
 	fs.mu.RLock()
-
 	fh, ok := fs.fileHandles[op.Handle]
 	if !ok {
 		panic(fmt.Sprintf("WriteFile: can't find handle %v", op.Handle))
 	}
 	fs.mu.RUnlock()
+
+	// Write through to staging directory if "staged write mode" is enabled
+	if fs.flags.StagedWriteModeEnabled {
+		err = fh.WriteFileStaged(op.Offset, op.Data)
+		return
+	}
 
 	// fuse binding leaves extra room for header, so we
 	// account for it when we decide whether to do "zero-copy" write
@@ -960,10 +983,16 @@ func mountFuseFS(fs *Goofys) (mfs MountedFS, err error) {
 
 	// Update read_ahead_kb on the mount point if set
 	if fs.flags.FuseReadAheadKB > 0 {
-		err = updateFuseReadAheadKB(fs.flags.MountPoint, int(fs.flags.FuseReadAheadKB))
-		if err != nil {
+		if err := updateFuseReadAheadKB(fs.flags.MountPoint, int(fs.flags.FuseReadAheadKB)); err != nil {
 			log.Warnf("Failed to update read_ahead_kb: %v", err)
-			err = nil
+		}
+	}
+
+	// Create staged file directory if enabled
+	if fs.flags.StagedWriteModeEnabled {
+		if err := os.MkdirAll(fs.flags.StagedWritePath, fs.flags.DirMode); err != nil {
+			log.Warnf("Failed to create staging directory: %v", err)
+			fs.flags.StagedWriteModeEnabled = false
 		}
 	}
 

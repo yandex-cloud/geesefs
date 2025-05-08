@@ -605,6 +605,25 @@ func (l *BufferList) AddLoadingFromDisk(offset, size uint64) (readRanges []Range
 	return
 }
 
+func (l *BufferList) ReviveFromStagedFile(offset uint64, data []byte) {
+	l.at.Ascend(offset+1, func(end uint64, b *FileBuffer) bool {
+		if b.offset == offset && b.length == uint64(len(data)) && b.loading {
+			b.data = data
+			b.ptr = &BufferPointer{
+				mem:  data,
+				refs: 1,
+			}
+			b.loading = false
+			if b.state == BUF_FL_CLEARED {
+				l.unqueue(b)
+				b.state = BUF_FLUSHED_FULL
+				l.queue(b)
+			}
+		}
+		return false
+	})
+}
+
 func (l *BufferList) ReviveFromDisk(offset uint64, data []byte) {
 	l.at.Ascend(offset+1, func(end uint64, b *FileBuffer) bool {
 		if b.offset == offset && b.length == uint64(len(data)) && b.loading && b.onDisk {

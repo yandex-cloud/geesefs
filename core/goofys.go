@@ -20,6 +20,7 @@ import (
 
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/url"
 	"os"
@@ -128,6 +129,8 @@ type Goofys struct {
 	cacheEventChan  chan cacheEvent
 	cachingStatus   map[string]bool
 	cachingStatusMu sync.Mutex
+
+	stagedFiles sync.Map
 }
 
 type OpStats struct {
@@ -396,6 +399,7 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 	}
 
 	go fs.MetaEvictor()
+	go fs.StagedFileFlusher()
 	go fs.processCacheEvents()
 
 	return fs, nil
@@ -825,6 +829,137 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 	childTmp.mu.Unlock()
 	tmpParent.mu.Unlock()
 	return true
+}
+
+func (fs *Goofys) StagedFileFlusher() {
+	ticker := time.NewTicker(fs.flags.StagedWriteFlushInterval)
+	defer ticker.Stop()
+
+	sem := make(chan struct{}, fs.flags.StagedWriteFlushConcurrency)
+
+	for {
+		select {
+		case <-ticker.C:
+			fs.stagedFiles.Range(func(_, value interface{}) bool {
+				inode := value.(*Inode)
+				if inode.StagedFile != nil && inode.StagedFile.ReadyToFlush() {
+					select {
+					case sem <- struct{}{}:
+						log.Debugf("StagedFileFlusher: queued to flush %s", inode.FullName())
+
+						go func(inode *Inode) {
+							defer func() { <-sem }()
+							fs.flushStagedFile(inode)
+						}(inode)
+					default:
+						// Concurrency limit reached, do not start more
+						log.Debugf("StagedFileFlusher: concurrency limit reached, skipping %s", inode.FullName())
+					}
+				}
+				return true
+			})
+		case <-fs.shutdownCh:
+			return
+		}
+	}
+}
+
+func (fs *Goofys) flushStagedFile(inode *Inode) {
+	inode.mu.Lock()
+	stagedFile := inode.StagedFile
+	if stagedFile == nil {
+		return
+	}
+
+	totalSize := int64(stagedFile.FH.inode.Attributes.Size)
+	inode.mu.Unlock()
+
+	stagedFile.flushing = true
+	stagedFile.shouldFlush = true
+
+	// Wake up flusher
+	fs.flusherMu.Lock()
+	fs.flushPending = 1
+	fs.flusherCond.Broadcast()
+	fs.flusherMu.Unlock()
+
+	offset := int64(0)
+
+	for offset < totalSize {
+		chunkSize := fs.flags.StagedWriteFlushSize
+		if totalSize-offset < int64(fs.flags.StagedWriteFlushSize) {
+			chunkSize = uint64(totalSize - offset)
+		}
+
+		// Lock this part's range while we're reading / flushing it
+		inode.LockRange(uint64(offset), chunkSize, true)
+
+		var n int
+		var err error
+		{
+			stagedFile.mu.Lock()
+			buf := make([]byte, chunkSize)
+			n, err = stagedFile.FD.ReadAt(buf, offset)
+			stagedFile.mu.Unlock()
+
+			if err != nil && err != io.EOF {
+				log.Errorf("Error reading from staged file: %v", err)
+				inode.UnlockRange(uint64(offset), chunkSize, true)
+				break
+			}
+			if n == 0 {
+				inode.UnlockRange(uint64(offset), chunkSize, true)
+				break
+			}
+
+			fh := stagedFile.FH
+			err = fh.WriteFile(offset, buf[:n], true)
+			if err != nil {
+				log.Errorf("Error staging data for flush: %v", err)
+				inode.UnlockRange(uint64(offset), chunkSize, true)
+				break
+			}
+		}
+
+		// Unlock this part's range after it's ready to flush
+		inode.UnlockRange(uint64(offset), chunkSize, true)
+
+		offset += int64(n)
+		if err == io.EOF {
+			break
+		}
+	}
+
+	err := inode.SyncFile()
+	if err != nil {
+		return
+	}
+
+	stagedFile.Cleanup()
+
+	inode.mu.Lock()
+	inode.StagedFile = nil
+	inode.fs.stagedFiles.Delete(inode.Id)
+	inode.mu.Unlock()
+}
+
+func (fs *Goofys) WaitForFlush() {
+	if fs.flags.StagedWriteModeEnabled {
+		for {
+			hasStaged := false
+
+			fs.stagedFiles.Range(func(_, _ interface{}) bool {
+				hasStaged = true
+				return false // stop iteration early
+			})
+
+			if !hasStaged {
+				break
+			}
+
+			time.Sleep(1 * time.Second)
+		}
+	}
 }
 
 func (fs *Goofys) MetaEvictor() {

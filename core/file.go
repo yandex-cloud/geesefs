@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -136,6 +137,89 @@ func (inode *Inode) checkPauseWriters() {
 	}
 }
 
+func (fh *FileHandle) getOrCreateStagedFile() (err error) {
+	if fh.inode.StagedFile != nil {
+		return nil
+	}
+
+	stagingPath := filepath.Join(fh.inode.fs.flags.StagedWritePath, fh.inode.FullName())
+	parentDir := filepath.Dir(stagingPath)
+	if err := os.MkdirAll(parentDir, fh.inode.fs.flags.DirMode); err != nil {
+		return err
+	}
+
+	stagingFD, err := os.OpenFile(stagingPath, os.O_CREATE|os.O_RDWR, fh.inode.fs.flags.FileMode)
+	if err != nil {
+		return err
+	}
+
+	fh.inode.StagedFile = &StagedFile{
+		FH:          fh,
+		FD:          stagingFD,
+		mu:          sync.Mutex{},
+		lastWriteAt: time.Now(),
+		lastReadAt:  time.Now(),
+		shouldFlush: false,
+		flushing:    false,
+		debounce:    fh.inode.fs.flags.StagedWriteDebounce,
+	}
+
+	fh.inode.fs.stagedFiles.Store(fh.inode.Id, fh.inode)
+	return nil
+}
+
+func (fh *FileHandle) WriteFileStaged(offset int64, data []byte) (err error) {
+	fh.inode.logFuse("WriteFileStaged", offset, len(data))
+
+	end := uint64(offset) + uint64(len(data))
+	if end > fh.inode.fs.getMaxFileSize() {
+		// File offset too large
+		log.Warnf(
+			"Maximum file size exceeded when writing %v bytes at offset %v to %v",
+			len(data), offset, fh.inode.FullName(),
+		)
+		return syscall.EFBIG
+	}
+
+	if fh.inode.fs.flags.StagedWriteModeEnabled {
+		_, ok := fh.inode.fs.stagedFiles.Load(fh.inode.Id)
+		if !ok {
+			err = fh.getOrCreateStagedFile()
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	fh.inode.mu.Lock()
+	if fh.inode.CacheState == ST_DELETED || fh.inode.CacheState == ST_DEAD {
+		fh.inode.mu.Unlock()
+		return syscall.ENOENT
+	}
+	defer fh.inode.mu.Unlock()
+
+	_, err = fh.inode.StagedFile.FD.WriteAt(data, offset)
+	if err != nil {
+		return err
+	}
+
+	fh.inode.StagedFile.mu.Lock()
+	fh.inode.StagedFile.lastWriteAt = time.Now()
+	fh.inode.StagedFile.mu.Unlock()
+
+	fh.inode.checkPauseWriters()
+	if fh.inode.Attributes.Size < end {
+		fh.inode.Attributes.Size = end
+	}
+
+	fh.inode.lastWriteEnd = end
+	if fh.inode.CacheState == ST_CACHED {
+		fh.inode.SetCacheState(ST_MODIFIED)
+	}
+
+	return
+}
+
 func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err error) {
 	fh.inode.logFuse("WriteFile", offset, len(data))
 
@@ -183,6 +267,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 	if fh.inode.CacheState == ST_CACHED {
 		fh.inode.SetCacheState(ST_MODIFIED)
 	}
+
 	// FIXME: Don't activate the flusher immediately for small writes
 	fh.inode.fs.WakeupFlusher()
 	fh.inode.Attributes.Mtime = time.Now()
@@ -273,6 +358,28 @@ func (inode *Inode) loadFromDisk(diskRanges []Range) (allocated int64, err error
 	return
 }
 
+func (inode *Inode) loadFromStagedFile(diskRanges []Range) (allocated int64, err error) {
+	inode.StagedFile.mu.Lock()
+	defer inode.StagedFile.mu.Unlock()
+
+	inode.StagedFile.lastReadAt = time.Now()
+	for _, rr := range diskRanges {
+		readSize := rr.End - rr.Start
+		data := make([]byte, readSize)
+		n, err := inode.StagedFile.FD.ReadAt(data, int64(rr.Start))
+		if err != nil {
+			return 0, err
+		}
+
+		if n > 0 {
+			allocated += int64(n)
+			inode.buffers.ReviveFromStagedFile(rr.Start, data)
+		}
+	}
+
+	return
+}
+
 func (inode *Inode) loadFromExternalCache(offset uint64, size uint64, hash string) (allocated int64, totalDone uint64, err error) {
 	buf, err := inode.fs.flags.ExternalCacheClient.GetContent(string(hash), int64(offset), int64(size), struct{ RoutingKey string }{RoutingKey: hash})
 	if err != nil || buf == nil {
@@ -320,17 +427,41 @@ func (inode *Inode) LoadRange(offset, size uint64, readAheadSize uint64, ignoreM
 
 	if len(readRanges) > 0 {
 		miss = true
-		inode.loadFromServer(readRanges, readAheadSize, ignoreMemoryLimit)
+
+		// If staged write mode is enabled, try to load from the staged file
+		if inode.fs.flags.StagedWriteModeEnabled && inode.StagedFile != nil {
+			for _, rr := range readRanges {
+				inode.buffers.AddLoading(rr.Start, rr.End-rr.Start)
+			}
+
+			if len(readRanges) > 0 {
+				allocated, err := inode.loadFromStagedFile(readRanges)
+
+				// Correct memory usage without the inode lock
+				inode.mu.Unlock()
+				inode.fs.bufferPool.Use(allocated, true)
+				inode.mu.Lock()
+
+				// Return on error
+				if err != nil {
+					return miss, err
+				}
+			}
+		} else {
+			inode.loadFromServer(readRanges, readAheadSize, ignoreMemoryLimit)
+		}
 	}
 
 	if inode.fs.flags.CachePath != "" {
 		diskRanges := inode.buffers.AddLoadingFromDisk(offset, size)
 		if len(diskRanges) > 0 {
 			allocated, err := inode.loadFromDisk(diskRanges)
+
 			// Correct memory usage without the inode lock
 			inode.mu.Unlock()
 			inode.fs.bufferPool.Use(allocated, true)
 			inode.mu.Lock()
+
 			// Return on error
 			if err != nil {
 				return miss, err
@@ -583,6 +714,10 @@ func (fh *FileHandle) shouldRetrieveHash() bool {
 		return false
 	}
 
+	if fh.inode.StagedFile != nil {
+		return false
+	}
+
 	if fh.inode.Attributes.Size < fh.inode.fs.flags.MinFileSizeForHashKB*1024 {
 		return false
 	}
@@ -712,6 +847,18 @@ func (inode *Inode) recordFlushError(err error) {
 }
 
 func (inode *Inode) TryFlush(priority int) bool {
+	inode.mu.Lock()
+	stagedFile := inode.StagedFile
+	shouldFlush := false
+	if stagedFile != nil {
+		shouldFlush = stagedFile.shouldFlush
+	}
+	inode.mu.Unlock()
+
+	if stagedFile == nil || !shouldFlush {
+		return false
+	}
+
 	overDeleted := false
 	parent := inode.Parent
 	if parent != nil {
@@ -744,13 +891,13 @@ func (inode *Inode) TryFlush(priority int) bool {
 		if overDeleted {
 			return false
 		}
+
 		return inode.sendUpload(priority)
 	}
 	return false
 }
 
 func (inode *Inode) sendUpload(priority int) bool {
-
 	if inode.oldParent != nil && inode.IsFlushing == 0 && inode.mpu == nil {
 		// Rename file
 		inode.sendRename()
@@ -807,6 +954,7 @@ func (inode *Inode) sendUpload(priority int) bool {
 		if inode.IsFlushing > 0 {
 			return false
 		}
+
 		if inode.fs.flags.UsePatch && inode.fs.flags.PreferPatchUploads {
 			inode.uploadMinMultipart()
 		} else {
@@ -828,6 +976,7 @@ func (inode *Inode) sendUpload(priority int) bool {
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.stats.flushes, 1)
 		atomic.AddInt64(&inode.fs.activeFlushers, 1)
+
 		go func() {
 			inode.mu.Lock()
 			inode.completeMultipart()
@@ -836,6 +985,7 @@ func (inode *Inode) sendUpload(priority int) bool {
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
 			inode.fs.WakeupFlusher()
 		}()
+
 		return true
 	}
 
@@ -847,21 +997,26 @@ func (inode *Inode) sendRename() {
 	if inode.isDir() {
 		key += "/"
 	}
+
 	inode.IsFlushing += inode.fs.flags.MaxParallelParts
 	atomic.AddInt64(&inode.fs.stats.flushes, 1)
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
+
 	_, from := inode.oldParent.cloud()
 	from = appendChildName(from, inode.oldName)
+
 	oldParent := inode.oldParent
 	oldName := inode.oldName
 	newParent := inode.Parent
 	newName := inode.Name
 	inode.renamingTo = true
 	skipRename := false
+
 	if inode.isDir() {
 		from += "/"
 		skipRename = true
 	}
+
 	go func() {
 		var err error
 		if !inode.isDir() || !inode.fs.flags.NoDirObject {
@@ -988,6 +1143,7 @@ func (inode *Inode) sendRename() {
 				}
 			}
 		}
+
 		inode.mu.Lock()
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
@@ -1014,12 +1170,14 @@ func (inode *Inode) sendUpdateMeta() {
 		ETag:        PString(inode.knownETag),
 		Metadata:    escapeMetadata(inode.userMetadata),
 	}
+
 	go func() {
 		inode.fs.addInflightChange(key)
 		_, err := cloud.CopyBlob(copyIn)
 		inode.fs.completeInflightChange(key)
 		inode.mu.Lock()
 		inode.recordFlushError(err)
+
 		if err != nil {
 			mappedErr := mapAwsError(err)
 			inode.userMetadataDirty = 2
@@ -1033,6 +1191,7 @@ func (inode *Inode) sendUpdateMeta() {
 			inode.SetCacheState(ST_CACHED)
 			inode.SetAttrTime(time.Now())
 		}
+
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
 		inode.fs.WakeupFlusher()
@@ -1524,7 +1683,6 @@ func (inode *Inode) abortMultipart() {
 }
 
 func (inode *Inode) flushSmallObject() {
-
 	inode.mu.Lock()
 
 	if inode.CacheState != ST_CREATED && inode.CacheState != ST_MODIFIED {
@@ -1587,6 +1745,7 @@ func (inode *Inode) flushSmallObject() {
 		// not be able to proceed to rename - it waits until inode.mpu == nil
 		inode.abortMultipart()
 	}
+
 	inode.mu.Unlock()
 	inode.fs.addInflightChange(key)
 	resp, err := cloud.PutBlob(params)
@@ -1601,6 +1760,7 @@ func (inode *Inode) flushSmallObject() {
 		}
 	} else {
 		log.Debugf("Flushed small file %v (inode %v): etag=%v, size=%v", key, inode.Id, NilStr(resp.ETag), sz)
+
 		inode.buffers.SetState(0, sz, bufIds, BUF_CLEAN)
 		inode.updateFromFlush(sz, resp.ETag, resp.LastModified, resp.StorageClass)
 		if inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED {
@@ -1788,6 +1948,7 @@ func (inode *Inode) flushPart(part uint64) {
 	inode.recordFlushError(err)
 	if err != nil {
 		log.Warnf("Failed to flush part %v of object %v: %v", part, key, err)
+
 		mappedErr := mapAwsError(err)
 		if mappedErr == syscall.ENOENT {
 			// Multipart upload is deleted
@@ -1887,6 +2048,7 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 		if inode.userMetadataDirty == 1 {
 			inode.userMetadataDirty = 0
 		}
+
 		inode.mpu = nil
 		inode.buffers.SetFlushedClean()
 		inode.updateFromFlush(finalSize, resp.ETag, resp.LastModified, resp.StorageClass)
@@ -1901,6 +2063,8 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 }
 
 func (inode *Inode) finalizeAndHash() error {
+	log.Debugf("Called finalizeAndHash: %s", inode.FullName())
+
 	if inode.isDir() {
 		return nil
 	}
@@ -1918,23 +2082,19 @@ func (inode *Inode) finalizeAndHash() error {
 		inode.hashLock.Lock()
 		defer inode.hashLock.Unlock()
 
-		if inode.hashOffset != inode.Attributes.Size {
-			return fmt.Errorf("not all parts have been hashed: hashed %d, expected %d", inode.hashOffset, inode.Attributes.Size)
+		hash, err := inode.waitForHashToComplete(inode.Attributes.Size)
+		if err != nil {
+			return err
 		}
 
-		hash := hex.EncodeToString(inode.hashInProgress.Sum(nil))
 		log.Debugf("Computed and stored hash of file '%s': %s", inode.FullName(), hash)
-
 		if inode.userMetadata == nil {
 			inode.userMetadata = make(map[string][]byte)
 		}
+
 		inode.userMetadata[inode.fs.flags.HashAttr] = []byte(hash)
 		inode.sendUpdateMeta()
-		inode.fs.CacheFileInExternalCache(inode)
 
-		// Clean up
-		inode.hashInProgress = nil
-		inode.pendingHashParts = nil
 		return nil
 	}
 
@@ -1951,15 +2111,12 @@ func (inode *Inode) finalizeAndHash() error {
 	hash := hex.EncodeToString(hasher.Sum(nil))
 
 	log.Debugf("Computed and stored hash of file '%s': %s", inode.FullName(), hash)
-
 	if inode.userMetadata == nil {
 		inode.userMetadata = make(map[string][]byte)
 	}
 
 	inode.userMetadata[inode.fs.flags.HashAttr] = []byte(hash)
 	inode.sendUpdateMeta()
-
-	inode.fs.CacheFileInExternalCache(inode)
 
 	return nil
 }
@@ -1981,6 +2138,7 @@ func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *tim
 
 func (inode *Inode) SyncFile() (err error) {
 	inode.logFuse("SyncFile")
+
 	for {
 		inode.mu.Lock()
 		inode.forceFlush = false
@@ -2003,6 +2161,7 @@ func (inode *Inode) SyncFile() (err error) {
 		}
 		inode.fs.flusherMu.Unlock()
 	}
+
 	inode.logFuse("Done SyncFile")
 	return
 }

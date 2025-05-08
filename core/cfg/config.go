@@ -55,9 +55,19 @@ type FlagStorage struct {
 	Endpoint       string
 	Backend        interface{}
 
+	// Staged write mode
+	StagedWriteModeEnabled      bool
+	StagedWritePath             string
+	StagedWriteDebounce         time.Duration
+	StagedWriteFlushSize        uint64
+	StagedWriteFlushInterval    time.Duration
+	StagedWriteFlushConcurrency int
+	StagedWriteUploadCallback   func(fullPath string, fileSize int64)
+
 	// External Caching
 	ExternalCacheClient  ContentCache
 	HashAttr             string
+	HashTimeout          time.Duration
 	MinFileSizeForHashKB uint64
 
 	// Tuning
