@@ -874,8 +874,15 @@ func (fs *Goofys) flushStagedFile(inode *Inode) {
 	totalSize := int64(stagedFile.FH.inode.Attributes.Size)
 	inode.mu.Unlock()
 
+	stagedFile.mu.Lock()
+	if stagedFile.flushing {
+		stagedFile.mu.Unlock()
+		return
+	}
+
 	stagedFile.flushing = true
 	stagedFile.shouldFlush = true
+	stagedFile.mu.Unlock()
 
 	// Wake up flusher
 	fs.flusherMu.Lock()
