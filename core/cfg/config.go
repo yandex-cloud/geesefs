@@ -62,13 +62,15 @@ type FlagStorage struct {
 	StagedWriteFlushSize        uint64
 	StagedWriteFlushInterval    time.Duration
 	StagedWriteFlushConcurrency int
-	StagedWriteUploadCallback   func(fullPath string, fileSize int64)
 
 	// External Caching
 	ExternalCacheClient  ContentCache
 	HashAttr             string
 	HashTimeout          time.Duration
 	MinFileSizeForHashKB uint64
+
+	// Events
+	EventCallback func(event EventType, data map[string]interface{})
 
 	// Tuning
 	MemoryLimit         uint64
@@ -190,4 +192,16 @@ var defaultHTTPTransport = http.Transport{
 
 func GetHTTPTransport() *http.Transport {
 	return &defaultHTTPTransport
+}
+
+type EventType string
+
+const (
+	EventCacheTriggered     EventType = "cache_triggered"
+	EventStagedFileUploaded EventType = "staged_file_uploaded"
+)
+
+type EventCallbackData struct {
+	Event EventType
+	Data  map[string]interface{}
 }

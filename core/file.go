@@ -1966,7 +1966,6 @@ func (inode *Inode) flushPart(part uint64) {
 			doneState = BUF_FLUSHED_CUT
 		}
 		log.Debugf("Flushed part %v of object %v", part, key)
-		inode.buffers.SetState(partOffset, partSize, bufIds, doneState)
 
 		// Only hash in chunks if it's a multipart upload
 		if inode.mpu != nil {
@@ -1974,6 +1973,8 @@ func (inode *Inode) flushPart(part uint64) {
 				log.Warnf("Failed to hash flushed part %v of object %v: %v", part, key, err)
 			}
 		}
+
+		inode.buffers.SetState(partOffset, partSize, bufIds, doneState)
 	}
 }
 

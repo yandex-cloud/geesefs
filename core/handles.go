@@ -127,8 +127,12 @@ func (stagedFile *StagedFile) Cleanup() {
 		log.Warnf("Failed to remove staged file: %v", err)
 	}
 
-	if fh.inode.fs.flags.StagedWriteUploadCallback != nil {
-		fh.inode.fs.flags.StagedWriteUploadCallback(fh.inode.FullName(), int64(fh.inode.Attributes.Size))
+	if fh.inode.fs.flags.EventCallback != nil {
+		fh.inode.fs.flags.EventCallback(cfg.EventStagedFileUploaded, map[string]interface{}{
+			"inode": fh.inode.FullName(),
+			"hash":  fh.inode.userMetadata["hash"],
+			"size":  fh.inode.Attributes.Size,
+		})
 	}
 
 	log.Debugf("Removed staged file: %s", fh.inode.FullName())

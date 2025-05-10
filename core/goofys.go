@@ -477,6 +477,13 @@ func (fs *Goofys) CacheFileInExternalCache(inode *Inode) {
 	fs.cachingStatus[string(hash)] = true
 	fs.cachingStatusMu.Unlock()
 
+	if fs.flags.EventCallback != nil {
+		fs.flags.EventCallback(cfg.EventCacheTriggered, map[string]interface{}{
+			"inode": inode.FullName(),
+			"hash":  string(hash),
+		})
+	}
+
 	// Submit cache event
 	fs.cacheEventChan <- cacheEvent{inode: inode}
 }
