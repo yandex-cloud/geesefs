@@ -359,6 +359,64 @@ func (s *S3Backend) detectBucketLocationByHEAD() (err error, isAws bool) {
 	return
 }
 
+func (s *S3Backend) detectBucketLocationByObject(key string) (err error, isAws bool) {
+	// Use HeadObject instead of bucket HEAD to work with prefix-only permissions
+	head := s3.HeadObjectInput{Bucket: &s.bucket, Key: &key}
+	if s.config.SseC != "" {
+		head.SSECustomerAlgorithm = PString("AES256")
+		head.SSECustomerKey = &s.config.SseC
+		head.SSECustomerKeyMD5 = &s.config.SseCDigest
+	}
+
+	req, _ := s.S3.HeadObjectRequest(&head)
+	err = req.Send()
+	
+	var region []string
+	var server []string
+	if req.HTTPResponse != nil {
+		region = req.HTTPResponse.Header["X-Amz-Bucket-Region"]
+		server = req.HTTPResponse.Header["Server"]
+		
+		s3Log.Debugf("HEAD object %v = %v %v", key, req.HTTPResponse.StatusCode, region)
+		if server != nil && server[0] == "AmazonS3" {
+			isAws = true
+		}
+	}
+
+	if err != nil {
+		// Map AWS errors similar to bucket HEAD
+		if awsErr, ok := err.(awserr.Error); ok {
+			switch awsErr.Code() {
+			case "NoSuchBucket":
+				err = syscall.ENXIO
+			case "AccessDenied", "Forbidden":
+				err = syscall.EACCES
+			case "NoSuchKey", "NotFound":
+				// Object doesn't exist but we can still extract region info
+				// This is normal for prefix-only access where the test object doesn't exist
+				err = nil
+			case "NoCredentialProviders":
+				// No credentials available, but we can still extract region from headers if available
+				if len(region) > 0 {
+					err = nil
+				}
+			}
+		}
+	}
+
+	if len(region) != 0 {
+		if region[0] != *s.awsConfig.Region {
+			s3Log.Infof("Switching from region '%v' to '%v'",
+				*s.awsConfig.Region, region[0])
+			s.awsConfig.Region = &region[0]
+		}
+		// we detected a region, this is aws, the error is irrelevant
+		err = nil
+	}
+
+	return
+}
+
 func (s *S3Backend) testBucket(key string) (err error) {
 	oldAttempts := s.flags.ReadRetryAttempts
 	if oldAttempts == 0 {
@@ -398,7 +456,12 @@ func (s *S3Backend) Init(key string) error {
 	}
 
 	if !s.config.RegionSet {
-		err, _ = s.detectBucketLocationByHEAD()
+		// If key contains a prefix (has path separator), try object-level detection first
+		if strings.Contains(key, "/") {
+			err, isAws = s.detectBucketLocationByObject(key)
+		} else {
+			err, isAws = s.detectBucketLocationByHEAD()
+		}
 		if err == nil {
 			// we detected a region header, this is probably AWS S3,
 			// or we can use anonymous access, or both

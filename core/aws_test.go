@@ -22,6 +22,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	
+	"github.com/aws/aws-sdk-go/aws/credentials"
 )
 
 type AwsTest struct {
@@ -53,6 +55,51 @@ func (s *AwsTest) TestBucket404(t *C) {
 	err, isAws := s.s3.detectBucketLocationByHEAD()
 	t.Assert(err, Equals, syscall.ENXIO)
 	t.Assert(isAws, Equals, true)
+}
+
+func (s *AwsTest) TestRegionDetectionByObject(t *C) {
+	// Create a fresh S3Backend instance for this test to avoid state contamination
+	s3Backend, err := NewS3("", &cfg.FlagStorage{}, &cfg.S3Config{
+		Region: "us-east-1",
+	})
+	t.Assert(err, IsNil)
+	
+	// Set a public bucket that supports object-level calls for testing
+	s3Backend.bucket = "goofys-eu-west-1.kahing.xyz"
+	
+	// Set anonymous credentials to avoid authentication issues in tests
+	s3Backend.awsConfig.Credentials = credentials.AnonymousCredentials
+	s3Backend.newS3()
+	
+	// Test prefix-based detection with a non-existent object
+	key := "test/prefix/" + RandStringBytesMaskImprSrc(32)
+	err, isAws := s3Backend.detectBucketLocationByObject(key)
+	
+	// Should succeed even if object doesn't exist, as long as we can extract region
+	t.Assert(err, IsNil)
+	t.Assert(*s3Backend.awsConfig.Region, Equals, "eu-west-1")
+	t.Assert(isAws, Equals, true)
+}
+
+func (s *AwsTest) TestInitWithPrefix(t *C) {
+	// Create a new S3Backend instance for this test with anonymous credentials
+	s3Backend, err := NewS3("", &cfg.FlagStorage{}, &cfg.S3Config{
+		Region: "us-east-1",
+	})
+	t.Assert(err, IsNil)
+	
+	s3Backend.bucket = "goofys-eu-west-1.kahing.xyz"
+	s3Backend.awsConfig.Credentials = credentials.AnonymousCredentials
+	s3Backend.newS3()
+	
+	// Test Init with a prefixed key (should use object-level detection)
+	prefixedKey := "test/prefix/" + RandStringBytesMaskImprSrc(32)
+	err = s3Backend.Init(prefixedKey)
+	
+	// We expect this to fail with access denied since it's anonymous access,
+	// but the important thing is that it switched to the correct region before failing
+	t.Assert(err, NotNil)
+	t.Assert(*s3Backend.awsConfig.Region, Equals, "eu-west-1")
 }
 
 type S3BucketEventualConsistency struct {
