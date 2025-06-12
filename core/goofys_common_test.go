@@ -514,6 +514,9 @@ func (s *GoofysTest) SetUpTest(t *C) {
 	}
 
 	cloud := os.Getenv("CLOUD")
+	if cloud == "" {
+		cloud = "s3"  // Default to S3 for tests
+	}
 
 	if cloud == "s3" {
 		conf := s.selectTestConfig(t, flags)
