@@ -1,3 +1,9 @@
+geesefs (0.43.1) unstable; urgency=medium
+
+  * Properly handle dirtyQueueId during inode ID swaps in directory rename
+
+ -- Artem Ikchurin <aikch@yandex-team.ru>  Fri, 25 Jul 2025 13:50:00 +0300
+
 geesefs (0.43.0) unstable; urgency=medium
 
   * Do not return ENOMEM to readers by default, allow them to exceed the memory limit. May be turned back with --use-enomem
