@@ -1660,16 +1660,23 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 	toDir := newParent.doMkDir(to)
 	toDir.userMetadata = fromInode.userMetadata
 	toDir.dir.ImplicitDir = fromInode.dir.ImplicitDir
+	fromInode.doUnlink()
 	// Trick IDs
+	// TODO: Fix potential race condition when Flusher goroutine retrieves an ID from
+	// inodeQueue (core/goofys.go:641) while IDs are being swapped, which can lead
+	// to incorrect inode lookup by ID
 	oldId := fromInode.Id
 	newId := toDir.Id
-	fromInode.Id = newId
+	fromInode.Id = toDir.Id
 	toDir.Id = oldId
 	fs := fromInode.fs
 	fs.mu.Lock()
 	fs.inodes[newId] = fromInode
 	fs.inodes[oldId] = toDir
 	fs.mu.Unlock()
+	oldQId := fromInode.dirtyQueueId
+	fromInode.dirtyQueueId = toDir.dirtyQueueId
+	toDir.dirtyQueueId = oldQId
 	// Swap reference counts - the kernel will still send forget ops for the new inode
 	fromInode.refcnt, toDir.refcnt = toDir.refcnt, fromInode.refcnt
 	for len(fromInode.dir.Children) > 0 {
@@ -1683,7 +1690,6 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 		child.mu.Unlock()
 	}
 	toDir.mu.Unlock()
-	fromInode.doUnlink()
 }
 
 func renameInCache(fromInode *Inode, newParent *Inode, to string) {
