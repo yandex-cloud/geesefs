@@ -76,7 +76,7 @@ func (fs *Goofys) partRange(num uint64) (offset uint64, size uint64) {
 	n := uint64(0)
 	start := uint64(0)
 	for _, s := range fs.flags.PartSizes {
-		if num < n+s.PartCount {
+		if num <= n+s.PartCount {
 			return start + (num-n)*s.PartSize, s.PartSize
 		}
 		start += s.PartSize * s.PartCount
