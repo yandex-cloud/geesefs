@@ -221,11 +221,15 @@ func (inode *Inode) OpenCacheFD() error {
 	return nil
 }
 
-func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ignoreMemoryLimit bool) {
+func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ignoreMemoryLimit bool) error {
 	// Add readahead & merge adjacent requests
 	readRanges = mergeRA(readRanges, readAheadSize, inode.fs.flags.ReadMergeKB*1024)
 	last := &readRanges[len(readRanges)-1]
 	if last.End > inode.knownSize {
+		if last.Start > inode.knownSize {
+			log.Errorf("Trying to read invalid range: offset=%v, inode.knownSize=%v. Possibly file resized remotely.", last.Start, inode.knownSize)
+			return syscall.ERANGE
+		}
 		last.End = inode.knownSize
 	}
 	// Split very large requests into smaller chunks to read in parallel
@@ -246,6 +250,7 @@ func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ign
 	for _, rr := range readRanges {
 		go inode.retryRead(cloud, key, rr.Start, rr.End-rr.Start, ignoreMemoryLimit)
 	}
+	return nil
 }
 
 func (inode *Inode) loadFromDisk(diskRanges []Range) (allocated int64, err error) {
@@ -293,7 +298,10 @@ func (inode *Inode) LoadRange(offset, size uint64, readAheadSize uint64, ignoreM
 
 	if len(readRanges) > 0 {
 		miss = true
-		inode.loadFromServer(readRanges, readAheadSize, ignoreMemoryLimit)
+		err = inode.loadFromServer(readRanges, readAheadSize, ignoreMemoryLimit)
+		if err != nil {
+			return miss, err
+		}
 	}
 
 	if inode.fs.flags.CachePath != "" {
