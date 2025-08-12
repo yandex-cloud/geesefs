@@ -1,3 +1,9 @@
+geesefs (0.43.2) unstable; urgency=medium
+
+  * Fixup processing of the boundaries of the requested range when downloading data from a server
+
+ -- Artem Ikchurin <aikch@yandex-team.ru>  Tue, 12 Aug 2025 14:20:00 +0300
+
 geesefs (0.43.1) unstable; urgency=medium
 
   * Properly handle dirtyQueueId during inode ID swaps in directory rename
