@@ -524,6 +524,12 @@ MISC OPTIONS:
 		},
 
 		cli.BoolFlag{
+			Name: "emulate-hardlinks-as-symlinks",
+			Usage: "Emulate hardlinks as symlinks. Useful for mirroring repositories with rsync" +
+				" where hardlinks are used but symlinks work just as well for serving via HTTP/rsync (default: off)",
+		},
+
+		cli.BoolFlag{
 			Name:  "disable-xattr",
 			Usage: "Disable extended attributes. Improves performance of very long directory listings",
 		},
@@ -860,6 +866,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		EnablePerms:         c.Bool("enable-perms"),
 		EnableSpecials:      c.Bool("enable-specials"),
 		EnableMtime:         c.Bool("enable-mtime"),
+		EmulateHardlinks:    c.Bool("emulate-hardlinks-as-symlinks"),
 		DisableXattr:        c.Bool("disable-xattr"),
 		UidAttr:             c.String("uid-attr"),
 		GidAttr:             c.String("gid-attr"),

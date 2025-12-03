@@ -264,6 +264,86 @@ func (fs *GoofysFuse) ReadSymlink(ctx context.Context,
 	return
 }
 
+func (fs *GoofysFuse) CreateLink(ctx context.Context,
+	op *fuseops.CreateLinkOp) (err error) {
+
+	if !fs.flags.EmulateHardlinks {
+		return syscall.ENOTSUP
+	}
+
+	target := fs.getInodeOrDie(op.Target)
+	parent := fs.getInodeOrDie(op.Parent)
+
+	if atomic.LoadInt32(&target.CacheState) == ST_DEAD ||
+		atomic.LoadInt32(&parent.CacheState) == ST_DEAD {
+		return syscall.ESTALE
+	}
+
+	// Hardlinks for directories are not allowed
+	if target.isDir() {
+		return syscall.EPERM
+	}
+
+	// Compute relative path from parent to target
+	targetPath := target.FullName()
+	parentPath := parent.FullName()
+
+	var symlinkTarget string
+	if parentPath == "" {
+		symlinkTarget = targetPath
+	} else {
+		parentParts := strings.Split(strings.Trim(parentPath, "/"), "/")
+		targetParts := strings.Split(strings.Trim(targetPath, "/"), "/")
+
+		// Find common prefix
+		i := 0
+		for i < len(parentParts) && i < len(targetParts) && parentParts[i] == targetParts[i] {
+			i++
+		}
+
+		// Build relative path: ../../../... + remaining target parts
+		upCount := len(parentParts) - i
+		rel := ""
+		for j := 0; j < upCount; j++ {
+			if j > 0 {
+				rel += "/"
+			}
+			rel += ".."
+		}
+
+		// Add remaining target parts
+		for j := i; j < len(targetParts); j++ {
+			if rel != "" {
+				rel += "/"
+			}
+			rel += targetParts[j]
+		}
+
+		if rel == "" {
+			symlinkTarget = "."
+		} else {
+			symlinkTarget = rel
+		}
+	}
+
+	// Reuse CreateSymlink
+	symlinkOp := &fuseops.CreateSymlinkOp{
+		Parent: op.Parent,
+		Name:   op.Name,
+		Target: symlinkTarget,
+	}
+
+	err = fs.CreateSymlink(ctx, symlinkOp)
+	if err != nil {
+		return err
+	}
+
+	// Copy result back
+	op.Entry = symlinkOp.Entry
+
+	return nil
+}
+
 func (fs *GoofysFuse) LookUpInode(
 	ctx context.Context,
 	op *fuseops.LookUpInodeOp) (err error) {
