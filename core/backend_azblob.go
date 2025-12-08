@@ -432,7 +432,7 @@ func (b *AZBlob) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
 	}
 
 	blob := c.NewBlobURL(param.Key)
-	resp, err := blob.GetProperties(context.TODO(), azblob.BlobAccessConditions{})
+	resp, err := blob.GetProperties(context.TODO(), azblob.BlobAccessConditions{}, azblob.ClientProvidedKeyOptions{})
 	if err != nil {
 		return nil, mapAZBError(err)
 	}
@@ -481,7 +481,7 @@ func (b *AZBlob) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 	prefixes := make([]BlobPrefixOutput, 0)
 	items := make([]BlobItemOutput, 0)
 
-	var blobItems []azblob.BlobItem
+	var blobItems []azblob.BlobItemInternal
 	var nextMarker *string
 
 	options := azblob.ListBlobsSegmentOptions{
@@ -703,8 +703,8 @@ func (b *AZBlob) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 
 	src := c.NewBlobURL(param.Source)
 	dest := c.NewBlobURL(param.Destination)
-	resp, err := dest.StartCopyFromURL(context.TODO(), src.URL(), nilMetadata(param.Metadata),
-		azblob.ModifiedAccessConditions{}, azblob.BlobAccessConditions{})
+	resp, err := dest.StartCopyFromURL(context.TODO(), src.URL(), azblob.Metadata(nilMetadata(param.Metadata)),
+		azblob.ModifiedAccessConditions{}, azblob.BlobAccessConditions{}, azblob.AccessTierNone, azblob.BlobTagsMap{})
 	if err != nil {
 		return nil, mapAZBError(err)
 	}
@@ -713,7 +713,7 @@ func (b *AZBlob) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 		time.Sleep(50 * time.Millisecond)
 
 		var copy *azblob.BlobGetPropertiesResponse
-		for copy, err = dest.GetProperties(context.TODO(), azblob.BlobAccessConditions{}); err == nil; copy, err = dest.GetProperties(context.TODO(), azblob.BlobAccessConditions{}) {
+		for copy, err = dest.GetProperties(context.TODO(), azblob.BlobAccessConditions{}, azblob.ClientProvidedKeyOptions{}); err == nil; copy, err = dest.GetProperties(context.TODO(), azblob.BlobAccessConditions{}, azblob.ClientProvidedKeyOptions{}) {
 			// if there's a new copy, we can only assume the last one was done
 			if copy.CopyStatus() != azblob.CopyStatusPending || copy.CopyID() != resp.CopyID() {
 				break
@@ -745,7 +745,7 @@ func (b *AZBlob) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
 			ModifiedAccessConditions: azblob.ModifiedAccessConditions{
 				IfMatch: ifMatch,
 			},
-		}, false)
+		}, false, azblob.ClientProvidedKeyOptions{})
 	if err != nil {
 		return nil, mapAZBError(err)
 	}
@@ -798,7 +798,7 @@ func (b *AZBlob) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 		azblob.BlobHTTPHeaders{
 			ContentType: NilStr(param.ContentType),
 		},
-		nilMetadata(param.Metadata), azblob.BlobAccessConditions{})
+		azblob.Metadata(nilMetadata(param.Metadata)), azblob.BlobAccessConditions{}, azblob.AccessTierNone, azblob.BlobTagsMap{}, azblob.ClientProvidedKeyOptions{}, azblob.ImmutabilityPolicyOptions{})
 	if err != nil {
 		return nil, mapAZBError(err)
 	}
@@ -837,7 +837,7 @@ func (b *AZBlob) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobA
 	base64BlockId := base64.StdEncoding.EncodeToString([]byte(blockId))
 
 	_, err = blob.StageBlock(context.TODO(), base64BlockId, param.Body,
-		azblob.LeaseAccessConditions{}, nil)
+		azblob.LeaseAccessConditions{}, nil, azblob.ClientProvidedKeyOptions{})
 	if err != nil {
 		return nil, mapAZBError(err)
 	}
@@ -880,7 +880,7 @@ func (b *AZBlob) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlo
 
 	_, err = blob.StageBlockFromURL(context.TODO(), base64BlockId,
 		srcBlobURL, int64(param.Offset), int64(param.Size),
-		azblob.LeaseAccessConditions{}, azblob.ModifiedAccessConditions{})
+		azblob.LeaseAccessConditions{}, azblob.ModifiedAccessConditions{}, azblob.ClientProvidedKeyOptions{}, nil)
 	if err != nil {
 		return nil, mapAZBError(err)
 	}
@@ -909,8 +909,8 @@ func (b *AZBlob) MultipartBlobCommit(param *MultipartBlobCommitInput) (*Multipar
 	}
 
 	resp, err := blob.CommitBlockList(context.TODO(), parts,
-		azblob.BlobHTTPHeaders{}, nilMetadata(param.Metadata),
-		azblob.BlobAccessConditions{})
+		azblob.BlobHTTPHeaders{}, azblob.Metadata(nilMetadata(param.Metadata)),
+		azblob.BlobAccessConditions{}, azblob.AccessTierNone, azblob.BlobTagsMap{}, azblob.ClientProvidedKeyOptions{}, azblob.ImmutabilityPolicyOptions{})
 	if err != nil {
 		return nil, mapAZBError(err)
 	}
