@@ -18,6 +18,8 @@
 package core
 
 import (
+	"path/filepath"
+
 	"github.com/yandex-cloud/geesefs/core/cfg"
 
 	"context"
@@ -285,46 +287,15 @@ func (fs *GoofysFuse) CreateLink(ctx context.Context,
 	}
 
 	// Compute relative path from parent to target
-	targetPath := target.FullName()
-	parentPath := parent.FullName()
+	base := filepath.Clean(parent.FullName())
+	tgt := filepath.Clean(target.FullName())
 
-	var symlinkTarget string
-	if parentPath == "" {
-		symlinkTarget = targetPath
-	} else {
-		parentParts := strings.Split(strings.Trim(parentPath, "/"), "/")
-		targetParts := strings.Split(strings.Trim(targetPath, "/"), "/")
-
-		// Find common prefix
-		i := 0
-		for i < len(parentParts) && i < len(targetParts) && parentParts[i] == targetParts[i] {
-			i++
-		}
-
-		// Build relative path: ../../../... + remaining target parts
-		upCount := len(parentParts) - i
-		rel := ""
-		for j := 0; j < upCount; j++ {
-			if j > 0 {
-				rel += "/"
-			}
-			rel += ".."
-		}
-
-		// Add remaining target parts
-		for j := i; j < len(targetParts); j++ {
-			if rel != "" {
-				rel += "/"
-			}
-			rel += targetParts[j]
-		}
-
-		if rel == "" {
-			symlinkTarget = "."
-		} else {
-			symlinkTarget = rel
-		}
+	rel, err := filepath.Rel(base, tgt)
+	if err != nil {
+		// Fallback in unexpected cases (e.g., different volumes on Windows)
+		rel = tgt
 	}
+	symlinkTarget := rel
 
 	// Reuse CreateSymlink
 	symlinkOp := &fuseops.CreateSymlinkOp{
