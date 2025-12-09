@@ -23,6 +23,21 @@ install:
 	go install -ldflags "-X main.Version=`git rev-parse HEAD`"
 
 
-.PHONY: protoc
+# Docker build targets
+docker-build:
+	docker build -f Dockerfile.build -t geesefs-builder:latest .
+
+docker-binary: docker-build
+	@echo "Extracting binary from Docker container..."
+	@# Create temporary container and copy binary
+	@CONTAINER_ID=$$(docker create geesefs-builder:latest) && \
+	docker cp $$CONTAINER_ID:/geesefs ./geesefs && \
+	docker rm $$CONTAINER_ID && \
+	echo "Binary geesefs copied to project root"
+
+docker-clean:
+	docker rmi geesefs-builder:latest 2>/dev/null || true
+
+.PHONY: protoc docker-build docker-binary docker-clean
 protoc:
 	protoc --go_out=. --experimental_allow_proto3_optional --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative core/pb/*.proto
