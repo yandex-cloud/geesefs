@@ -18,6 +18,8 @@
 package core
 
 import (
+	"path/filepath"
+
 	"github.com/yandex-cloud/geesefs/core/cfg"
 
 	"context"
@@ -262,6 +264,55 @@ func (fs *GoofysFuse) ReadSymlink(ctx context.Context,
 	op.Target, err = inode.ReadSymlink()
 	err = mapAwsError(err)
 	return
+}
+
+func (fs *GoofysFuse) CreateLink(ctx context.Context,
+	op *fuseops.CreateLinkOp) (err error) {
+
+	if !fs.flags.EmulateHardlinks {
+		return syscall.ENOTSUP
+	}
+
+	target := fs.getInodeOrDie(op.Target)
+	parent := fs.getInodeOrDie(op.Parent)
+
+	if atomic.LoadInt32(&target.CacheState) == ST_DEAD ||
+		atomic.LoadInt32(&parent.CacheState) == ST_DEAD {
+		return syscall.ESTALE
+	}
+
+	// Hardlinks for directories are not allowed
+	if target.isDir() {
+		return syscall.EPERM
+	}
+
+	// Compute relative path from parent to target
+	base := filepath.Clean(parent.FullName())
+	tgt := filepath.Clean(target.FullName())
+
+	rel, err := filepath.Rel(base, tgt)
+	if err != nil {
+		// Fallback in unexpected cases (e.g., different volumes on Windows)
+		rel = tgt
+	}
+	symlinkTarget := rel
+
+	// Reuse CreateSymlink
+	symlinkOp := &fuseops.CreateSymlinkOp{
+		Parent: op.Parent,
+		Name:   op.Name,
+		Target: symlinkTarget,
+	}
+
+	err = fs.CreateSymlink(ctx, symlinkOp)
+	if err != nil {
+		return err
+	}
+
+	// Copy result back
+	op.Entry = symlinkOp.Entry
+
+	return nil
 }
 
 func (fs *GoofysFuse) LookUpInode(
