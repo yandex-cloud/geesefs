@@ -1,0 +1,26 @@
+# Dockerfile for building geesefs
+FROM golang:1.25.5-alpine AS builder
+
+# Install required packages
+RUN apk add --no-cache git make bash
+
+# Set working directory
+WORKDIR /build
+
+# Copy source code (needed for replace directives in go.mod)
+COPY . .
+
+# Download dependencies
+RUN go mod download
+
+# Set environment variables for static build
+ENV CGO_ENABLED=0
+ENV GOOS=linux
+
+# Build binary
+RUN go build -ldflags "-X main.Version=docker-build -s -w" -o geesefs .
+
+# Final stage - minimal image with binary only (optional)
+FROM scratch AS final
+COPY --from=builder /build/geesefs /geesefs
+ENTRYPOINT ["/geesefs"]
