@@ -15,7 +15,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v2
       with:
-        go-version: 1.25
+        go-version: 1.25.5
 
     - name: Build linux amd64
       run: env CGO_ENABLED=0 go build -o geesefs-linux-amd64 -v && ln -s geesefs-linux-amd64 geesefs
