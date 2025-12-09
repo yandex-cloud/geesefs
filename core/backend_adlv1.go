@@ -28,7 +28,7 @@ import (
 	"syscall"
 	"time"
 
-	uuid "github.com/satori/go.uuid"
+	uuid "github.com/gofrs/uuid"
 	"github.com/sirupsen/logrus"
 
 	adl "github.com/Azure/azure-sdk-for-go/services/datalake/store/2016-11-01/filesystem"
