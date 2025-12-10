@@ -4,3 +4,5 @@ goofys
 goofys.test
 xout
 s3proxy.jar
+test/s3proxy_test.properties
+core/*.log
