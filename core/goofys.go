@@ -342,7 +342,7 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 		debug.SetGCPercent(20)
 	}
 
-	fs.bufferPool = NewBufferPool(int64(flags.MemoryLimit), uint64(flags.GCInterval)<<20)
+	fs.bufferPool = NewBufferPool(int64(flags.MemoryLimit), uint64(flags.GCInterval))
 	fs.bufferPool.FreeSomeCleanBuffers = func(size int64) (int64, bool) {
 		return fs.FreeSomeCleanBuffers(size)
 	}
