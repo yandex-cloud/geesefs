@@ -88,6 +88,7 @@ type FlagStorage struct {
 	EnablePerms         bool
 	EnableSpecials      bool
 	EnableMtime         bool
+	EmulateHardlinks    bool
 	DisableXattr        bool
 	UidAttr             string
 	GidAttr             string

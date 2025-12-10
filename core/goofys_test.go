@@ -2958,3 +2958,143 @@ func (s *GoofysTest) TestListBeforeFlushRename(t *C) {
 	t.Assert(err, IsNil)
 	fh.Release()
 }
+
+func (s *GoofysTest) TestCreateHardlinkDisabled(t *C) {
+	// Test that hardlinks are not supported when EmulateHardlinks is false (default)
+	root := s.getRoot(t)
+
+	// Create a test file
+	_, fh, err := root.Create("testfile")
+	t.Assert(err, IsNil)
+	err = fh.inode.SyncFile()
+	t.Assert(err, IsNil)
+	fh.Release()
+
+	// Try to create a hardlink - should fail with ENOTSUP
+	targetInode, err := s.fs.LookupPath("testfile")
+	t.Assert(err, IsNil)
+
+	// Simulate CreateLink operation
+	fs := NewGoofysFuse(s.fs)
+	op := &fuseops.CreateLinkOp{
+		Parent: root.Id,
+		Name:   "hardlink",
+		Target: targetInode.Id,
+	}
+
+	err = fs.CreateLink(context.Background(), op)
+	t.Assert(err, Equals, syscall.ENOTSUP)
+}
+
+func (s *GoofysTest) TestCreateHardlinkEnabled(t *C) {
+	// Enable hardlink emulation
+	s.fs.flags.EmulateHardlinks = true
+
+	root := s.getRoot(t)
+
+	// Create a test file
+	_, fh, err := root.Create("testfile")
+	t.Assert(err, IsNil)
+	err = fh.WriteFile(0, []byte("test content"), true)
+	t.Assert(err, IsNil)
+	err = fh.inode.SyncFile()
+	t.Assert(err, IsNil)
+	fh.Release()
+
+	// Create a hardlink
+	targetInode, err := s.fs.LookupPath("testfile")
+	t.Assert(err, IsNil)
+
+	// Simulate CreateLink operation
+	fs := NewGoofysFuse(s.fs)
+	op := &fuseops.CreateLinkOp{
+		Parent: root.Id,
+		Name:   "hardlink",
+		Target: targetInode.Id,
+	}
+
+	err = fs.CreateLink(context.Background(), op)
+	t.Assert(err, IsNil)
+
+	// Verify that the hardlink was created as a symlink
+	hardlinkInode, err := s.fs.LookupPath("hardlink")
+	t.Assert(err, IsNil)
+
+	// Check that it's a symlink
+	attr := hardlinkInode.GetAttributes()
+	t.Assert(attr.Mode&os.ModeSymlink, Not(Equals), 0)
+
+	// Read the symlink target
+	target, err := hardlinkInode.ReadSymlink()
+	t.Assert(err, IsNil)
+	t.Assert(target, Equals, "testfile")
+}
+
+func (s *GoofysTest) TestCreateHardlinkOnDirectory(t *C) {
+	// Enable hardlink emulation
+	s.fs.flags.EmulateHardlinks = true
+
+	root := s.getRoot(t)
+
+	// Create a test directory
+	testDir, err := root.MkDir("testdir")
+	t.Assert(err, IsNil)
+	err = testDir.SyncFile()
+	t.Assert(err, IsNil)
+
+	// Try to create a hardlink to the directory - should fail with EPERM
+	fs := NewGoofysFuse(s.fs)
+	op := &fuseops.CreateLinkOp{
+		Parent: root.Id,
+		Name:   "hardlink_to_dir",
+		Target: testDir.Id,
+	}
+
+	err = fs.CreateLink(context.Background(), op)
+	t.Assert(err, Equals, syscall.EPERM)
+}
+
+func (s *GoofysTest) TestCreateHardlinkRelativePath(t *C) {
+	// Enable hardlink emulation
+	s.fs.flags.EmulateHardlinks = true
+
+	root := s.getRoot(t)
+
+	// Create a subdirectory
+	subdir, err := root.MkDir("subdir")
+	t.Assert(err, IsNil)
+	err = subdir.SyncFile()
+	t.Assert(err, IsNil)
+
+	// Create a test file in root
+	_, fh, err := root.Create("testfile")
+	t.Assert(err, IsNil)
+	err = fh.WriteFile(0, []byte("test content"), true)
+	t.Assert(err, IsNil)
+	err = fh.inode.SyncFile()
+	t.Assert(err, IsNil)
+	fh.Release()
+
+	// Create a hardlink in subdirectory pointing to file in root
+	targetInode, err := s.fs.LookupPath("testfile")
+	t.Assert(err, IsNil)
+
+	fs := NewGoofysFuse(s.fs)
+	op := &fuseops.CreateLinkOp{
+		Parent: subdir.Id,
+		Name:   "hardlink",
+		Target: targetInode.Id,
+	}
+
+	err = fs.CreateLink(context.Background(), op)
+	t.Assert(err, IsNil)
+
+	// Verify that the hardlink was created as a symlink with relative path
+	hardlinkInode, err := s.fs.LookupPath("subdir/hardlink")
+	t.Assert(err, IsNil)
+
+	// Read the symlink target - should be relative path
+	target, err := hardlinkInode.ReadSymlink()
+	t.Assert(err, IsNil)
+	t.Assert(target, Equals, "../testfile")
+}
