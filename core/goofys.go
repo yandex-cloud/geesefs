@@ -684,6 +684,13 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 		childTmp.isDir() && atomic.LoadInt64(&childTmp.dir.ModifiedChildren) > 0 {
 		return false
 	}
+	// Do not evict inode if it parent is RootInode
+  if fs.flags.NoEvictRootChilds && childTmp.Parent.Id == fuseops.RootInodeID {
+	  log.Debugf("Do not evict root child: inode %v, name %v, parent inode %v", childTmp.Id, childTmp.Name, childTmp.Parent.Id)
+		childNewExprTime := time.Now()
+		childTmp.SetExpireTime(childNewExprTime)
+		return false
+	}
 	if !childTmp.mu.TryLock() {
 		return false
 	}
