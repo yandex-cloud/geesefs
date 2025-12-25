@@ -353,7 +353,7 @@ MISC OPTIONS:
 
 		cli.IntFlag{
 			Name:  "gc-interval",
-			Usage: "Force garbage collection after this amount of data buffer allocations",
+			Usage: "Force garbage collection after this amount of data buffer allocations (in MB)",
 			Value: 250,
 		},
 
