@@ -1,3 +1,16 @@
+geesefs (0.43.3) unstable; urgency=medium
+
+  * Add flag to ignore root directory attribute errors
+  * Fix double conversion of GCInterval to bytes
+  * Fix panic when setting user metadata on implicit directories
+  * Fix panic in partRange when uploading exactly 10000 parts
+  * Fix inode refcnt bug
+  * Add support for converting hardlinks to symlinks
+  * Update Docker build and golang dependencies
+  * Add test workflows to run on pull requests
+
+ -- Artem Ikchurin <aikch@yandex-team.ru>  Thu, 23 Jan 2026 15:16:00 +0300
+
 geesefs (0.43.2) unstable; urgency=medium
 
   * Fixup processing of the boundaries of the requested range when downloading data from a server
