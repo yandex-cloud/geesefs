@@ -145,6 +145,10 @@ MISC OPTIONS:
 			Name:  "refresh-dirs",
 			Usage: "Automatically refresh open directories using notifications under Windows",
 		},
+		cli.BoolFlag{
+			Name:  "ignore-setting-attrs-for-root-dir-erros",
+			Usage: "Ignore changing attributes for root of geesefs (ex. 'touch ./mountpoint')",
+		},
 	}
 
 	s3Flags := []cli.Flag{
@@ -824,14 +828,15 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 	flags := &FlagStorage{
 		// File system
-		MountOptions:   c.StringSlice("o"),
-		DirMode:        os.FileMode(c.Int("dir-mode")),
-		FileMode:       os.FileMode(c.Int("file-mode")),
-		Uid:            uint32(c.Int("uid")),
-		Gid:            uint32(c.Int("gid")),
-		Setuid:         c.Int("setuid"),
-		Setgid:         c.Int("setgid"),
-		WinRefreshDirs: c.Bool("refresh-dirs"),
+		MountOptions:                       c.StringSlice("o"),
+		DirMode:                            os.FileMode(c.Int("dir-mode")),
+		FileMode:                           os.FileMode(c.Int("file-mode")),
+		Uid:                                uint32(c.Int("uid")),
+		Gid:                                uint32(c.Int("gid")),
+		Setuid:                             c.Int("setuid"),
+		Setgid:                             c.Int("setgid"),
+		WinRefreshDirs:                     c.Bool("refresh-dirs"),
+		IgnoreSettingAttrsForRootDirErrors: c.Bool("ignore-setting-attrs-for-root-dir-erros"),
 
 		// Tuning,
 		MemoryLimit:         uint64(1024 * 1024 * c.Int("memory-limit")),
