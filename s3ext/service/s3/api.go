@@ -14,7 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awsutil"
 	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/aws/signer/v4"
+	v4 "github.com/aws/aws-sdk-go/aws/signer/v4"
 	"github.com/aws/aws-sdk-go/internal/s3shared/arn"
 	"github.com/aws/aws-sdk-go/private/checksum"
 	"github.com/aws/aws-sdk-go/private/protocol"
@@ -30628,6 +30628,17 @@ type PutObjectInput struct {
 	// This action is not supported by Amazon S3 on Outposts.
 	GrantWriteACP *string `location:"header" locationName:"x-amz-grant-write-acp" type:"string"`
 
+	// Uploads the object only if the ETag (entity tag) value provided matches the ETag
+	// of the object in S3. If the ETag values do not match, the operation returns a
+	// 412 Precondition Failed error. Used for optimistic locking / conditional updates.
+	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
+
+	// Uploads the object only if the object key name does not already exist in the
+	// bucket specified. Otherwise, Amazon S3 returns a 412 Precondition Failed error.
+	// Set to "*" to prevent overwriting an existing object.
+	// Only supported for general purpose buckets.
+	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
+
 	// Object key for which the PUT action was initiated.
 	//
 	// Key is a required field
@@ -30861,6 +30872,18 @@ func (s *PutObjectInput) SetGrantReadACP(v string) *PutObjectInput {
 // SetGrantWriteACP sets the GrantWriteACP field's value.
 func (s *PutObjectInput) SetGrantWriteACP(v string) *PutObjectInput {
 	s.GrantWriteACP = &v
+	return s
+}
+
+// SetIfMatch sets the IfMatch field's value.
+func (s *PutObjectInput) SetIfMatch(v string) *PutObjectInput {
+	s.IfMatch = &v
+	return s
+}
+
+// SetIfNoneMatch sets the IfNoneMatch field's value.
+func (s *PutObjectInput) SetIfNoneMatch(v string) *PutObjectInput {
+	s.IfNoneMatch = &v
 	return s
 }
 
