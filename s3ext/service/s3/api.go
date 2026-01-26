@@ -14,7 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awsutil"
 	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/request"
-	v4 "github.com/aws/aws-sdk-go/aws/signer/v4"
+	"github.com/aws/aws-sdk-go/aws/signer/v4"
 	"github.com/aws/aws-sdk-go/internal/s3shared/arn"
 	"github.com/aws/aws-sdk-go/private/checksum"
 	"github.com/aws/aws-sdk-go/private/protocol"
@@ -12200,6 +12200,10 @@ type CompleteMultipartUploadInput struct {
 	// error.
 	ExpectedBucketOwner *string `location:"header" locationName:"x-amz-expected-bucket-owner" type:"string"`
 
+	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
+
+	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
+
 	// Object key for which the multipart upload was initiated.
 	//
 	// Key is a required field
@@ -12272,6 +12276,18 @@ func (s *CompleteMultipartUploadInput) getBucket() (v string) {
 // SetExpectedBucketOwner sets the ExpectedBucketOwner field's value.
 func (s *CompleteMultipartUploadInput) SetExpectedBucketOwner(v string) *CompleteMultipartUploadInput {
 	s.ExpectedBucketOwner = &v
+	return s
+}
+
+// SetIfMatch sets the IfMatch field's value.
+func (s *CompleteMultipartUploadInput) SetIfMatch(v string) *CompleteMultipartUploadInput {
+	s.IfMatch = &v
+	return s
+}
+
+// SetIfNoneMatch sets the IfNoneMatch field's value.
+func (s *CompleteMultipartUploadInput) SetIfNoneMatch(v string) *CompleteMultipartUploadInput {
+	s.IfNoneMatch = &v
 	return s
 }
 
@@ -30628,15 +30644,8 @@ type PutObjectInput struct {
 	// This action is not supported by Amazon S3 on Outposts.
 	GrantWriteACP *string `location:"header" locationName:"x-amz-grant-write-acp" type:"string"`
 
-	// Uploads the object only if the ETag (entity tag) value provided matches the ETag
-	// of the object in S3. If the ETag values do not match, the operation returns a
-	// 412 Precondition Failed error. Used for optimistic locking / conditional updates.
 	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
 
-	// Uploads the object only if the object key name does not already exist in the
-	// bucket specified. Otherwise, Amazon S3 returns a 412 Precondition Failed error.
-	// Set to "*" to prevent overwriting an existing object.
-	// Only supported for general purpose buckets.
 	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
 
 	// Object key for which the PUT action was initiated.
