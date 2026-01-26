@@ -620,8 +620,8 @@ MISC OPTIONS:
 
 		cli.IntFlag{
 			Name:  "read-retry-attempts",
-			Value: 0,
-			Usage: "Maximum read retry attempts (0 means unlimited)",
+			Value: 10,
+			Usage: "Maximum read retry attempts (minimum: 1)",
 		},
 
 		cli.IntFlag{
@@ -826,6 +826,11 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		singlePart = 5
 	}
 
+	readRetryAttempts := c.Int("read-retry-attempts")
+	if readRetryAttempts < 1 {
+		panic("--read-retry-attempts must be at least 1")
+	}
+
 	flags := &FlagStorage{
 		// File system
 		MountOptions:                       c.StringSlice("o"),
@@ -855,7 +860,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		ReadRetryInterval:   c.Duration("read-retry-interval"),
 		ReadRetryMultiplier: c.Float64("read-retry-mul"),
 		ReadRetryMax:        c.Duration("read-retry-max-interval"),
-		ReadRetryAttempts:   c.Int("read-retry-attempts"),
+		ReadRetryAttempts:   readRetryAttempts,
 		ReadAheadKB:         uint64(c.Int("read-ahead")),
 		SmallReadCount:      uint64(c.Int("small-read-count")),
 		SmallReadCutoffKB:   uint64(c.Int("small-read-cutoff")),
@@ -1087,6 +1092,7 @@ func DefaultFlags() *FlagStorage {
 		StatCacheTTL:        30 * time.Second,
 		HTTPTimeout:         30 * time.Second,
 		RetryInterval:       30 * time.Second,
+		ReadRetryAttempts:   10,
 		MaxDiskCacheFD:      512,
 		RefreshFilename:     ".invalidate",
 		FlushFilename:       ".fsyncdir",
