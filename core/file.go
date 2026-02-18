@@ -1856,7 +1856,12 @@ func (inode *Inode) SetAttributes(size *uint64, mode *os.FileMode,
 
 	if inode.Parent == nil {
 		// chmod/chown on the root directory of mountpoint is not supported
-		return syscall.ENOTSUP
+		if inode.fs.flags.IgnoreSettingAttrsForRootDirErrors {
+			log.Debug("Trying to set attrs for roor dir")
+			return
+		} else {
+			return syscall.ENOTSUP
+		}
 	}
 
 	fs := inode.fs

@@ -50,6 +50,8 @@ type FlagStorage struct {
 	Setuid   int
 	Setgid   int
 
+	IgnoreSettingAttrsForRootDirErrors bool
+
 	// Common Backend Config
 	UseContentType bool
 	Endpoint       string
@@ -88,6 +90,7 @@ type FlagStorage struct {
 	EnablePerms         bool
 	EnableSpecials      bool
 	EnableMtime         bool
+	EmulateHardlinks    bool
 	DisableXattr        bool
 	UidAttr             string
 	GidAttr             string

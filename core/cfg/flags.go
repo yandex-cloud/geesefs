@@ -30,7 +30,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-const GEESEFS_VERSION = "0.43.2"
+const GEESEFS_VERSION = "0.43.3"
 
 var flagCategories map[string]string
 
@@ -144,6 +144,10 @@ MISC OPTIONS:
 		cli.BoolFlag{
 			Name:  "refresh-dirs",
 			Usage: "Automatically refresh open directories using notifications under Windows",
+		},
+		cli.BoolFlag{
+			Name:  "ignore-setting-attrs-for-root-dir-erros",
+			Usage: "Ignore changing attributes for root of geesefs (ex. 'touch ./mountpoint')",
 		},
 	}
 
@@ -353,7 +357,7 @@ MISC OPTIONS:
 
 		cli.IntFlag{
 			Name:  "gc-interval",
-			Usage: "Force garbage collection after this amount of data buffer allocations",
+			Usage: "Force garbage collection after this amount of data buffer allocations (in MB)",
 			Value: 250,
 		},
 
@@ -524,6 +528,12 @@ MISC OPTIONS:
 		},
 
 		cli.BoolFlag{
+			Name: "emulate-hardlinks-as-symlinks",
+			Usage: "Emulate hardlinks as symlinks. Useful for mirroring repositories with rsync" +
+				" where hardlinks are used but symlinks work just as well for serving via HTTP/rsync (default: off)",
+		},
+
+		cli.BoolFlag{
 			Name:  "disable-xattr",
 			Usage: "Disable extended attributes. Improves performance of very long directory listings",
 		},
@@ -610,8 +620,8 @@ MISC OPTIONS:
 
 		cli.IntFlag{
 			Name:  "read-retry-attempts",
-			Value: 0,
-			Usage: "Maximum read retry attempts (0 means unlimited)",
+			Value: 10,
+			Usage: "Maximum read retry attempts (minimum: 1)",
 		},
 
 		cli.IntFlag{
@@ -816,16 +826,22 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		singlePart = 5
 	}
 
+	readRetryAttempts := c.Int("read-retry-attempts")
+	if readRetryAttempts < 1 {
+		panic("--read-retry-attempts must be at least 1")
+	}
+
 	flags := &FlagStorage{
 		// File system
-		MountOptions:   c.StringSlice("o"),
-		DirMode:        os.FileMode(c.Int("dir-mode")),
-		FileMode:       os.FileMode(c.Int("file-mode")),
-		Uid:            uint32(c.Int("uid")),
-		Gid:            uint32(c.Int("gid")),
-		Setuid:         c.Int("setuid"),
-		Setgid:         c.Int("setgid"),
-		WinRefreshDirs: c.Bool("refresh-dirs"),
+		MountOptions:                       c.StringSlice("o"),
+		DirMode:                            os.FileMode(c.Int("dir-mode")),
+		FileMode:                           os.FileMode(c.Int("file-mode")),
+		Uid:                                uint32(c.Int("uid")),
+		Gid:                                uint32(c.Int("gid")),
+		Setuid:                             c.Int("setuid"),
+		Setgid:                             c.Int("setgid"),
+		WinRefreshDirs:                     c.Bool("refresh-dirs"),
+		IgnoreSettingAttrsForRootDirErrors: c.Bool("ignore-setting-attrs-for-root-dir-erros"),
 
 		// Tuning,
 		MemoryLimit:         uint64(1024 * 1024 * c.Int("memory-limit")),
@@ -844,7 +860,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		ReadRetryInterval:   c.Duration("read-retry-interval"),
 		ReadRetryMultiplier: c.Float64("read-retry-mul"),
 		ReadRetryMax:        c.Duration("read-retry-max-interval"),
-		ReadRetryAttempts:   c.Int("read-retry-attempts"),
+		ReadRetryAttempts:   readRetryAttempts,
 		ReadAheadKB:         uint64(c.Int("read-ahead")),
 		SmallReadCount:      uint64(c.Int("small-read-count")),
 		SmallReadCutoffKB:   uint64(c.Int("small-read-cutoff")),
@@ -860,6 +876,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		EnablePerms:         c.Bool("enable-perms"),
 		EnableSpecials:      c.Bool("enable-specials"),
 		EnableMtime:         c.Bool("enable-mtime"),
+		EmulateHardlinks:    c.Bool("emulate-hardlinks-as-symlinks"),
 		DisableXattr:        c.Bool("disable-xattr"),
 		UidAttr:             c.String("uid-attr"),
 		GidAttr:             c.String("gid-attr"),
@@ -1075,6 +1092,7 @@ func DefaultFlags() *FlagStorage {
 		StatCacheTTL:        30 * time.Second,
 		HTTPTimeout:         30 * time.Second,
 		RetryInterval:       30 * time.Second,
+		ReadRetryAttempts:   10,
 		MaxDiskCacheFD:      512,
 		RefreshFilename:     ".invalidate",
 		FlushFilename:       ".fsyncdir",
