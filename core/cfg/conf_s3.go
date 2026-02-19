@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -70,7 +71,8 @@ type S3Config struct {
 	ListV2     bool
 	ListV1Ext  bool
 
-	Subdomain bool
+	CopySourceBucket string
+	Subdomain        bool
 
 	UseIAM    bool
 	IAMFlavor string
@@ -132,10 +134,18 @@ func (c *S3Config) ToAwsConfig(flags *FlagStorage) (*aws.Config, error) {
 			c.Credentials = credentials.NewStaticCredentials(c.AccessKey, c.SecretKey, "")
 		}
 	}
-	if flags.Endpoint != "" {
-		awsConfig.Endpoint = &flags.Endpoint
-	}
 
+	if flags.Endpoint != "" {
+		if c.Subdomain {
+			var endpoint string
+			u, _ := url.Parse(flags.Endpoint)
+			u.Host = c.CopySourceBucket + "." + u.Host
+			endpoint = u.String()
+			awsConfig.Endpoint = &endpoint
+		} else {
+			awsConfig.Endpoint = &flags.Endpoint
+		}
+	}
 	awsConfig.S3ForcePathStyle = aws.Bool(!c.Subdomain)
 
 	awsConfig.Retryer = client.DefaultRetryer{
