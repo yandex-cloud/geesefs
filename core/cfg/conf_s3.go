@@ -137,14 +137,14 @@ func (c *S3Config) ToAwsConfig(flags *FlagStorage) (*aws.Config, error) {
 
 	if flags.Endpoint != "" {
 		if c.Subdomain {
-			var endpoint string
-			u, _ := url.Parse(flags.Endpoint)
+			u, err := url.Parse(flags.Endpoint)
+			if err != nil {
+				return nil, err
+			}
 			u.Host = c.CopySourceBucket + "." + u.Host
-			endpoint = u.String()
-			awsConfig.Endpoint = &endpoint
-		} else {
-			awsConfig.Endpoint = &flags.Endpoint
+			flags.Endpoint = u.String()
 		}
+		awsConfig.Endpoint = &flags.Endpoint
 	}
 	awsConfig.S3ForcePathStyle = aws.Bool(!c.Subdomain)
 
