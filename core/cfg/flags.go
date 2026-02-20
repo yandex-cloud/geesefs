@@ -629,6 +629,11 @@ MISC OPTIONS:
 			Value: 512,
 			Usage: "Simultaneously opened cache file descriptor limit",
 		},
+		cli.BoolFlag{
+			Name: "no-evict-root-childs",
+			Usage: "Do not evict inode if it parent is RootInode." +
+			  " Useful if you mount one bucket and docker mount the bucket's child folders.",
+		},
 	}
 
 	if runtime.GOOS == "windows" {
@@ -893,6 +898,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		PreferPatchUploads:  c.Bool("prefer-patch-uploads"),
 		NoPreloadDir:        c.Bool("no-preload-dir"),
 		NoVerifySSL:         c.Bool("no-verify-ssl"),
+		NoEvictRootChilds:   c.Bool("no-evict-root-childs"),
 
 		// Common Backend Config
 		Endpoint:       c.String("endpoint"),
