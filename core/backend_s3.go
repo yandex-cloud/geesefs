@@ -64,6 +64,10 @@ func NewS3(bucket string, flags *cfg.FlagStorage, config *cfg.S3Config) (*S3Back
 	if config.MultipartCopyThreshold == 0 {
 		config.MultipartCopyThreshold = 128 * 1024 * 1024
 	}
+	config.CopySourceBucket = bucket
+	if config.Subdomain {
+		bucket = "/"
+	}
 
 	if config.ProjectId != "" {
 		log.Infof("Using Ceph multitenancy format bucket naming: %s", bucket)
@@ -815,7 +819,7 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 		metadataDirective = s3.MetadataDirectiveReplace
 	}
 
-	from := s.bucket + "/" + param.Source
+	from := s.config.CopySourceBucket + "/" + param.Source
 
 	// Copy into the same object is used to just update metadata
 	// and should be very quick regardless of parameters
@@ -1112,7 +1116,7 @@ func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*Multipart
 		Bucket:     &s.bucket,
 		Key:        param.Commit.Key,
 		PartNumber: aws.Int64(int64(param.PartNumber)),
-		CopySource: aws.String(pathEscape(s.bucket + "/" + param.CopySource)),
+		CopySource: aws.String(pathEscape(s.config.CopySourceBucket + "/" + param.CopySource)),
 		UploadId:   param.Commit.UploadId,
 	}
 	if param.Size != 0 {
