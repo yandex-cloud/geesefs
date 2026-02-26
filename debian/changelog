@@ -1,3 +1,10 @@
+geesefs (0.43.4) unstable; urgency=medium
+
+  * fix(s3): invalid CopySource format with virtual-hosted-style endpoint. (#173)
+  * Fix infinite retry loop on read errors
+
+ -- Artem Ikchurin <aikch@yandex-team.ru>  Thu, 26 Feb 2026 13:50:00 +0300
+
 geesefs (0.43.3) unstable; urgency=medium
 
   * Add flag to ignore root directory attribute errors
