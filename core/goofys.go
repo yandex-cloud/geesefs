@@ -212,72 +212,70 @@ func NewGoofys(ctx context.Context, bucketName string, flags *cfg.FlagStorage) (
 	if flags.DebugS3 {
 		cfg.SetCloudLogLevel(logrus.DebugLevel)
 	}
-	if flags.Backend == nil {
-		if spec, err := ParseBucketSpec(bucketName); err == nil {
-			switch spec.Scheme {
-			case "adl":
-				auth, err := cfg.AzureAuthorizerConfig{
-					Log: cfg.GetLogger("adlv1"),
-				}.Authorizer()
-				if err != nil {
-					err = fmt.Errorf("couldn't load azure credentials: %v",
-						err)
-					return nil, err
-				}
-				flags.Backend = &cfg.ADLv1Config{
-					Endpoint:   spec.Bucket,
-					Authorizer: auth,
-				}
-				// adlv1 doesn't really have bucket
-				// names, but we will rebuild the
-				// prefix
-				bucketName = ""
-				if spec.Prefix != "" {
-					bucketName = ":" + spec.Prefix
-				}
-			case "wasb":
-				config, err := cfg.AzureBlobConfig(flags.Endpoint, spec.Bucket, "blob")
-				if err != nil {
-					return nil, err
-				}
-				flags.Backend = &config
-				if config.Container != "" {
-					bucketName = config.Container
-				} else {
-					bucketName = spec.Bucket
-				}
-				if config.Prefix != "" {
-					spec.Prefix = config.Prefix
-				}
-				if spec.Prefix != "" {
-					bucketName += ":" + spec.Prefix
-				}
-			case "abfs":
-				config, err := cfg.AzureBlobConfig(flags.Endpoint, spec.Bucket, "dfs")
-				if err != nil {
-					return nil, err
-				}
-				flags.Backend = &config
-				if config.Container != "" {
-					bucketName = config.Container
-				} else {
-					bucketName = spec.Bucket
-				}
-				if config.Prefix != "" {
-					spec.Prefix = config.Prefix
-				}
-				if spec.Prefix != "" {
-					bucketName += ":" + spec.Prefix
-				}
-
-				flags.Backend = &cfg.ADLv2Config{
-					Endpoint:   config.Endpoint,
-					Authorizer: &config,
-				}
+	if spec, err := ParseBucketSpec(bucketName); err == nil {
+		switch spec.Scheme {
+		case "adl":
+			auth, err := cfg.AzureAuthorizerConfig{
+				Log: cfg.GetLogger("adlv1"),
+			}.Authorizer()
+			if err != nil {
+				err = fmt.Errorf("couldn't load azure credentials: %v",
+					err)
+				return nil, err
+			}
+			flags.Backend = &cfg.ADLv1Config{
+				Endpoint:   spec.Bucket,
+				Authorizer: auth,
+			}
+			// adlv1 doesn't really have bucket
+			// names, but we will rebuild the
+			// prefix
+			bucketName = ""
+			if spec.Prefix != "" {
+				bucketName = ":" + spec.Prefix
+			}
+		case "wasb":
+			config, err := cfg.AzureBlobConfig(flags.Endpoint, spec.Bucket, "blob")
+			if err != nil {
+				return nil, err
+			}
+			flags.Backend = &config
+			if config.Container != "" {
+				bucketName = config.Container
+			} else {
 				bucketName = spec.Bucket
-				if spec.Prefix != "" {
-					bucketName += ":" + spec.Prefix
-				}
+			}
+			if config.Prefix != "" {
+				spec.Prefix = config.Prefix
+			}
+			if spec.Prefix != "" {
+				bucketName += ":" + spec.Prefix
+			}
+		case "abfs":
+			config, err := cfg.AzureBlobConfig(flags.Endpoint, spec.Bucket, "dfs")
+			if err != nil {
+				return nil, err
+			}
+			flags.Backend = &config
+			if config.Container != "" {
+				bucketName = config.Container
+			} else {
+				bucketName = spec.Bucket
+			}
+			if config.Prefix != "" {
+				spec.Prefix = config.Prefix
+			}
+			if spec.Prefix != "" {
+				bucketName += ":" + spec.Prefix
+			}
+
+			flags.Backend = &cfg.ADLv2Config{
+				Endpoint:   config.Endpoint,
+				Authorizer: &config,
+			}
+			bucketName = spec.Bucket
+			if spec.Prefix != "" {
+				bucketName += ":" + spec.Prefix
 			}
 		}
 	}
