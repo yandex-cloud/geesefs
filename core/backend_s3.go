@@ -38,6 +38,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/corehandlers"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/aws/aws-sdk-go/private/protocol/rest"
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
@@ -270,6 +271,11 @@ func (s *S3Backend) newS3() {
 		Name: "core.SDKVersionUserAgentHandler",
 		Fn: request.MakeAddToUserAgentHandler("GeeseFS", cfg.GEESEFS_VERSION,
 			runtime.Version(), runtime.GOOS, runtime.GOARCH),
+	})
+	s.S3.Handlers.Build.PushBack(func(req *request.Request) {
+		if s.config.Subdomain && req.HTTPRequest.URL.Path != "" {
+			req.HTTPRequest.URL.RawPath = rest.EscapePath(req.HTTPRequest.URL.Path, false)
+		}
 	})
 }
 
