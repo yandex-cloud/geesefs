@@ -929,7 +929,10 @@ func (s *S3Backend) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
 		}
 		get.Range = &bytes
 	}
-	// TODO handle IfMatch
+
+	if param.IfMatch != nil {
+		get.IfMatch = param.IfMatch
+	}
 
 	req, resp := s.GetObjectRequest(&get)
 	err := req.Send()
@@ -992,6 +995,16 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 
 	if s.config.ACL != "" {
 		put.ACL = &s.config.ACL
+	}
+
+	// Conditional write support (S3 feature since August 2024)
+	// IfMatch: only write if ETag matches (optimistic locking for updates)
+	// IfNoneMatch: only write if object doesn't exist (create-if-not-exists)
+	if param.IfMatch != nil {
+		put.IfMatch = param.IfMatch
+	}
+	if param.IfNoneMatch != nil {
+		put.IfNoneMatch = param.IfNoneMatch
 	}
 
 	req, resp := s.PutObjectRequest(put)

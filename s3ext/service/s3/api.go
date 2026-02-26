@@ -12200,6 +12200,10 @@ type CompleteMultipartUploadInput struct {
 	// error.
 	ExpectedBucketOwner *string `location:"header" locationName:"x-amz-expected-bucket-owner" type:"string"`
 
+	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
+
+	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
+
 	// Object key for which the multipart upload was initiated.
 	//
 	// Key is a required field
@@ -12272,6 +12276,18 @@ func (s *CompleteMultipartUploadInput) getBucket() (v string) {
 // SetExpectedBucketOwner sets the ExpectedBucketOwner field's value.
 func (s *CompleteMultipartUploadInput) SetExpectedBucketOwner(v string) *CompleteMultipartUploadInput {
 	s.ExpectedBucketOwner = &v
+	return s
+}
+
+// SetIfMatch sets the IfMatch field's value.
+func (s *CompleteMultipartUploadInput) SetIfMatch(v string) *CompleteMultipartUploadInput {
+	s.IfMatch = &v
+	return s
+}
+
+// SetIfNoneMatch sets the IfNoneMatch field's value.
+func (s *CompleteMultipartUploadInput) SetIfNoneMatch(v string) *CompleteMultipartUploadInput {
+	s.IfNoneMatch = &v
 	return s
 }
 
@@ -30628,6 +30644,10 @@ type PutObjectInput struct {
 	// This action is not supported by Amazon S3 on Outposts.
 	GrantWriteACP *string `location:"header" locationName:"x-amz-grant-write-acp" type:"string"`
 
+	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
+
+	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
+
 	// Object key for which the PUT action was initiated.
 	//
 	// Key is a required field
@@ -30861,6 +30881,18 @@ func (s *PutObjectInput) SetGrantReadACP(v string) *PutObjectInput {
 // SetGrantWriteACP sets the GrantWriteACP field's value.
 func (s *PutObjectInput) SetGrantWriteACP(v string) *PutObjectInput {
 	s.GrantWriteACP = &v
+	return s
+}
+
+// SetIfMatch sets the IfMatch field's value.
+func (s *PutObjectInput) SetIfMatch(v string) *PutObjectInput {
+	s.IfMatch = &v
+	return s
+}
+
+// SetIfNoneMatch sets the IfNoneMatch field's value.
+func (s *PutObjectInput) SetIfNoneMatch(v string) *PutObjectInput {
+	s.IfNoneMatch = &v
 	return s
 }
 
