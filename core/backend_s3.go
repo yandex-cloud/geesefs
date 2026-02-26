@@ -273,7 +273,7 @@ func (s *S3Backend) newS3() {
 			runtime.Version(), runtime.GOOS, runtime.GOARCH),
 	})
 	s.S3.Handlers.Build.PushBack(func(req *request.Request) {
-		if s.config.Subdomain && req.HTTPRequest.URL.Path != "" {
+		if s.config.Subdomain {
 			req.HTTPRequest.URL.RawPath = rest.EscapePath(req.HTTPRequest.URL.Path, false)
 		}
 	})
