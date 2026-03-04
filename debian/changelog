@@ -1,3 +1,9 @@
+geesefs (0.43.5) unstable; urgency=medium
+
+  * fix(s3): URI escaping in VHS mode (#174)
+
+ -- Artem Ikchurin <aikch@yandex-team.ru>  Wed, 4 Mar 2026 14:15:00 +0300
+
 geesefs (0.43.4) unstable; urgency=medium
 
   * fix(s3): invalid CopySource format with virtual-hosted-style endpoint. (#173)
