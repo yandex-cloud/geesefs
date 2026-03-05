@@ -273,6 +273,12 @@ MISC OPTIONS:
 			Usage: "Do not expire multipart uploads older than --multipart-age on start",
 		},
 
+		cli.BoolFlag{
+			Name: "use-conditional-writes",
+			Usage: "Enable conditional writes (If-Match/If-None-Match) to prevent lost updates " +
+				"when multiple clients write the same file concurrently.",
+		},
+
 		cli.StringFlag{
 			Name:  "multipart-age",
 			Usage: "Multipart uploads older than this value will be deleted on start",
@@ -973,6 +979,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		config.MultipartCopyThreshold = uint64(c.Int("multipart-copy-threshold")) * 1024 * 1024
 
 		config.NoExpireMultipart = c.Bool("no-expire-multipart")
+		config.UseConditionalWrites = c.Bool("use-conditional-writes")
 		config.NoDetect = c.Bool("no-detect")
 
 		config.SDKMaxRetries = c.Int("sdk-max-retries")
