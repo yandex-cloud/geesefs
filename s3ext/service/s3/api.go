@@ -12200,8 +12200,12 @@ type CompleteMultipartUploadInput struct {
 	// error.
 	ExpectedBucketOwner *string `location:"header" locationName:"x-amz-expected-bucket-owner" type:"string"`
 
+	// If-Match: succeed only if object's current ETag matches this value.
+	// Applied at CompleteMultipartUpload, not at CreateMultipartUpload.
 	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
 
+	// If-None-Match: succeed only if object does NOT exist.
+	// Use "*" to prevent overwriting an existing object.
 	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
 
 	// Object key for which the multipart upload was initiated.

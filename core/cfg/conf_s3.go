@@ -55,7 +55,8 @@ type S3Config struct {
 	ColdMinSize  uint64
 	MultipartAge time.Duration
 
-	NoExpireMultipart bool
+	NoExpireMultipart    bool
+	UseConditionalWrites bool
 
 	MultipartCopyThreshold uint64
 

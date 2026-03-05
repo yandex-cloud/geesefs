@@ -1010,6 +1010,9 @@ func mapHttpError(status int) error {
 		return syscall.ENOTSUP
 	case http.StatusConflict:
 		return syscall.EINTR
+	// Conditional write errors - do NOT retry these.
+	case http.StatusPreconditionFailed:
+		return syscall.EBUSY
 	case http.StatusRequestedRangeNotSatisfiable:
 		return syscall.ERANGE
 	case 429:
