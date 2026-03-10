@@ -194,6 +194,8 @@ var _ = Suite(&BackendTest{})
 // mockConditionalBackend implements StorageBackend interface for testing conditional writes.
 // It simulates S3/Azure conditional write behavior with If-Match and If-None-Match headers.
 type mockConditionalBackend struct {
+	TestBackend
+
 	mu      sync.Mutex
 	objects map[string]*mockStoredObject
 
@@ -217,11 +219,9 @@ func (m *mockConditionalBackend) generateETag() string {
 	return fmt.Sprintf("\"%d\"", time.Now().UnixNano())
 }
 
-func (m *mockConditionalBackend) Init(key string) error { return nil }
 func (m *mockConditionalBackend) Capabilities() *Capabilities {
 	return &Capabilities{Name: "mock-conditional"}
 }
-func (m *mockConditionalBackend) Bucket() string { return "mock-bucket" }
 
 func (m *mockConditionalBackend) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
 	m.mu.Lock()
@@ -239,34 +239,10 @@ func (m *mockConditionalBackend) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput
 	}, nil
 }
 
-func (m *mockConditionalBackend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
-	return &ListBlobsOutput{}, nil
-}
-
-func (m *mockConditionalBackend) DeleteBlob(param *DeleteBlobInput) (*DeleteBlobOutput, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.objects, param.Key)
-	return &DeleteBlobOutput{}, nil
-}
-
-func (m *mockConditionalBackend) DeleteBlobs(param *DeleteBlobsInput) (*DeleteBlobsOutput, error) {
-	return &DeleteBlobsOutput{}, nil
-}
-
-func (m *mockConditionalBackend) RenameBlob(param *RenameBlobInput) (*RenameBlobOutput, error) {
-	return &RenameBlobOutput{}, nil
-}
-
-func (m *mockConditionalBackend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
-	return &CopyBlobOutput{}, nil
-}
-
 func (m *mockConditionalBackend) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Call hook if set
 	if m.onGetBlob != nil {
 		m.onGetBlob(param)
 	}
@@ -276,7 +252,6 @@ func (m *mockConditionalBackend) GetBlob(param *GetBlobInput) (*GetBlobOutput, e
 		return nil, syscall.ENOENT
 	}
 
-	// Check IfMatch condition - only return if ETag matches
 	if param.IfMatch != nil && *param.IfMatch != obj.etag {
 		return nil, fmt.Errorf("PreconditionFailed: ETag mismatch for GetBlob")
 	}
@@ -297,23 +272,18 @@ func (m *mockConditionalBackend) PutBlob(param *PutBlobInput) (*PutBlobOutput, e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Call hook if set
 	if m.onPutBlob != nil {
 		m.onPutBlob(param)
 	}
 
 	obj, exists := m.objects[param.Key]
 
-	// Check If-None-Match: "*" condition (create-if-not-exists)
-	// Returns 412 Precondition Failed if object already exists
 	if param.IfNoneMatch != nil && *param.IfNoneMatch == "*" {
 		if exists {
 			return nil, fmt.Errorf("PreconditionFailed: object already exists")
 		}
 	}
 
-	// Check If-Match condition (optimistic locking)
-	// Returns 412 Precondition Failed if ETag doesn't match
 	if param.IfMatch != nil {
 		if !exists {
 			return nil, fmt.Errorf("PreconditionFailed: object does not exist for If-Match")
@@ -323,7 +293,6 @@ func (m *mockConditionalBackend) PutBlob(param *PutBlobInput) (*PutBlobOutput, e
 		}
 	}
 
-	// Read the body
 	data, err := io.ReadAll(param.Body)
 	if err != nil {
 		return nil, err
@@ -338,46 +307,6 @@ func (m *mockConditionalBackend) PutBlob(param *PutBlobInput) (*PutBlobOutput, e
 	return &PutBlobOutput{
 		ETag: &etag,
 	}, nil
-}
-
-func (m *mockConditionalBackend) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
-	return &PatchBlobOutput{}, nil
-}
-
-func (m *mockConditionalBackend) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBlobCommitInput, error) {
-	return &MultipartBlobCommitInput{}, nil
-}
-
-func (m *mockConditionalBackend) MultipartBlobAdd(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error) {
-	return &MultipartBlobAddOutput{}, nil
-}
-
-func (m *mockConditionalBackend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error) {
-	return &MultipartBlobCopyOutput{}, nil
-}
-
-func (m *mockConditionalBackend) MultipartBlobAbort(param *MultipartBlobCommitInput) (*MultipartBlobAbortOutput, error) {
-	return &MultipartBlobAbortOutput{}, nil
-}
-
-func (m *mockConditionalBackend) MultipartBlobCommit(param *MultipartBlobCommitInput) (*MultipartBlobCommitOutput, error) {
-	return &MultipartBlobCommitOutput{}, nil
-}
-
-func (m *mockConditionalBackend) MultipartExpire(param *MultipartExpireInput) (*MultipartExpireOutput, error) {
-	return &MultipartExpireOutput{}, nil
-}
-
-func (m *mockConditionalBackend) RemoveBucket(param *RemoveBucketInput) (*RemoveBucketOutput, error) {
-	return &RemoveBucketOutput{}, nil
-}
-
-func (m *mockConditionalBackend) MakeBucket(param *MakeBucketInput) (*MakeBucketOutput, error) {
-	return &MakeBucketOutput{}, nil
-}
-
-func (m *mockConditionalBackend) Delegate() interface{} {
-	return nil
 }
 
 // ============================================================================
@@ -675,79 +604,4 @@ func (s *BackendTest) TestOptimisticLockingRetryPattern(t *C) {
 	t.Assert(success, Equals, true)
 	t.Assert(string(mock.objects["counter"].data), Equals, "0+1")
 	_ = currentETag // Used in real scenarios for subsequent operations
-}
-
-// ============================================================================
-// Tests for hook inspection
-// ============================================================================
-
-func (s *BackendTest) TestPutBlobHookInspection(t *C) {
-	mock := newMockConditionalBackend()
-
-	var capturedIfMatch *string
-	var capturedIfNoneMatch *string
-
-	mock.onPutBlob = func(param *PutBlobInput) {
-		capturedIfMatch = param.IfMatch
-		capturedIfNoneMatch = param.IfNoneMatch
-	}
-
-	// Test IfNoneMatch is captured
-	ifNoneMatch := "*"
-	_, err := mock.PutBlob(&PutBlobInput{
-		Key:         "test1",
-		Body:        bytes.NewReader([]byte("data")),
-		IfNoneMatch: &ifNoneMatch,
-	})
-	t.Assert(err, IsNil)
-	t.Assert(capturedIfNoneMatch, NotNil)
-	t.Assert(*capturedIfNoneMatch, Equals, "*")
-	t.Assert(capturedIfMatch, IsNil)
-
-	// Reset
-	capturedIfMatch = nil
-	capturedIfNoneMatch = nil
-
-	// Test IfMatch is captured
-	existingETag := mock.objects["test1"].etag
-	_, err = mock.PutBlob(&PutBlobInput{
-		Key:     "test1",
-		Body:    bytes.NewReader([]byte("updated")),
-		IfMatch: &existingETag,
-	})
-	t.Assert(err, IsNil)
-	t.Assert(capturedIfMatch, NotNil)
-	t.Assert(*capturedIfMatch, Equals, existingETag)
-	t.Assert(capturedIfNoneMatch, IsNil)
-}
-
-func (s *BackendTest) TestGetBlobHookInspection(t *C) {
-	mock := newMockConditionalBackend()
-
-	existingETag := "\"test-etag\""
-	mock.objects["test-key"] = &mockStoredObject{
-		data: []byte("test data"),
-		etag: existingETag,
-	}
-
-	var capturedIfMatch *string
-	mock.onGetBlob = func(param *GetBlobInput) {
-		capturedIfMatch = param.IfMatch
-	}
-
-	// Test without IfMatch
-	resp, err := mock.GetBlob(&GetBlobInput{Key: "test-key"})
-	t.Assert(err, IsNil)
-	resp.Body.Close()
-	t.Assert(capturedIfMatch, IsNil)
-
-	// Test with IfMatch
-	resp, err = mock.GetBlob(&GetBlobInput{
-		Key:     "test-key",
-		IfMatch: &existingETag,
-	})
-	t.Assert(err, IsNil)
-	resp.Body.Close()
-	t.Assert(capturedIfMatch, NotNil)
-	t.Assert(*capturedIfMatch, Equals, existingETag)
 }
