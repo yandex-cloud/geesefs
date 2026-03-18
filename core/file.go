@@ -825,7 +825,7 @@ func (inode *Inode) sendRename() {
 				if mappedErr == syscall.ENOENT && skipRename {
 					err = nil
 					notFoundIgnore = true
-				} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
+				} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE || mappedErr == syscall.EBUSY {
 					s3Log.Warnf("Conflict detected (inode %v): failed to copy %v to %v: %v. File is removed remotely, dropping cache", inode.Id, from, key, err)
 					inode.mu.Lock()
 					newParent := inode.Parent
@@ -967,14 +967,15 @@ func (inode *Inode) sendUpdateMeta() {
 		_, err := cloud.CopyBlob(copyIn)
 		inode.fs.completeInflightChange(key)
 		inode.mu.Lock()
-		inode.recordFlushError(err)
 		if err != nil {
 			mappedErr := mapAwsError(err)
 			inode.userMetadataDirty = 2
-			if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
+			if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE || mappedErr == syscall.EBUSY {
 				// Object is deleted or resized remotely (416). Discard local version
 				s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 				inode.resetCache()
+			} else {
+				inode.recordFlushError(err)
 			}
 			log.Warnf("Error flushing metadata using COPY for %v: %v", key, err)
 		} else if inode.CacheState == ST_MODIFIED && !inode.isStillDirty() {
@@ -1548,11 +1549,17 @@ func (inode *Inode) flushSmallObject() {
 	inode.fs.completeInflightChange(key)
 	inode.mu.Lock()
 
-	inode.recordFlushError(err)
 	if err != nil {
-		log.Warnf("Failed to flush small file %v: %v", key, err)
-		if params.Metadata != nil {
-			inode.userMetadataDirty = 2
+		mappedErr := mapAwsError(err)
+		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE || mappedErr == syscall.EBUSY {
+			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted, resized or modified remotely, discarding local changes", inode.Id, inode.FullName())
+			inode.resetCache()
+		} else {
+			inode.recordFlushError(err)
+			log.Warnf("Failed to flush small file %v: %v", key, err)
+			if params.Metadata != nil {
+				inode.userMetadataDirty = 2
+			}
 		}
 	} else {
 		log.Debugf("Flushed small file %v (inode %v): etag=%v, size=%v", key, inode.Id, NilStr(resp.ETag), sz)
@@ -1785,7 +1792,7 @@ func (inode *Inode) completeMultipart() {
 		return
 	}
 	mappedErr := mapAwsError(err)
-	if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
+	if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE || mappedErr == syscall.EBUSY {
 		// Object is deleted or resized remotely (416). Discard local version
 		s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 		inode.resetCache()
@@ -1827,11 +1834,17 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 		// Already flushed or conflict => do not complete
 		return
 	}
-	inode.recordFlushError(err)
 	if err != nil {
-		log.Warnf("Failed to finalize multi-part upload of object %v: %v", key, err)
-		if inode.mpu.Metadata != nil {
-			inode.userMetadataDirty = 2
+		mappedErr := mapAwsError(err)
+		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE || mappedErr == syscall.EBUSY {
+			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted, resized or modified remotely, discarding local changes", inode.Id, inode.FullName())
+			inode.resetCache()
+		} else {
+			inode.recordFlushError(err)
+			log.Warnf("Failed to finalize multi-part upload of object %v: %v", key, err)
+			if inode.mpu.Metadata != nil {
+				inode.userMetadataDirty = 2
+			}
 		}
 	} else {
 		log.Debugf("Finalized multi-part upload of object %v: etag=%v, size=%v", key, NilStr(resp.ETag), finalSize)

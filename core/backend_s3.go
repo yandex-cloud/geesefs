@@ -930,8 +930,7 @@ func shouldRetry(err error) bool {
 		err != syscall.EINVAL &&
 		err != syscall.EACCES &&
 		err != syscall.ENOTSUP &&
-		err != syscall.ERANGE &&
-		err != syscall.EBUSY
+		err != syscall.ERANGE
 }
 
 func (s *S3Backend) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
