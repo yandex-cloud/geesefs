@@ -207,6 +207,14 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// ETag or Size for sure, so the simplest fix is to also ignore this check
 	renameInProgress := inode.oldName != ""
 
+	// If inode has local modifications not yet flushed (ST_CREATED or ST_MODIFIED),
+	// do NOT reset cache and do NOT update knownETag from external source.
+	// Doing so would cause conditional writes to use the wrong ETag, allowing
+	// external overwrites to go undetected.
+	// Exception: patchInProgress and renameInProgress are handled below as before.
+	hasDirtyData := (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) &&
+		!patchInProgress && !renameInProgress
+
 	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
 		!patchInProgress && !renameInProgress {
 		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
@@ -214,9 +222,14 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
 				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
 		}
-		inode.resetCache()
-		inode.Attributes.Size = item.Size
-		inode.knownSize = item.Size
+		// Only reset cache if inode has no local modifications.
+		// If user is actively editing the file, we must NOT discard their changes
+		// based on a background listing — they will be protected by conditional writes.
+		if !hasDirtyData {
+			inode.resetCache()
+			inode.Attributes.Size = item.Size
+			inode.knownSize = item.Size
+		}
 		if item.LastModified != nil {
 			inode.Attributes.Mtime = *item.LastModified
 			inode.Attributes.Ctime = *item.LastModified
@@ -231,7 +244,12 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	}
 	if item.ETag != nil {
 		inode.s3Metadata["etag"] = []byte(*item.ETag)
-		inode.knownETag = *item.ETag
+		// Do NOT update knownETag if inode has unsaved local changes.
+		// knownETag must reflect the ETag that was last synced to S3 from this client,
+		// so that conditional writes (If-Match) correctly detect external modifications.
+		if !hasDirtyData {
+			inode.knownETag = *item.ETag
+		}
 	} else {
 		delete(inode.s3Metadata, "etag")
 	}

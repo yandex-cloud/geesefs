@@ -1044,6 +1044,13 @@ func (inode *Inode) beginMultipartUpload(cloud StorageBackend, key string) {
 	} else {
 		log.Debugf("Started multi-part upload of object %v", key)
 		inode.mpu = resp
+		if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+			if inode.knownETag != "" {
+				inode.mpu.IfMatch = PString(inode.knownETag)
+			} else {
+				inode.mpu.IfNoneMatch = PString("*")
+			}
+		}
 	}
 }
 
@@ -1562,6 +1569,7 @@ func (inode *Inode) flushSmallObject() {
 		// not be able to proceed to rename - it waits until inode.mpu == nil
 		inode.abortMultipart()
 	}
+
 	inode.mu.Unlock()
 	inode.fs.addInflightChange(key)
 	resp, err := cloud.PutBlob(params)
@@ -1639,10 +1647,8 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 		}
 		mpu := inode.mpu
 		var copySourceIfMatch *string
-		if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
-			if inode.knownETag != "" {
-				copySourceIfMatch = PString(inode.knownETag)
-			}
+		if mpu.IfMatch != nil {
+			copySourceIfMatch = mpu.IfMatch
 		}
 
 		guard := make(chan int, inode.fs.flags.MaxParallelCopy)
@@ -1832,13 +1838,6 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 	// Finalize the upload
 	mpu := inode.mpu
 	mpu.NumParts = uint32(numParts)
-	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
-		if inode.knownETag != "" {
-			mpu.IfMatch = PString(inode.knownETag)
-		} else {
-			mpu.IfNoneMatch = PString("*")
-		}
-	}
 
 	inode.mu.Unlock()
 	inode.fs.addInflightChange(key)
@@ -1880,8 +1879,9 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 }
 
 func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *time.Time, storageClass *string) {
-	if etag != nil {
+	if etag != nil && *etag != "" {
 		inode.s3Metadata["etag"] = []byte(*etag)
+		inode.knownETag = *etag
 	}
 	if storageClass != nil {
 		inode.s3Metadata["storage-class"] = []byte(*storageClass)
@@ -1890,7 +1890,6 @@ func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *tim
 		inode.Attributes.Ctime = *lastModified
 	}
 	inode.knownSize = size
-	inode.knownETag = *etag
 	inode.SetAttrTime(time.Now())
 }
 
