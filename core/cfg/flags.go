@@ -501,6 +501,12 @@ MISC OPTIONS:
 		},
 
 		cli.BoolFlag{
+			Name: "open-block-updates",
+			Usage: "Do not update the tracked server ETag for a file from background directory" +
+				" listings while the file has open file handles. ",
+		},
+
+		cli.BoolFlag{
 			Name:  "ignore-fsync",
 			Usage: "Do not wait until changes are persisted to the server on fsync() call (default: off)",
 		},
@@ -877,6 +883,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		ReadMergeKB:         uint64(c.Int("read-merge")),
 		SinglePartMB:        uint64(singlePart),
 		MaxMergeCopyMB:      uint64(c.Int("max-merge-copy")),
+		OpenBlockUpdates:    c.Bool("open-block-updates"),
 		IgnoreFsync:         c.Bool("ignore-fsync"),
 		FsyncOnClose:        c.Bool("fsync-on-close"),
 		EnablePerms:         c.Bool("enable-perms"),

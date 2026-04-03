@@ -111,6 +111,7 @@ type FlagStorage struct {
 	NoPreloadDir        bool
 	NoVerifySSL         bool
 	WinRefreshDirs      bool
+	OpenBlockUpdates    bool
 
 	// Debugging
 	DebugMain  bool

@@ -209,11 +209,15 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 
 	// If inode has local modifications not yet flushed (ST_CREATED or ST_MODIFIED),
 	// do NOT reset cache and do NOT update knownETag from external source.
-	// Doing so would cause conditional writes to use the wrong ETag, allowing
-	// external overwrites to go undetected.
-	// Exception: patchInProgress and renameInProgress are handled below as before.
 	hasDirtyData := (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) &&
 		!patchInProgress && !renameInProgress
+
+	// When --open-block-updates is enabled: protect files that are open
+	// (fileHandles > 0) but not yet written to (ST_CACHED).
+	hasOpenHandles := inode.fs.flags.OpenBlockUpdates && atomic.LoadInt32(&inode.fileHandles) > 0 &&
+		!patchInProgress && !renameInProgress
+
+	blockUpdate := hasDirtyData || hasOpenHandles
 
 	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
 		!patchInProgress && !renameInProgress {
@@ -224,8 +228,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 		}
 		// Only reset cache if inode has no local modifications.
 		// If user is actively editing the file, we must NOT discard their changes
-		// based on a background listing — they will be protected by conditional writes.
-		if !hasDirtyData {
+		if !blockUpdate {
 			inode.resetCache()
 			inode.Attributes.Size = item.Size
 			inode.knownSize = item.Size
@@ -247,7 +250,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 		// Do NOT update knownETag if inode has unsaved local changes.
 		// knownETag must reflect the ETag that was last synced to S3 from this client,
 		// so that conditional writes (If-Match) correctly detect external modifications.
-		if !hasDirtyData {
+		if !blockUpdate {
 			inode.knownETag = *item.ETag
 		}
 	} else {
