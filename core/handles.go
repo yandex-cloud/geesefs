@@ -219,6 +219,8 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 
 	blockUpdate := hasDirtyData || hasOpenHandles
 
+	s3Log.Warnf("Checking SetEtagBlob: (%v, %v, %v, %v)", inode.FullName(), atomic.LoadInt32(&inode.fileHandles), hasDirtyData, hasOpenHandles)
+
 	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
 		!patchInProgress && !renameInProgress {
 		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
