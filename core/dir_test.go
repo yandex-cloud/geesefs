@@ -157,7 +157,7 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 	checkedPrefix := "w-o-w/2019/"
 	cloud := &TestBackend{
 		ListBlobsFunc: func(param *ListBlobsInput) (*ListBlobsOutput, error) {
-			t.Assert(NilStr(param.StartAfter), Equals, "w-o-w/2019.\xEF\xBF\xBD")
+			t.Assert(NilStr(param.Prefix), Equals, "w-o-w/2019/")
 			t.Assert(param.MaxKeys, NotNil)
 			t.Assert(*param.MaxKeys, Equals, uint32(1))
 			listCalled++
