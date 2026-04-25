@@ -127,6 +127,8 @@ type Inode struct {
 	oldName   string
 	// is already being renamed to the current name
 	renamingTo bool
+	// ETag of the destination object being overwritten by rename (for conditional writes)
+	renameDestETag string
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
@@ -217,9 +219,10 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	hasOpenHandles := inode.fs.flags.OpenBlockUpdates && atomic.LoadInt32(&inode.fileHandles) > 0 &&
 		!patchInProgress && !renameInProgress
 
-	blockUpdate := hasDirtyData || hasOpenHandles
+	// Also block updates if a flush error (e.g. CW conflict) is pending.
+	hasFlushError := inode.flushError != nil
 
-	s3Log.Warnf("Checking SetEtagBlob: (%v, %v, %v, %v)", inode.FullName(), atomic.LoadInt32(&inode.fileHandles), hasDirtyData, hasOpenHandles)
+	blockUpdate := hasDirtyData || hasOpenHandles || hasFlushError
 
 	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
 		!patchInProgress && !renameInProgress {

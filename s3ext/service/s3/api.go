@@ -12751,6 +12751,14 @@ type CopyObjectInput struct {
 	// Denied) error.
 	ExpectedSourceBucketOwner *string `location:"header" locationName:"x-amz-source-expected-bucket-owner" type:"string"`
 
+	// If-Match: succeed only if the destination object's current ETag matches this value.
+	// Used for conditional writes / optimistic locking on CopyObject.
+	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
+
+	// If-None-Match: succeed only if the destination object does NOT exist.
+	// Use "*" to prevent overwriting an existing object.
+	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
+
 	// The date and time at which the object is no longer cacheable.
 	Expires *time.Time `location:"header" locationName:"Expires" type:"timestamp"`
 
@@ -13012,6 +13020,18 @@ func (s *CopyObjectInput) SetExpectedBucketOwner(v string) *CopyObjectInput {
 // SetExpectedSourceBucketOwner sets the ExpectedSourceBucketOwner field's value.
 func (s *CopyObjectInput) SetExpectedSourceBucketOwner(v string) *CopyObjectInput {
 	s.ExpectedSourceBucketOwner = &v
+	return s
+}
+
+// SetIfMatch sets the IfMatch field's value.
+func (s *CopyObjectInput) SetIfMatch(v string) *CopyObjectInput {
+	s.IfMatch = &v
+	return s
+}
+
+// SetIfNoneMatch sets the IfNoneMatch field's value.
+func (s *CopyObjectInput) SetIfNoneMatch(v string) *CopyObjectInput {
+	s.IfNoneMatch = &v
 	return s
 }
 

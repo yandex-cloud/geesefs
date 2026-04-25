@@ -907,6 +907,14 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 	if param.CopySourceIfNoneMatch != nil {
 		params.CopySourceIfNoneMatch = param.CopySourceIfNoneMatch
 	}
+	// If-Match on destination: copy only if destination ETag matches (conditional write).
+	if param.IfMatch != nil {
+		params.IfMatch = param.IfMatch
+	}
+	// If-None-Match on destination: copy only if destination does NOT exist.
+	if param.IfNoneMatch != nil {
+		params.IfNoneMatch = param.IfNoneMatch
+	}
 
 	req, _ := s.CopyObjectRequest(params)
 	// make a shallow copy of the client so we can change the
