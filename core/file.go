@@ -72,17 +72,36 @@ func (fs *Goofys) partNum(offset uint64) uint64 {
 	))
 }
 
+func (fs *Goofys) numParts(size uint64) uint64 {
+	part := fs.partNum(size)
+	if part == fs.maxParts() {
+		return part
+	}
+	partOffset, _ := fs.partRange(part)
+	if partOffset < size {
+		part++
+	}
+	return part
+}
+
 func (fs *Goofys) partRange(num uint64) (offset uint64, size uint64) {
 	n := uint64(0)
 	start := uint64(0)
 	for _, s := range fs.flags.PartSizes {
-		if num <= n+s.PartCount {
+		if num < n+s.PartCount {
 			return start + (num-n)*s.PartSize, s.PartSize
 		}
 		start += s.PartSize * s.PartCount
 		n += s.PartCount
 	}
 	panic(fmt.Sprintf("Part number too large: %v", num))
+}
+
+func (fs *Goofys) maxParts() (parts uint64) {
+	for _, s := range fs.flags.PartSizes {
+		parts += s.PartCount
+	}
+	return parts
 }
 
 func (fs *Goofys) getMaxFileSize() (size uint64) {
@@ -1739,11 +1758,7 @@ func (inode *Inode) completeMultipart() {
 		return
 	}
 	finalSize := inode.Attributes.Size
-	numParts := inode.fs.partNum(finalSize)
-	numPartOffset, _ := inode.fs.partRange(numParts)
-	if numPartOffset < finalSize {
-		numParts++
-	}
+	numParts := inode.fs.numParts(finalSize)
 	err := inode.copyUnmodifiedParts(numParts)
 	if !(inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) {
 		// State changed, abort this flush (even if we get ENOENT)
