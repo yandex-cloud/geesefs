@@ -1624,6 +1624,15 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 		if toInode.isDir() {
 			toInode.doUnlink()
 		} else {
+			if c, ok := fromInode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+				if toInode.flushError != nil {
+					// The destination had a CW conflict — its knownETag is stale.
+					// Skip If-Match on destination so the retry ("save anyway") can overwrite.
+					fromInode.renameDestETag = ""
+				} else {
+					fromInode.renameDestETag = toInode.knownETag
+				}
+			}
 			// Do not unlink target file if it's a file to make situation where the old
 			// file is already deleted, but the new one is not uploaded yet, impossible
 			newParent.removeChildUnlocked(toInode)

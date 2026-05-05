@@ -580,7 +580,22 @@ func (fs *GoofysFuse) FlushFile(
 	ctx context.Context,
 	op *fuseops.FlushFileOp) (err error) {
 
-	// FlushFile is a no-op because we flush changes to the server asynchronously
+	// When conditional writes are enabled, FlushFile must synchronously flush
+	// and return errors to the calling application. This allows programs like
+	// Excel/Word to detect that a file was modified by another client (412
+	// Precondition Failed).
+	if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+		in := fs.getInodeOrDie(op.Inode)
+		if !in.isDir() {
+			atomic.AddInt64(&fs.stats.metadataWrites, 1)
+			err = in.SyncFile()
+			err = mapAwsError(err)
+			return
+		}
+	}
+
+	// Without conditional writes, FlushFile is a no-op because we flush
+	// changes to the server asynchronously.
 	// If the user really wants to persist a file to the server he should call fsync()
 
 	atomic.AddInt64(&fs.stats.noops, 1)
@@ -601,7 +616,9 @@ func (fs *GoofysFuse) ReleaseFileHandle(
 	fs.mu.Unlock()
 
 	if fh.inode.fs.flags.FsyncOnClose {
-		return fh.inode.SyncFile()
+		err = fh.inode.SyncFile()
+		err = mapAwsError(err)
+		return
 	}
 
 	return
@@ -836,6 +853,20 @@ func (fs *GoofysFuse) Rename(
 
 	err = parent.Rename(op.OldName, newParent, op.NewName)
 	err = mapAwsError(err)
+
+	// When conditional writes are enabled, synchronously wait for the rename
+	// to complete on S3. This ensures that CW conflicts (412 Precondition
+	// Failed → EBUSY) are returned to the calling application (e.g. Word)
+	// from the rename() syscall itself.
+	if err == nil {
+		if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+			renamed := newParent.findChild(op.NewName)
+			if renamed != nil && !renamed.isDir() {
+				err = renamed.SyncFile()
+				err = mapAwsError(err)
+			}
+		}
+	}
 
 	return
 }

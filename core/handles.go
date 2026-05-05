@@ -127,6 +127,8 @@ type Inode struct {
 	oldName   string
 	// is already being renamed to the current name
 	renamingTo bool
+	// ETag of the destination object being overwritten by rename (for conditional writes)
+	renameDestETag string
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
@@ -207,6 +209,21 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// ETag or Size for sure, so the simplest fix is to also ignore this check
 	renameInProgress := inode.oldName != ""
 
+	// If inode has local modifications not yet flushed (ST_CREATED or ST_MODIFIED),
+	// do NOT reset cache and do NOT update knownETag from external source.
+	hasDirtyData := (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) &&
+		!patchInProgress && !renameInProgress
+
+	// When --open-block-updates is enabled: protect files that are open
+	// (fileHandles > 0) but not yet written to (ST_CACHED).
+	hasOpenHandles := inode.fs.flags.OpenBlockUpdates && atomic.LoadInt32(&inode.fileHandles) > 0 &&
+		!patchInProgress && !renameInProgress
+
+	// Also block updates if a flush error (e.g. CW conflict) is pending.
+	hasFlushError := inode.flushError != nil
+
+	blockUpdate := hasDirtyData || hasOpenHandles || hasFlushError
+
 	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
 		!patchInProgress && !renameInProgress {
 		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
@@ -214,9 +231,13 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
 				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
 		}
-		inode.resetCache()
-		inode.Attributes.Size = item.Size
-		inode.knownSize = item.Size
+		// Only reset cache if inode has no local modifications.
+		// If user is actively editing the file, we must NOT discard their changes
+		if !blockUpdate {
+			inode.resetCache()
+			inode.Attributes.Size = item.Size
+			inode.knownSize = item.Size
+		}
 		if item.LastModified != nil {
 			inode.Attributes.Mtime = *item.LastModified
 			inode.Attributes.Ctime = *item.LastModified
@@ -231,7 +252,12 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	}
 	if item.ETag != nil {
 		inode.s3Metadata["etag"] = []byte(*item.ETag)
-		inode.knownETag = *item.ETag
+		// Do NOT update knownETag if inode has unsaved local changes.
+		// knownETag must reflect the ETag that was last synced to S3 from this client,
+		// so that conditional writes (If-Match) correctly detect external modifications.
+		if !blockUpdate {
+			inode.knownETag = *item.ETag
+		}
 	} else {
 		delete(inode.s3Metadata, "etag")
 	}
