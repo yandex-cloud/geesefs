@@ -111,6 +111,10 @@ type UploadInput struct {
 	// This action is not supported by Amazon S3 on Outposts.
 	GrantWriteACP *string `location:"header" locationName:"x-amz-grant-write-acp" type:"string"`
 
+	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
+
+	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
+
 	// Object key for which the PUT action was initiated.
 	//
 	// Key is a required field
