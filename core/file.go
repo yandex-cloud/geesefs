@@ -886,6 +886,12 @@ func (inode *Inode) sendRename() {
 					}
 					inode.flushError = err
 					inode.flushErrorTime = time.Now()
+
+					// Save parent info before clearing it
+					newParent := inode.Parent
+					oldParent := inode.oldParent
+					oldName := inode.oldName
+
 					inode.oldParent = nil
 					inode.oldName = ""
 					inode.renamingTo = false
@@ -894,6 +900,23 @@ func (inode *Inode) sendRename() {
 						inode.SetAttrTime(time.Now())
 					}
 					inode.mu.Unlock()
+
+					// REVERT THE RENAME IN THE CACHE
+					if oldParent != nil && newParent != nil {
+						newParent.removeChild(inode)
+						inode.mu.Lock()
+						inode.Parent = oldParent
+						inode.Name = oldName
+						inode.mu.Unlock()
+						oldParent.insertChildUnlocked(inode)
+						if renameDest != nil {
+							renameDest.mu.Lock()
+							renameDest.SetCacheState(ST_CACHED)
+							renameDest.mu.Unlock()
+							newParent.insertChildUnlocked(renameDest)
+						}
+					}
+
 					if !skipRename {
 						// Only clean up orphaned temp files (e.g. in Word's .sb-* dirs)
 						// Do NOT delete the source if it's the original document!
