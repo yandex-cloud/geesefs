@@ -167,6 +167,8 @@ func mapWinError(err error) int {
 		return -fuse.EOPNOTSUPP
 	case syscall.EPERM:
 		return -fuse.EPERM
+	case syscall.EROFS:
+		return -fuse.EROFS
 	case syscall.ERANGE:
 		return -fuse.ERANGE
 	case syscall.ESPIPE:
@@ -361,6 +363,16 @@ func (fs *GoofysWin) Rename(oldpath string, newpath string) (ret int) {
 	}
 
 	err = parent.Rename(oldName, newParent, newName)
+
+	// When conditional writes are enabled, synchronously wait for the rename to complete on S3.
+	if err == nil {
+		if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+			renamed := newParent.findChild(newName)
+			if renamed != nil && !renamed.isDir() {
+				err = renamed.SyncFile()
+			}
+		}
+	}
 
 	return mapWinError(err)
 }
@@ -655,11 +667,31 @@ func (fs *GoofysWin) Write(path string, buff []byte, ofst int64, fhId uint64) (r
 	return len(buff)
 }
 
-// Flush flushes cached file data. Ignore it.
+// Flush flushes cached file data.
+// When conditional writes are enabled, synchronously flush and return errors
+// so applications can detect conflicts.
 func (fs *GoofysWin) Flush(path string, fhId uint64) (ret int) {
 	if fuseLog.Level == logrus.DebugLevel {
-		fuseLog.Debugf("<--> Flush %v %v = 0", path, fhId)
+		fuseLog.Debugf("-> Flush %v %v", path, fhId)
+		defer func() {
+			fuseLog.Debugf("<- Flush %v %v = %v", path, fhId, ret)
+		}()
 	}
+
+	if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+		fs.mu.RLock()
+		fh := fs.fileHandles[fuseops.HandleID(fhId)]
+		fs.mu.RUnlock()
+		if fh != nil && !fh.inode.isDir() {
+			atomic.AddInt64(&fs.stats.metadataWrites, 1)
+			err := fh.inode.SyncFile()
+			if err != nil {
+				return mapWinError(err)
+			}
+			return 0
+		}
+	}
+
 	atomic.AddInt64(&fs.stats.noops, 1)
 	return 0
 }
@@ -687,10 +719,52 @@ func (fs *GoofysWin) Release(path string, fhId uint64) (ret int) {
 	delete(fs.fileHandles, fuseops.HandleID(fhId))
 	fs.mu.Unlock()
 
-	if fs.flags.FsyncOnClose {
+	needSync := fs.flags.FsyncOnClose
+	forceError := false
+	verifyRename := false
+	expectedETag := ""
+	if !needSync {
+		if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+			fh.inode.mu.Lock()
+			hasError := fh.inode.flushError != nil
+			isDead := atomic.LoadInt32(&fh.inode.CacheState) <= ST_DEAD
+			if fh.inode.renameExpectedETag != "" {
+				expectedETag = fh.inode.renameExpectedETag
+				fh.inode.renameExpectedETag = ""
+				verifyRename = true
+			}
+			if hasError && isDead {
+				needSync = true
+				forceError = true
+			}
+			fh.inode.mu.Unlock()
+		}
+	}
+	if forceError {
+		fh.inode.mu.Lock()
+		fh.inode.deferFlushError = false
+		fh.inode.mu.Unlock()
+	}
+	if needSync {
 		err := fh.inode.SyncFile()
 		if err != nil {
 			return mapWinError(err)
+		}
+	}
+	if verifyRename {
+		fh.inode.mu.Lock()
+		cloud, key := fh.inode.cloud()
+		if fh.inode.isDir() {
+			key += "/"
+		}
+		fh.inode.mu.Unlock()
+		resp, err := RetryHeadBlob(fs.flags, cloud, &HeadBlobInput{Key: key})
+		if err != nil {
+			return mapWinError(err)
+		}
+		if resp.ETag == nil || *resp.ETag != expectedETag {
+			fuseLog.Warnf("CW rename verify failed on close for %v: expected etag=%v got=%v", key, expectedETag, NilStr(resp.ETag))
+			return mapWinError(syscall.EROFS)
 		}
 	}
 

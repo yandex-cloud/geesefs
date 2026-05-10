@@ -127,6 +127,12 @@ type Inode struct {
 	oldName   string
 	// is already being renamed to the current name
 	renamingTo bool
+	// Destination state captured before rename for conditional writes.
+	renameDestETag string
+	renameDest     *Inode
+	// Expected ETag after successful rename-overwrite (used to verify on close).
+	renameExpectedETag string
+	deferFlushError bool
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
@@ -212,15 +218,17 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	hasDirtyData := (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) &&
 		!patchInProgress && !renameInProgress
 
-	// When --open-block-updates is enabled: protect files that are open
-	// (fileHandles > 0) but not yet written to (ST_CACHED).
-	hasOpenHandles := inode.fs.flags.OpenBlockUpdates && atomic.LoadInt32(&inode.fileHandles) > 0 &&
+	// Never update knownETag for open file inodes from background refresh.
+	hasOpenHandles := atomic.LoadInt32(&inode.fileHandles) > 0 &&
 		!patchInProgress && !renameInProgress
 
-	blockUpdate := hasDirtyData || hasOpenHandles
+	// Also block updates if a flush error (e.g. CW conflict) is pending.
+	hasFlushError := inode.flushError != nil
 
-	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
-		!patchInProgress && !renameInProgress {
+	blockUpdate := hasDirtyData || hasOpenHandles || hasFlushError
+	remoteChanged := (item.ETag != nil && inode.knownETag != *item.ETag) || item.Size != inode.knownSize
+
+	if remoteChanged && !patchInProgress && !renameInProgress {
 		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
 			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
 				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
@@ -247,10 +255,9 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	}
 	if item.ETag != nil {
 		inode.s3Metadata["etag"] = []byte(*item.ETag)
-		// Do NOT update knownETag if inode has unsaved local changes.
-		// knownETag must reflect the ETag that was last synced to S3 from this client,
-		// so that conditional writes (If-Match) correctly detect external modifications.
-		if !blockUpdate {
+		// Do not refresh knownETag from background listings for already-known inodes.
+		// knownETag must represent version actually read/flushed by this client.
+		if inode.knownETag == "" && !blockUpdate {
 			inode.knownETag = *item.ETag
 		}
 	} else {

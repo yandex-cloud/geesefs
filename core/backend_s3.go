@@ -845,21 +845,30 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 	if param.Source != param.Destination {
 
 		// FIXME Remove additional HEAD query
-		if param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
-			(param.Metadata == nil || param.StorageClass == nil)) {
-
+		needHead := param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
+			(param.Metadata == nil || param.StorageClass == nil))
+		origETag := param.ETag
+		if needHead {
 			params := &HeadBlobInput{Key: param.Source}
 			resp, err := s.HeadBlob(params)
 			if err != nil {
 				return nil, err
 			}
 
-			param.Size = &resp.Size
-			param.ETag = resp.ETag
+			if param.Size == nil {
+				param.Size = &resp.Size
+			}
+			if param.ETag == nil {
+				param.ETag = resp.ETag
+			} else if origETag != nil && resp.ETag != nil && *origETag != *resp.ETag {
+				s3Log.Warnf("CopyBlob source ETag changed: %v expected %v got %v", param.Source, *origETag, *resp.ETag)
+			}
 			if param.Metadata == nil {
 				param.Metadata = resp.Metadata
 			}
-			param.StorageClass = resp.StorageClass
+			if param.StorageClass == nil {
+				param.StorageClass = resp.StorageClass
+			}
 		}
 
 		if param.StorageClass == nil {
@@ -916,6 +925,14 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 	// X-Amz-Copy-Source-If-None-Match: copy only if source ETag does NOT match.
 	if param.CopySourceIfNoneMatch != nil {
 		params.CopySourceIfNoneMatch = param.CopySourceIfNoneMatch
+	}
+	// If-Match on destination: copy only if destination ETag matches (conditional write).
+	if param.IfMatch != nil {
+		params.IfMatch = param.IfMatch
+	}
+	// If-None-Match on destination: copy only if destination does NOT exist.
+	if param.IfNoneMatch != nil {
+		params.IfNoneMatch = param.IfNoneMatch
 	}
 
 	req, _ := s.CopyObjectRequest(params)
