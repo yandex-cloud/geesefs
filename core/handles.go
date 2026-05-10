@@ -132,7 +132,7 @@ type Inode struct {
 	renameDest     *Inode
 	// Expected ETag after successful rename-overwrite (used to verify on close).
 	renameExpectedETag string
-	deferFlushError bool
+	deferFlushError    bool
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
@@ -200,6 +200,14 @@ func (inode *Inode) UnqueueCleanBuffer(buf *FileBuffer) {
 func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
+
+	// When conditional writes are enabled, completely disable background
+	// refresh for any inode that currently has open file handles.
+	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+		if atomic.LoadInt32(&inode.fileHandles) > 0 {
+			return
+		}
+	}
 
 	// We always just drop our local cache when inode size or etag changes remotely
 	// It's the simplest method of conflict resolution

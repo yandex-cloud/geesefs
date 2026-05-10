@@ -130,7 +130,7 @@ func mapWinError(err error) int {
 	case syscall.EAGAIN:
 		return -fuse.EAGAIN
 	case syscall.EBUSY:
-		return -fuse.EBUSY
+		return -fuse.EACCES
 	case syscall.ECONNRESET:
 		return -fuse.ECONNRESET
 	case syscall.EEXIST:

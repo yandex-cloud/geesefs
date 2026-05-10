@@ -440,7 +440,7 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 			// Cache xattrs
 			inode.fillXattrFromHead(&(*resp).HeadBlobOutput)
 		}
-		if resp.ETag != nil && inode.flushError == nil {
+		if resp.ETag != nil && inode.flushError == nil && inode.knownETag == "" {
 			inode.knownETag = *resp.ETag
 		}
 		allocated += inode.buffers.Add(offset, buf, BUF_CLEAN, false)
