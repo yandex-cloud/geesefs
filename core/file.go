@@ -440,9 +440,6 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 			// Cache xattrs
 			inode.fillXattrFromHead(&(*resp).HeadBlobOutput)
 		}
-		if resp.ETag != nil && inode.flushError == nil && inode.knownETag == "" {
-			inode.knownETag = *resp.ETag // ??
-		}
 		allocated += inode.buffers.Add(offset, buf, BUF_CLEAN, false)
 		inode.mu.Unlock()
 		size -= done
@@ -2006,40 +2003,19 @@ func (inode *Inode) SyncFile() (err error) {
 	for {
 		inode.mu.Lock()
 		inode.forceFlush = false
-		if inode.flushError != nil {
-			if inode.deferFlushError {
-				inode.deferFlushError = false
-				inode.mu.Unlock()
-				break
-			}
-			err = inode.flushError
-			inode.flushError = nil
+		if inode.CacheState <= ST_DEAD {
 			inode.mu.Unlock()
 			break
 		}
-		if inode.CacheState <= ST_DEAD {
+		if inode.flushError != nil {
+			// Return the error to user
+			err = inode.flushError
 			inode.mu.Unlock()
 			break
 		}
 		inode.forceFlush = true
 		inode.mu.Unlock()
 		inode.TryFlush(MAX_FLUSH_PRIORITY)
-		// Re-check inode state before waiting on the shared flusherCond.
-		// Between TryFlush() and flusherMu.Lock(), the flush goroutine may
-		// have already completed (e.g. CW conflict → EBUSY → flushError set,
-		// CacheState → ST_CACHED) and called WakeupFlusher(). If the Flusher()
-		// goroutine consumes flushPending before we check it, we'd block on
-		// flusherCond.Wait() for up to RetryInterval (default 30s).
-		// CacheState is accessed atomically so a lock-free check is safe here.
-		if atomic.LoadInt32(&inode.CacheState) <= ST_DEAD {
-			continue
-		}
-		inode.mu.Lock()
-		hasError := inode.flushError != nil
-		inode.mu.Unlock()
-		if hasError {
-			continue
-		}
 		inode.fs.flusherMu.Lock()
 		if inode.fs.flushPending == 0 {
 			inode.fs.flusherCond.Wait()
