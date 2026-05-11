@@ -221,85 +221,24 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// ETag or Size for sure, so the simplest fix is to also ignore this check
 	renameInProgress := inode.oldName != ""
 
-	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
-		!patchInProgress && !renameInProgress {
-		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
-			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
-				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
-				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
-		}
-		inode.resetCache()
-		inode.Attributes.Size = item.Size
-		inode.knownSize = item.Size
-		if item.LastModified != nil {
-			inode.Attributes.Mtime = *item.LastModified
-			inode.Attributes.Ctime = *item.LastModified
-		}
-	}
-	if item.ETag != nil {
-		inode.s3Metadata["etag"] = []byte(*item.ETag)
-		inode.knownETag = *item.ETag
-	} else {
-		delete(inode.s3Metadata, "etag")
-	}
-	if item.StorageClass != nil {
-		inode.s3Metadata["storage-class"] = []byte(*item.StorageClass)
-	} else {
-		delete(inode.s3Metadata, "storage-class")
-	}
-	now := time.Now()
-	// don't want to update time if this inode is setup to never expire
-	if inode.AttrTime.Before(now) {
-		inode.SetAttrTime(now)
-	}
-
-	// // If inode has local modifications not yet flushed (ST_CREATED or ST_MODIFIED),
-	// // do NOT reset cache and do NOT update knownETag from external source.
-	// hasDirtyData := (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) &&
-	// 	!patchInProgress && !renameInProgress
-
-	// // Never update knownETag for open file inodes from background refresh.
-	// hasOpenHandles := atomic.LoadInt32(&inode.fileHandles) > 0 &&
-	// 	!patchInProgress && !renameInProgress
-
-	// // Also block updates if a flush error (e.g. CW conflict) is pending.
-	// hasFlushError := inode.flushError != nil
-
-	// blockUpdate := hasDirtyData || hasOpenHandles || hasFlushError
-	// remoteChanged := (item.ETag != nil && inode.knownETag != *item.ETag) || item.Size != inode.knownSize
-
-	// if remoteChanged && !patchInProgress && !renameInProgress {
+	// if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
+	// 	!patchInProgress && !renameInProgress {
 	// 	if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
 	// 		s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
 	// 			" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
 	// 			inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
 	// 	}
-	// 	// Only reset cache if inode has no local modifications.
-	// 	// If user is actively editing the file, we must NOT discard their changes
-	// 	if !blockUpdate {
-	// 		inode.resetCache()
-	// 		inode.Attributes.Size = item.Size
-	// 		inode.knownSize = item.Size
-	// 	}
+	// 	inode.resetCache()
+	// 	inode.Attributes.Size = item.Size
+	// 	inode.knownSize = item.Size
 	// 	if item.LastModified != nil {
 	// 		inode.Attributes.Mtime = *item.LastModified
 	// 		inode.Attributes.Ctime = *item.LastModified
-	// 	} else {
-	// 		inode.Attributes.Mtime = inode.fs.rootAttrs.Ctime
-	// 		inode.Attributes.Ctime = inode.fs.rootAttrs.Ctime
-	// 	}
-	// 	if item.Metadata != nil {
-	// 		inode.setMetadata(item.Metadata)
-	// 		inode.userMetadataDirty = 0
 	// 	}
 	// }
 	// if item.ETag != nil {
 	// 	inode.s3Metadata["etag"] = []byte(*item.ETag)
-	// 	// Do not refresh knownETag from background listings for already-known inodes.
-	// 	// knownETag must represent version actually read/flushed by this client.
-	// 	if inode.knownETag == "" && !blockUpdate {
-	// 		inode.knownETag = *item.ETag
-	// 	}
+	// 	inode.knownETag = *item.ETag
 	// } else {
 	// 	delete(inode.s3Metadata, "etag")
 	// }
@@ -313,6 +252,67 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// if inode.AttrTime.Before(now) {
 	// 	inode.SetAttrTime(now)
 	// }
+
+	// If inode has local modifications not yet flushed (ST_CREATED or ST_MODIFIED),
+	// do NOT reset cache and do NOT update knownETag from external source.
+	hasDirtyData := (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) &&
+		!patchInProgress && !renameInProgress
+
+	// Never update knownETag for open file inodes from background refresh.
+	hasOpenHandles := atomic.LoadInt32(&inode.fileHandles) > 0 &&
+		!patchInProgress && !renameInProgress
+
+	// Also block updates if a flush error (e.g. CW conflict) is pending.
+	hasFlushError := inode.flushError != nil
+
+	blockUpdate := hasDirtyData || hasOpenHandles || hasFlushError
+	remoteChanged := (item.ETag != nil && inode.knownETag != *item.ETag) || item.Size != inode.knownSize
+
+	if remoteChanged && !patchInProgress && !renameInProgress {
+		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
+			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
+				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
+				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
+		}
+		// Only reset cache if inode has no local modifications.
+		// If user is actively editing the file, we must NOT discard their changes
+		if !blockUpdate {
+			inode.resetCache()
+			inode.Attributes.Size = item.Size
+			inode.knownSize = item.Size
+		}
+		if item.LastModified != nil {
+			inode.Attributes.Mtime = *item.LastModified
+			inode.Attributes.Ctime = *item.LastModified
+		} else {
+			inode.Attributes.Mtime = inode.fs.rootAttrs.Ctime
+			inode.Attributes.Ctime = inode.fs.rootAttrs.Ctime
+		}
+		if item.Metadata != nil {
+			inode.setMetadata(item.Metadata)
+			inode.userMetadataDirty = 0
+		}
+	}
+	if item.ETag != nil {
+		inode.s3Metadata["etag"] = []byte(*item.ETag)
+		// Do not refresh knownETag from background listings for already-known inodes.
+		// knownETag must represent version actually read/flushed by this client.
+		if inode.knownETag == "" && !blockUpdate {
+			inode.knownETag = *item.ETag
+		}
+	} else {
+		delete(inode.s3Metadata, "etag")
+	}
+	if item.StorageClass != nil {
+		inode.s3Metadata["storage-class"] = []byte(*item.StorageClass)
+	} else {
+		delete(inode.s3Metadata, "storage-class")
+	}
+	now := time.Now()
+	// don't want to update time if this inode is setup to never expire
+	if inode.AttrTime.Before(now) {
+		inode.SetAttrTime(now)
+	}
 }
 
 // LOCKS_REQUIRED(inode.mu)
