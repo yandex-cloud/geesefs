@@ -206,26 +206,21 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// Apart than that we may not be able to make a correct object version
 
 	// If ongoing patch requests exist, then concurrent etag changes is normal. In current implementation
-	// it is hard to reliably distinguish actual data conflicts from concurrent patch updates
+	// it is hard to reliably distinguish actual data conflicts from concurrent patch updates.
 	patchInProgress := inode.fs.flags.UsePatch && inode.mpu == nil && inode.CacheState == ST_MODIFIED && inode.IsFlushing > 0
 
 	// If a file is renamed from a different file then we also don't know its server-side
 	// ETag or Size for sure, so the simplest fix is to also ignore this check
 	renameInProgress := inode.oldName != ""
 
-	// ConditionalWrite blockers:
-	// If inode has local modifications not yet flushed (ST_CREATED or ST_MODIFIED)
-	hasDirtyData := (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) && !patchInProgress && !renameInProgress
-	// Never update knownETag for open file inodes from background refresh
 	hasOpenHandles := atomic.LoadInt32(&inode.fileHandles) > 0 && !patchInProgress && !renameInProgress
-	// Block updates if a flush error is pending
 	hasFlushError := inode.flushError != nil
 
 	useConditionalWrites := false
 	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
 		useConditionalWrites = true
 	}
-	blockUpdate := (hasDirtyData || hasOpenHandles || hasFlushError) && useConditionalWrites
+	blockUpdate := (hasOpenHandles || hasFlushError) && useConditionalWrites
 	if blockUpdate {
 		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
 			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
@@ -251,13 +246,11 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 			inode.Attributes.Mtime = inode.fs.rootAttrs.Ctime
 			inode.Attributes.Ctime = inode.fs.rootAttrs.Ctime
 		}
-
 		if item.Metadata != nil {
 			inode.setMetadata(item.Metadata)
 			inode.userMetadataDirty = 0
 		}
 	}
-
 	if item.ETag != nil {
 		inode.s3Metadata["etag"] = []byte(*item.ETag)
 		// Under --use-conditional-writes, once an inode has had open file handles,
