@@ -201,14 +201,6 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 
-	// When conditional writes are enabled, completely disable background
-	// refresh for any inode that currently has open file handles.
-	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
-		if atomic.LoadInt32(&inode.fileHandles) > 0 {
-			return
-		}
-	}
-
 	// We always just drop our local cache when inode size or etag changes remotely
 	// It's the simplest method of conflict resolution
 	// Otherwise we may not be able to make a correct object version
@@ -220,38 +212,6 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// If a file is renamed from a different file then we also don't know its server-side
 	// ETag or Size for sure, so the simplest fix is to also ignore this check
 	renameInProgress := inode.oldName != ""
-
-	// if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
-	// 	!patchInProgress && !renameInProgress {
-	// 	if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
-	// 		s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
-	// 			" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
-	// 			inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
-	// 	}
-	// 	inode.resetCache()
-	// 	inode.Attributes.Size = item.Size
-	// 	inode.knownSize = item.Size
-	// 	if item.LastModified != nil {
-	// 		inode.Attributes.Mtime = *item.LastModified
-	// 		inode.Attributes.Ctime = *item.LastModified
-	// 	}
-	// }
-	// if item.ETag != nil {
-	// 	inode.s3Metadata["etag"] = []byte(*item.ETag)
-	// 	inode.knownETag = *item.ETag
-	// } else {
-	// 	delete(inode.s3Metadata, "etag")
-	// }
-	// if item.StorageClass != nil {
-	// 	inode.s3Metadata["storage-class"] = []byte(*item.StorageClass)
-	// } else {
-	// 	delete(inode.s3Metadata, "storage-class")
-	// }
-	// now := time.Now()
-	// // don't want to update time if this inode is setup to never expire
-	// if inode.AttrTime.Before(now) {
-	// 	inode.SetAttrTime(now)
-	// }
 
 	// If inode has local modifications not yet flushed (ST_CREATED or ST_MODIFIED),
 	// do NOT reset cache and do NOT update knownETag from external source.
