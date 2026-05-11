@@ -127,8 +127,6 @@ type Inode struct {
 	oldName   string
 	// is already being renamed to the current name
 	renamingTo bool
-	// Expected ETag after successful rename-overwrite (used to verify on close).
-	renameExpectedETag string
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
@@ -238,7 +236,6 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
 				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
 		}
-
 		inode.resetCache()
 		inode.Attributes.Size = item.Size
 		inode.knownSize = item.Size

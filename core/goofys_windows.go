@@ -717,18 +717,11 @@ func (fs *GoofysWin) Release(path string, fhId uint64) (ret int) {
 	fs.mu.Unlock()
 
 	needSync := fs.flags.FsyncOnClose
-	verifyRename := false
-	expectedETag := ""
 	if !needSync {
 		if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
 			fh.inode.mu.Lock()
 			hasError := fh.inode.flushError != nil
 			isDead := atomic.LoadInt32(&fh.inode.CacheState) <= ST_DEAD
-			if fh.inode.renameExpectedETag != "" {
-				expectedETag = fh.inode.renameExpectedETag
-				fh.inode.renameExpectedETag = ""
-				verifyRename = true
-			}
 			if hasError && isDead {
 				needSync = true
 			}
@@ -739,22 +732,6 @@ func (fs *GoofysWin) Release(path string, fhId uint64) (ret int) {
 		err := fh.inode.SyncFile()
 		if err != nil {
 			return mapWinError(err)
-		}
-	}
-	if verifyRename {
-		fh.inode.mu.Lock()
-		cloud, key := fh.inode.cloud()
-		if fh.inode.isDir() {
-			key += "/"
-		}
-		fh.inode.mu.Unlock()
-		resp, err := RetryHeadBlob(fs.flags, cloud, &HeadBlobInput{Key: key})
-		if err != nil {
-			return mapWinError(err)
-		}
-		if resp.ETag == nil || *resp.ETag != expectedETag {
-			fuseLog.Warnf("CW rename verify failed on close for %v: expected etag=%v got=%v", key, expectedETag, NilStr(resp.ETag))
-			return mapWinError(syscall.EROFS)
 		}
 	}
 

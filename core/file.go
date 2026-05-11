@@ -816,7 +816,6 @@ func (inode *Inode) sendRename() {
 		skipRename = true
 	}
 	knownETag := inode.knownETag
-	inode.renameExpectedETag = ""
 	useConditionalWrites := false
 	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok {
 		useConditionalWrites = c.UseConditionalWrites
@@ -858,11 +857,6 @@ func (inode *Inode) sendRename() {
 				} else if mappedErr == syscall.EBUSY {
 					s3Log.Warnf("Conditional write conflict (inode %v): failed to copy %v to %v: %v", inode.Id, from, key, err)
 					inode.mu.Lock()
-					if useConditionalWrites && knownETag != "" {
-						inode.renameExpectedETag = knownETag
-					} else {
-						inode.renameExpectedETag = ""
-					}
 					inode.flushError = err
 					inode.flushErrorTime = time.Now()
 
@@ -985,9 +979,6 @@ func (inode *Inode) sendRename() {
 					// Someone renamed the inode again(!)
 					inode.oldParent = newParent
 					inode.oldName = newName
-				}
-				if useConditionalWrites && knownETag != "" {
-					inode.renameExpectedETag = knownETag
 				}
 				if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
 					!inode.isStillDirty() {
