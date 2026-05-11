@@ -871,39 +871,6 @@ func (inode *Inode) sendRename() {
 						inode.mu.Unlock()
 						oldParent.insertChildUnlocked(inode)
 					}
-
-					// if !skipRename {
-					// 	// Only clean up orphaned temp files (e.g. in Word's .sb-* dirs)
-					// 	// Do NOT delete the source if it's the original document!
-					// 	_, oldParentKey := oldParent.cloud()
-					// 	if strings.Contains(oldParentKey, ".sb-") {
-					// 		inode.fs.addInflightChange(from)
-					// 		_, delErr := cloud.DeleteBlob(&DeleteBlobInput{Key: from})
-					// 		inode.fs.completeInflightChange(from)
-					// 		if delErr != nil {
-					// 			log.Debugf("Failed to delete orphaned temp source %v after CW conflict: %v", from, delErr)
-					// 		} else {
-					// 			log.Debugf("Deleted orphaned temp source %v after CW conflict", from)
-					// 		}
-					// 	}
-					// 	if oldParent != nil {
-					// 		oldParent.mu.Lock()
-					// 		if _, ok := oldParent.dir.DeletedChildren[oldName]; ok {
-					// 			delete(oldParent.dir.DeletedChildren, oldName)
-					// 			oldParent.addModified(-1)
-					// 		}
-					// 		oldParent.mu.Unlock()
-					// 		if strings.Contains(oldParentKey, ".sb-") {
-					// 			dirKey := appendChildName(oldParentKey, oldName)
-					// 			inode.fs.addInflightChange(dirKey)
-					// 			_, dirDelErr := cloud.DeleteBlob(&DeleteBlobInput{Key: dirKey})
-					// 			inode.fs.completeInflightChange(dirKey)
-					// 			if dirDelErr != nil {
-					// 				log.Debugf("Failed to delete orphaned temp source dir %v after CW conflict: %v", dirKey, dirDelErr)
-					// 			}
-					// 		}
-					// 	}
-					// }
 				} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 					s3Log.Warnf("Conflict detected (inode %v): failed to copy %v to %v: %v. File is removed remotely, dropping cache", inode.Id, from, key, err)
 					inode.mu.Lock()
