@@ -251,9 +251,7 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 		}
 		if item.ETag != nil {
 			inode.s3Metadata["etag"] = []byte(*item.ETag)
-			if inode.knownETag == "" || !useConditionalWrites {
-				inode.knownETag = *item.ETag
-			}
+			inode.knownETag = *item.ETag
 		} else {
 			delete(inode.s3Metadata, "etag")
 		}
