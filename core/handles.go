@@ -231,22 +231,19 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// Also block updates if a flush error (e.g. CW conflict) is pending.
 	hasFlushError := inode.flushError != nil
 
-	blockUpdate := hasDirtyData || hasOpenHandles || hasFlushError
-	remoteChanged := (item.ETag != nil && inode.knownETag != *item.ETag) || item.Size != inode.knownSize
+	blockUpdate := (hasDirtyData || hasOpenHandles || hasFlushError) && useConditionalWrites
 
-	if remoteChanged && !patchInProgress && !renameInProgress {
-		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
-			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
-				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
-				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
-		}
-		// Only reset cache if inode has no local modifications.
-		// If user is actively editing the file, we must NOT discard their changes
-		if !blockUpdate {
-			inode.resetCache()
-			inode.Attributes.Size = item.Size
-			inode.knownSize = item.Size
-		}
+	if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
+		s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
+			" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
+			inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
+	}
+	// Only reset cache if inode has no local modifications.
+	// If user is actively editing the file, we must NOT discard their changes
+	if !blockUpdate {
+		inode.resetCache()
+		inode.Attributes.Size = item.Size
+		inode.knownSize = item.Size
 		if item.LastModified != nil {
 			inode.Attributes.Mtime = *item.LastModified
 			inode.Attributes.Ctime = *item.LastModified
@@ -260,10 +257,8 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 		}
 	}
 	if item.ETag != nil {
-		inode.s3Metadata["etag"] = []byte(*item.ETag)
-		// Do not refresh knownETag from background listings for already-known inodes.
-		// knownETag must represent version actually read/flushed by this client.
 		if !blockUpdate {
+			inode.s3Metadata["etag"] = []byte(*item.ETag)
 			inode.knownETag = *item.ETag
 		}
 	} else {
