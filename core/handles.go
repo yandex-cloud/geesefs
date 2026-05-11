@@ -140,11 +140,8 @@ type Inode struct {
 	knownETag string
 
 	// Last time fileHandles transitioned from >0 back to 0.
-	// Used under --use-conditional-writes to distinguish a transient,
-	// sub-second release (e.g. between MS Word save-rename steps) from
-	// a real user-initiated close+reopen. We only allow the background
-	// refresh (SetFromBlobItem) to overwrite a known ETag after the
-	// inode has been idle (no handles) for long enough.
+	// Used under --use-conditional-writes to distinguish a sub-second,
+	// release from a real user-initiated close+reopen.
 	lastHandleReleaseTime time.Time
 
 	// the refcnt is an exception, it's protected with atomic access
@@ -206,7 +203,6 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// When conditional writes are enabled, completely disable background
 	// refresh for any inode that currently has open file handles.
 	// Otherwise we always just drop our local cache when inode size or etag changes remotely
-	// It's the simplest method of conflict resolution
 	// Apart than that we may not be able to make a correct object version
 	useConditionalWrites := false
 	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
@@ -230,60 +226,60 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	hasFlushError := inode.flushError != nil
 
 	blockUpdate := (hasDirtyData || hasOpenHandles || hasFlushError) && useConditionalWrites
-	if !blockUpdate {
-		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
-			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
-				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
-				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
-		}
-		inode.resetCache()
-		inode.Attributes.Size = item.Size
-		inode.knownSize = item.Size
-		if item.LastModified != nil {
-			inode.Attributes.Mtime = *item.LastModified
-			inode.Attributes.Ctime = *item.LastModified
-		} else {
-			inode.Attributes.Mtime = inode.fs.rootAttrs.Ctime
-			inode.Attributes.Ctime = inode.fs.rootAttrs.Ctime
-		}
-		if item.Metadata != nil {
-			inode.setMetadata(item.Metadata)
-			inode.userMetadataDirty = 0
-		}
-		if item.ETag != nil {
-			inode.s3Metadata["etag"] = []byte(*item.ETag)
-			// Under --use-conditional-writes, once an inode has had open file handles,
-			// the background stat-cache-ttl refresh must NOT overwrite knownETag
-			// until enough idle time has elapsed since the last handle was released.
-			// This prevents the brief sub-second windows between rename/save steps
-			// (e.g. MS Word: rename original -> write tmp -> rename tmp) from being
-			// observed as "the file is idle, refresh OK". The threshold is generous
-			// enough to cover Word's full save sequence but short enough that an
-			// actual user-initiated close+reopen sees a fresh ETag.
-			allowETagRefresh := !useConditionalWrites || inode.knownETag == "" ||
-				(!inode.lastHandleReleaseTime.IsZero() && time.Since(inode.lastHandleReleaseTime) >= 2*time.Second)
-			if allowETagRefresh {
-				inode.knownETag = *item.ETag
-			}
-		} else {
-			delete(inode.s3Metadata, "etag")
-		}
-		if item.StorageClass != nil {
-			inode.s3Metadata["storage-class"] = []byte(*item.StorageClass)
-		} else {
-			delete(inode.s3Metadata, "storage-class")
-		}
-		now := time.Now()
-		// don't want to update time if this inode is setup to never expire
-		if inode.AttrTime.Before(now) {
-			inode.SetAttrTime(now)
-		}
-	} else {
+	if blockUpdate {
 		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
 			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
 				" (%v, %v) differs from local (%v, %v). File is changed remotely but CW are enabled, keeping cache",
 				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
 		}
+		return
+	}
+
+	if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
+		s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
+			" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
+			inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
+	}
+	inode.resetCache()
+	inode.Attributes.Size = item.Size
+	inode.knownSize = item.Size
+	if item.LastModified != nil {
+		inode.Attributes.Mtime = *item.LastModified
+		inode.Attributes.Ctime = *item.LastModified
+	} else {
+		inode.Attributes.Mtime = inode.fs.rootAttrs.Ctime
+		inode.Attributes.Ctime = inode.fs.rootAttrs.Ctime
+	}
+	if item.Metadata != nil {
+		inode.setMetadata(item.Metadata)
+		inode.userMetadataDirty = 0
+	}
+	if item.ETag != nil {
+		inode.s3Metadata["etag"] = []byte(*item.ETag)
+		// Under --use-conditional-writes, once an inode has had open file handles,
+		// the background stat-cache-ttl refresh must NOT overwrite knownETag
+		// until enough idle time has elapsed since the last handle was released.
+		// This prevents the brief sub-second windows between rename/save steps
+		// (e.g. MS Word: rename original -> write tmp -> rename tmp) from being
+		// observed as "the file is idle, refresh OK". The threshold is generous
+		// enough to cover Word's full save sequence but short enough that an
+		// actual user-initiated close+reopen sees a fresh ETag.
+		allowETagRefresh := inode.knownETag == "" || (!inode.lastHandleReleaseTime.IsZero() && time.Since(inode.lastHandleReleaseTime) >= 2*time.Second)
+		if !useConditionalWrites || allowETagRefresh {
+			inode.knownETag = *item.ETag
+		}
+	} else {
+		delete(inode.s3Metadata, "etag")
+	}
+	if item.StorageClass != nil {
+		inode.s3Metadata["storage-class"] = []byte(*item.StorageClass)
+	} else {
+		delete(inode.s3Metadata, "storage-class")
+	}
+	now := time.Now()
+	// don't want to update time if this inode is setup to never expire
+	if inode.AttrTime.Before(now) {
+		inode.SetAttrTime(now)
 	}
 }
 
@@ -889,8 +885,6 @@ func (inode *Inode) OpenFile() (fh *FileHandle, err error) {
 	if n == 1 {
 		// This is done to try to protect directories with open files
 		inode.Parent.addModified(1)
-		// Reset the idle timestamp; while a handle is open the cooldown
-		// is meaningless (hasOpenHandles blocks updates anyway).
 		inode.lastHandleReleaseTime = time.Time{}
 	}
 	return
