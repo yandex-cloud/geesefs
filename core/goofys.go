@@ -685,7 +685,7 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 		return false
 	}
 	if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
-		if childTmp.knownETag != "" && atomic.LoadInt32(&childTmp.CacheState) != ST_DELETED {
+		if childTmp.knownETag != "" {
 			return false
 		}
 	}
