@@ -128,8 +128,8 @@ type Inode struct {
 	// is already being renamed to the current name
 	renamingTo bool
 	// Destination state captured before rename for conditional writes.
-	renameDestETag string
-	renameDest     *Inode
+	// renameDestETag string
+	// renameDest     *Inode
 	// Expected ETag after successful rename-overwrite (used to verify on close).
 	renameExpectedETag string
 	deferFlushError    bool
@@ -203,9 +203,9 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 
 	// When conditional writes are enabled, completely disable background
 	// refresh for any inode that currently has open file handles.
-	// Alternetively we always just drop our local cache when inode size or etag changes remotely
+	// Otherwise we always just drop our local cache when inode size or etag changes remotely
 	// It's the simplest method of conflict resolution
-	// Otherwise we may not be able to make a correct object version
+	// Apart than that we may not be able to make a correct object version
 	useConditionalWrites := false
 	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
 		useConditionalWrites = true
