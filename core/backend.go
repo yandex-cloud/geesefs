@@ -109,6 +109,11 @@ type CopyBlobInput struct {
 	ETag         *string            // if non-nil, do conditional copy
 	Metadata     map[string]*string // if nil, copy from Source
 	StorageClass *string            // if nil, copy from Source
+
+	IfMatch     *string
+	IfNoneMatch *string
+
+	CopySourceIfNoneMatch *string
 }
 
 type CopyBlobOutput struct {
@@ -138,6 +143,9 @@ type PutBlobInput struct {
 
 	Body io.ReadSeeker
 	Size *uint64
+
+	IfMatch     *string
+	IfNoneMatch *string
 }
 
 type PutBlobOutput struct {
@@ -178,6 +186,9 @@ type MultipartBlobCommitInput struct {
 	Parts    []*string
 	NumParts uint32
 
+	IfMatch     *string
+	IfNoneMatch *string
+
 	// for GCS
 	backendData interface{}
 }
@@ -203,6 +214,9 @@ type MultipartBlobCopyInput struct {
 	CopySource string
 	Offset     uint64
 	Size       uint64
+
+	CopySourceIfMatch     *string
+	CopySourceIfNoneMatch *string
 }
 
 type MultipartBlobCopyOutput struct {

@@ -139,6 +139,9 @@ type Inode struct {
 	knownSize uint64
 	knownETag string
 
+	// last time fileHandles transitioned from >0 back to 0.
+	lastHandleReleaseTime time.Time
+
 	// the refcnt is an exception, it's protected with atomic access
 	// being part of parent.dir.Children increases refcnt by 1
 	refcnt int64
@@ -195,9 +198,10 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 
-	// We always just drop our local cache when inode size or etag changes remotely
-	// It's the simplest method of conflict resolution
-	// Otherwise we may not be able to make a correct object version
+	// When conditional writes are enabled, disable background refresh for
+	// any inode that currently has open file handles. Otherwise we always
+	// just drop our local cache when inode size or etag changes  remotely
+	// Apart than that we may not be able to make a correct object version
 
 	// If ongoing patch requests exist, then concurrent etag changes is normal. In current implementation
 	// it is hard to reliably distinguish actual data conflicts from concurrent patch updates.
@@ -206,6 +210,19 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// If a file is renamed from a different file then we also don't know its server-side
 	// ETag or Size for sure, so the simplest fix is to also ignore this check
 	renameInProgress := inode.oldName != ""
+
+	useConditionalWrites := false
+	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+		if atomic.LoadInt32(&inode.fileHandles) > 0 && !patchInProgress && !renameInProgress {
+			if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
+				s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
+					" (%v, %v) differs from local (%v, %v). File is changed remotely but CW are enabled, keeping cache",
+					inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
+			}
+			return
+		}
+		useConditionalWrites = true
+	}
 
 	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
 		!patchInProgress && !renameInProgress {
@@ -231,7 +248,13 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	}
 	if item.ETag != nil {
 		inode.s3Metadata["etag"] = []byte(*item.ETag)
-		inode.knownETag = *item.ETag
+		// Under --use-conditional-writes, once an inode has had open file handles,
+		// the background stat-cache-ttl refresh must NOT overwrite knownETag
+		// until enough idle time has elapsed since the last handle was released
+		allowETagRefresh := inode.knownETag == "" || (!inode.lastHandleReleaseTime.IsZero() && time.Since(inode.lastHandleReleaseTime) >= 2*time.Second)
+		if !useConditionalWrites || allowETagRefresh {
+			inode.knownETag = *item.ETag
+		}
 	} else {
 		delete(inode.s3Metadata, "etag")
 	}
@@ -849,6 +872,7 @@ func (inode *Inode) OpenFile() (fh *FileHandle, err error) {
 	if n == 1 {
 		// This is done to try to protect directories with open files
 		inode.Parent.addModified(1)
+		inode.lastHandleReleaseTime = time.Time{}
 	}
 	return
 }
