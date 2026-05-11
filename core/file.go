@@ -849,9 +849,14 @@ func (inode *Inode) sendRename() {
 					newParent := inode.Parent
 					oldParent := inode.oldParent
 					oldName := inode.oldName
+
 					inode.oldParent = nil
 					inode.oldName = ""
 					inode.renamingTo = false
+					if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) && !inode.isStillDirty() {
+						inode.SetCacheState(ST_CACHED)
+						inode.SetAttrTime(time.Now())
+					}
 					inode.mu.Unlock()
 
 					// Revert the rename in cache
