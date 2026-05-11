@@ -221,13 +221,13 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 
 	// ConditionalWrite blockers:
 	// If inode has local modifications not yet flushed (ST_CREATED or ST_MODIFIED)
-	// hasDirtyData := (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) && !patchInProgress && !renameInProgress
+	hasDirtyData := (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) && !patchInProgress && !renameInProgress
 	// Never update knownETag for open file inodes from background refresh.
 	hasOpenHandles := atomic.LoadInt32(&inode.fileHandles) > 0 && !patchInProgress && !renameInProgress
 	// Block updates if a flush error is pending.
 	hasFlushError := inode.flushError != nil
 
-	blockUpdate := (hasOpenHandles || hasFlushError) && useConditionalWrites
+	blockUpdate := (hasDirtyData || hasOpenHandles || hasFlushError) && useConditionalWrites
 	if !blockUpdate {
 		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
 			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
