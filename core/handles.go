@@ -226,7 +226,8 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 		useConditionalWrites = true
 	}
 
-	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) && !patchInProgress && !renameInProgress {
+	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) &&
+		!patchInProgress && !renameInProgress {
 		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
 			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
 				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
