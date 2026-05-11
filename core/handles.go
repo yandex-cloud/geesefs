@@ -251,9 +251,11 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 		}
 		if item.ETag != nil {
 			inode.s3Metadata["etag"] = []byte(*item.ETag)
-			if !useConditionalWrites || inode.knownETag == "" {
-				inode.knownETag = *item.ETag
-			}
+			// blockUpdate==false here guarantees: no open handles, no dirty data, no flush error.
+			// So it is safe (and necessary, for the close+reopen scenario under CW) to refresh
+			// the known ETag from the server. The outer blockUpdate guard above is the proper
+			// protection against unsafe updates during active use.
+			inode.knownETag = *item.ETag
 		} else {
 			delete(inode.s3Metadata, "etag")
 		}
