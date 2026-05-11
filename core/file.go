@@ -845,24 +845,16 @@ func (inode *Inode) sendRename() {
 				} else if mappedErr == syscall.EBUSY {
 					s3Log.Warnf("Conditional write conflict (inode %v): failed to copy %v to %v: %v", inode.Id, from, key, err)
 					inode.mu.Lock()
-					inode.flushError = err
-					inode.flushErrorTime = time.Now()
-
-					// Save parent info before clearing it
+					inode.recordFlushError(err)
 					newParent := inode.Parent
 					oldParent := inode.oldParent
 					oldName := inode.oldName
-
 					inode.oldParent = nil
 					inode.oldName = ""
 					inode.renamingTo = false
-					if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) && !inode.isStillDirty() {
-						inode.SetCacheState(ST_CACHED)
-						inode.SetAttrTime(time.Now())
-					}
 					inode.mu.Unlock()
 
-					// REVERT THE RENAME IN THE CACHE
+					// Revert the rename in cache
 					if oldParent != nil && newParent != nil {
 						newParent.removeChild(inode)
 						inode.mu.Lock()
