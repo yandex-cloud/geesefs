@@ -817,7 +817,6 @@ func (inode *Inode) sendRename() {
 	}
 	go func() {
 		var err error
-		copyCompleted := false
 		if !inode.isDir() || !inode.fs.flags.NoDirObject {
 			// We don't use RenameBlob here even for hypothetical clouds that support it (not S3),
 			// because if we used it we'd have to do it under the inode lock. Because otherwise
@@ -834,7 +833,6 @@ func (inode *Inode) sendRename() {
 
 			_, err = cloud.CopyBlob(copyInput)
 			inode.fs.completeInflightChange(key)
-			copyCompleted = err == nil
 			notFoundIgnore := false
 			if err != nil {
 				mappedErr := mapAwsError(err)
@@ -906,7 +904,6 @@ func (inode *Inode) sendRename() {
 							}
 						}
 					}
-					err = nil
 				} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 					s3Log.Warnf("Conflict detected (inode %v): failed to copy %v to %v: %v. File is removed remotely, dropping cache", inode.Id, from, key, err)
 					inode.mu.Lock()
@@ -946,7 +943,7 @@ func (inode *Inode) sendRename() {
 					inode.mu.Unlock()
 				}
 			}
-			if err == nil && copyCompleted {
+			if err == nil {
 				log.Debugf("Copied %v to %v (rename)", from, key)
 				delKey := from
 				delParent := oldParent
@@ -1632,15 +1629,14 @@ func (inode *Inode) flushSmallObject() {
 		// not be able to proceed to rename - it waits until inode.mpu == nil
 		inode.abortMultipart()
 	}
-
 	inode.mu.Unlock()
 	inode.fs.addInflightChange(key)
 	resp, err := cloud.PutBlob(params)
 	inode.fs.completeInflightChange(key)
 	inode.mu.Lock()
 
+	inode.recordFlushError(err)
 	if err != nil {
-		inode.recordFlushError(err)
 		log.Warnf("Failed to flush small file %v: %v", key, err)
 		if params.Metadata != nil {
 			inode.userMetadataDirty = 2
@@ -1909,8 +1905,8 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 		// Already flushed or conflict => do not complete
 		return
 	}
+	inode.recordFlushError(err)
 	if err != nil {
-		inode.recordFlushError(err)
 		log.Warnf("Failed to finalize multi-part upload of object %v: %v", key, err)
 		if inode.mpu.Metadata != nil {
 			inode.userMetadataDirty = 2
