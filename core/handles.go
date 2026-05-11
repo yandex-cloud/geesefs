@@ -128,8 +128,8 @@ type Inode struct {
 	// is already being renamed to the current name
 	renamingTo bool
 	// Destination state captured before rename for conditional writes.
-	// renameDestETag string
-	// renameDest     *Inode
+	renameDestETag string
+	renameDest     *Inode
 	// Expected ETag after successful rename-overwrite (used to verify on close).
 	renameExpectedETag string
 	deferFlushError    bool
