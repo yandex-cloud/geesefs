@@ -139,9 +139,7 @@ type Inode struct {
 	knownSize uint64
 	knownETag string
 
-	// Last time fileHandles transitioned from >0 back to 0.
-	// Used under --use-conditional-writes to distinguish a sub-second,
-	// release from a real user-initiated close+reopen.
+	// last time fileHandles transitioned from >0 back to 0.
 	lastHandleReleaseTime time.Time
 
 	// the refcnt is an exception, it's protected with atomic access

@@ -1653,17 +1653,17 @@ func (inode *Inode) flushSmallObject() {
 	inode.mu.Lock()
 
 	if err != nil {
-		mappedErr := mapAwsError(err)
-		if mappedErr == syscall.EBUSY {
+		switch mapAwsError(err) {
+		case syscall.EBUSY:
 			s3Log.Warnf("Conditional write conflict (inode %v): File %v was modified remotely, keeping local changes", inode.Id, inode.FullName())
 			inode.recordFlushError(err)
 			if params.Metadata != nil {
 				inode.userMetadataDirty = 2
 			}
-		} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
+		case syscall.ENOENT, syscall.ERANGE:
 			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 			inode.resetCache()
-		} else {
+		default:
 			inode.recordFlushError(err)
 			log.Warnf("Failed to flush small file %v: %v", key, err)
 			if params.Metadata != nil {
@@ -1925,7 +1925,6 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 	// Finalize the upload
 	mpu := inode.mpu
 	mpu.NumParts = uint32(numParts)
-
 	inode.mu.Unlock()
 	inode.fs.addInflightChange(key)
 	resp, err := cloud.MultipartBlobCommit(mpu)
@@ -1936,8 +1935,8 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 		return
 	}
 	if err != nil {
-		mappedErr := mapAwsError(err)
-		if mappedErr == syscall.EBUSY {
+		switch mapAwsError(err) {
+		case syscall.EBUSY:
 			// Conditional write failed (412): object modified by another client.
 			// Keep local dirty buffers so the file remains "modified" and propagate
 			// the error to FUSE so applications (Excel/Word) see the conflict.
@@ -1946,10 +1945,10 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 			if inode.mpu.Metadata != nil {
 				inode.userMetadataDirty = 2
 			}
-		} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
+		case syscall.ENOENT, syscall.ERANGE:
 			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 			inode.resetCache()
-		} else {
+		default:
 			inode.recordFlushError(err)
 			log.Warnf("Failed to finalize multi-part upload of object %v: %v", key, err)
 			if inode.mpu.Metadata != nil {
@@ -1975,9 +1974,8 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 }
 
 func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *time.Time, storageClass *string) {
-	if etag != nil && *etag != "" {
+	if etag != nil {
 		inode.s3Metadata["etag"] = []byte(*etag)
-		inode.knownETag = *etag
 	}
 	if storageClass != nil {
 		inode.s3Metadata["storage-class"] = []byte(*storageClass)
@@ -1986,6 +1984,7 @@ func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *tim
 		inode.Attributes.Ctime = *lastModified
 	}
 	inode.knownSize = size
+	inode.knownETag = *etag
 	inode.SetAttrTime(time.Now())
 }
 
@@ -2007,7 +2006,6 @@ func (inode *Inode) SyncFile() (err error) {
 		inode.forceFlush = true
 		inode.mu.Unlock()
 		inode.TryFlush(MAX_FLUSH_PRIORITY)
-
 		inode.fs.flusherMu.Lock()
 		if inode.fs.flushPending == 0 {
 			inode.fs.flusherCond.Wait()
