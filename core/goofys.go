@@ -684,6 +684,11 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 		childTmp.isDir() && atomic.LoadInt64(&childTmp.dir.ModifiedChildren) > 0 {
 		return false
 	}
+	if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+		if childTmp.knownETag != "" && atomic.LoadInt32(&childTmp.CacheState) != ST_DELETED {
+			return false
+		}
+	}
 	if !childTmp.mu.TryLock() {
 		return false
 	}
