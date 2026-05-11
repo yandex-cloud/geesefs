@@ -45,6 +45,16 @@ const (
 	ST_DELETED  int32 = 4
 )
 
+// Under --use-conditional-writes, once an inode has had open file handles,
+// the background stat-cache-ttl refresh must NOT overwrite knownETag
+// until enough idle time has elapsed since the last handle was released.
+// This prevents the brief sub-second windows between rename/save steps
+// (e.g. MS Word: rename original -> write tmp -> rename tmp) from being
+// observed as "the file is idle, refresh OK". The threshold is generous
+// enough to cover Word's full save sequence but short enough that an
+// actual user-initiated close+reopen sees a fresh ETag.
+const cwETagRefreshCooldown = 5 * time.Second
+
 type NodeId uint64
 
 type Joinable interface {
@@ -144,6 +154,14 @@ type Inode struct {
 	// last known size and etag from the cloud
 	knownSize uint64
 	knownETag string
+
+	// Last time fileHandles transitioned from >0 back to 0.
+	// Used under --use-conditional-writes to distinguish a transient,
+	// sub-second release (e.g. between MS Word save-rename steps) from
+	// a real user-initiated close+reopen. We only allow the background
+	// refresh (SetFromBlobItem) to overwrite a known ETag after the
+	// inode has been idle (no handles) for long enough.
+	lastHandleReleaseTime time.Time
 
 	// the refcnt is an exception, it's protected with atomic access
 	// being part of parent.dir.Children increases refcnt by 1
@@ -251,7 +269,22 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 		}
 		if item.ETag != nil {
 			inode.s3Metadata["etag"] = []byte(*item.ETag)
-			if !useConditionalWrites || inode.knownETag == "" {
+			// Under CW, we already have a known ETag from a prior interaction
+			// (a flush, a previous LIST/HEAD, or a direct read). We must NOT
+			// overwrite it from a background refresh while the inode is still
+			// "warm", because that would silently re-validate stale data on
+			// the next write (e.g. between MS Word's rename steps where the
+			// handle count momentarily drops to 0).
+			// Allow refresh only if:
+			//   - CW is off, OR
+			//   - knownETag was never set, OR
+			//   - the inode has been idle (no open handles) long enough that
+			//     this cannot be part of an in-progress save sequence.
+			allowETagRefresh := !useConditionalWrites ||
+				inode.knownETag == "" ||
+				(!inode.lastHandleReleaseTime.IsZero() &&
+					time.Since(inode.lastHandleReleaseTime) >= cwETagRefreshCooldown)
+			if allowETagRefresh {
 				inode.knownETag = *item.ETag
 			}
 		} else {
@@ -878,6 +911,9 @@ func (inode *Inode) OpenFile() (fh *FileHandle, err error) {
 	if n == 1 {
 		// This is done to try to protect directories with open files
 		inode.Parent.addModified(1)
+		// Reset the idle timestamp; while a handle is open the cooldown
+		// is meaningless (hasOpenHandles blocks updates anyway).
+		inode.lastHandleReleaseTime = time.Time{}
 	}
 	return
 }

@@ -638,6 +638,13 @@ func (fh *FileHandle) Release() {
 		panic(fmt.Sprintf("Released more file handles than acquired, n = %v", n))
 	}
 	if n == 0 {
+		// Stamp the time the last handle was released. Under
+		// --use-conditional-writes, SetFromBlobItem will use this to
+		// decide whether the background stat-cache-ttl refresh is
+		// allowed to overwrite knownETag (see cwETagRefreshCooldown).
+		fh.inode.mu.Lock()
+		fh.inode.lastHandleReleaseTime = time.Now()
+		fh.inode.mu.Unlock()
 		fh.inode.Parent.addModified(-1)
 	}
 	fh.inode.fs.WakeupFlusher()
