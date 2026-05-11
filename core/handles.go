@@ -213,21 +213,17 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 	// ETag or Size for sure, so the simplest fix is to also ignore this check
 	renameInProgress := inode.oldName != ""
 
-	hasOpenHandles := atomic.LoadInt32(&inode.fileHandles) > 0 && !patchInProgress && !renameInProgress
-	hasFlushError := inode.flushError != nil
-
 	useConditionalWrites := false
 	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
-		useConditionalWrites = true
-	}
-	blockUpdate := (hasOpenHandles || hasFlushError) && useConditionalWrites
-	if blockUpdate {
-		if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
-			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
-				" (%v, %v) differs from local (%v, %v). File is changed remotely but CW are enabled, keeping cache",
-				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
+		if atomic.LoadInt32(&inode.fileHandles) > 0 && !patchInProgress && !renameInProgress {
+			if inode.CacheState != ST_CACHED && (inode.knownETag != "" || inode.knownSize > 0) {
+				s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
+					" (%v, %v) differs from local (%v, %v). File is changed remotely but CW are enabled, keeping cache",
+					inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
+			}
+			return
 		}
-		return
+		useConditionalWrites = true
 	}
 
 	if (item.ETag != nil && inode.knownETag != *item.ETag || item.Size != inode.knownSize) && !patchInProgress && !renameInProgress {
