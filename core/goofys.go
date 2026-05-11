@@ -688,9 +688,6 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 		if atomic.LoadInt64(&childTmp.refcnt) > 0 && childTmp.knownETag != "" {
 			return false
 		}
-		if childTmp.knownETag != "" {
-			return false
-		}
 	}
 	if !childTmp.mu.TryLock() {
 		return false
