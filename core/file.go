@@ -815,11 +815,6 @@ func (inode *Inode) sendRename() {
 		from += "/"
 		skipRename = true
 	}
-	knownETag := inode.knownETag
-	useConditionalWrites := false
-	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok {
-		useConditionalWrites = c.UseConditionalWrites
-	}
 	go func() {
 		var err error
 		copyCompleted := false
@@ -833,13 +828,8 @@ func (inode *Inode) sendRename() {
 				Source:      from,
 				Destination: key,
 			}
-			if useConditionalWrites {
-				// log.Debugf("CW rename: %v -> %v srcEtag=%v destEtag=%v destKnown=%v", from, key, knownETag, destETag, renameDest != nil)
-				if knownETag != "" {
-					copyInput.ETag = PString(knownETag)
-				}
-			} else if knownETag != "" {
-				copyInput.ETag = PString(knownETag)
+			if inode.knownETag != "" {
+				copyInput.ETag = PString(inode.knownETag)
 			}
 
 			_, err = cloud.CopyBlob(copyInput)
@@ -1058,18 +1048,16 @@ func (inode *Inode) sendUpdateMeta() {
 		_, err := cloud.CopyBlob(copyIn)
 		inode.fs.completeInflightChange(key)
 		inode.mu.Lock()
+		inode.recordFlushError(err)
 		if err != nil {
-			mappedErr := mapAwsError(err)
 			inode.userMetadataDirty = 2
-			if mappedErr == syscall.EBUSY {
+			switch mapAwsError(err) {
+			case syscall.EBUSY:
 				s3Log.Warnf("Conditional write conflict (inode %v): metadata COPY for %v failed, keeping local changes", inode.Id, inode.FullName())
-				inode.recordFlushError(err)
-			} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
+			case syscall.ENOENT, syscall.ERANGE:
 				// Object is deleted or resized remotely (416). Discard local version
 				s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 				inode.resetCache()
-			} else {
-				inode.recordFlushError(err)
 			}
 			log.Warnf("Error flushing metadata using COPY for %v: %v", key, err)
 		} else if inode.CacheState == ST_MODIFIED && !inode.isStillDirty() {
@@ -1513,11 +1501,10 @@ func (inode *Inode) sendPatch(offset, size uint64, r io.ReadSeeker, partSize uin
 			log.Errorf("Failed to patch range %d-%d of file %s (inode %d): %s", offset, offset+size, key, inode.Id, err)
 		}
 		return false
-	} else {
-		log.Debugf("Succesfully patched range %d-%d of file %s (inode %d), etag: %s", offset, offset+size, key, inode.Id, NilStr(resp.ETag))
-		inode.updateFromFlush(MaxUInt64(inode.knownSize, offset+size), resp.ETag, resp.LastModified, nil)
 	}
 
+	log.Debugf("Succesfully patched range %d-%d of file %s (inode %d), etag: %s", offset, offset+size, key, inode.Id, NilStr(resp.ETag))
+	inode.updateFromFlush(MaxUInt64(inode.knownSize, offset+size), resp.ETag, resp.LastModified, nil)
 	return true
 }
 

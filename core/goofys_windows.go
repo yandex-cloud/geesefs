@@ -716,19 +716,7 @@ func (fs *GoofysWin) Release(path string, fhId uint64) (ret int) {
 	delete(fs.fileHandles, fuseops.HandleID(fhId))
 	fs.mu.Unlock()
 
-	needSync := fs.flags.FsyncOnClose
-	if !needSync {
-		if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
-			fh.inode.mu.Lock()
-			hasError := fh.inode.flushError != nil
-			isDead := atomic.LoadInt32(&fh.inode.CacheState) <= ST_DEAD
-			if hasError && isDead {
-				needSync = true
-			}
-			fh.inode.mu.Unlock()
-		}
-	}
-	if needSync {
+	if fs.flags.FsyncOnClose {
 		err := fh.inode.SyncFile()
 		if err != nil {
 			return mapWinError(err)
