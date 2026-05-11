@@ -827,8 +827,10 @@ func (inode *Inode) sendRename() {
 				Source:      from,
 				Destination: key,
 			}
-			if inode.knownETag != "" {
-				copyInput.ETag = PString(inode.knownETag)
+			if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+				if inode.knownETag != "" {
+					copyInput.ETag = PString(inode.knownETag)
+				}
 			}
 			_, err = cloud.CopyBlob(copyInput)
 
