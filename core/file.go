@@ -2021,36 +2021,19 @@ func (inode *Inode) SyncFile() (err error) {
 
 		inode.mu.Lock()
 		inode.forceFlush = false
-		if inode.CacheState <= ST_DEAD {
-			inode.mu.Unlock()
-			break
-		}
 		if inode.flushError != nil {
 			err = inode.flushError
 			inode.flushError = nil
 			inode.mu.Unlock()
 			break
 		}
+		if inode.CacheState <= ST_DEAD {
+			inode.mu.Unlock()
+			break
+		}
 		inode.forceFlush = true
 		inode.mu.Unlock()
 		inode.TryFlush(MAX_FLUSH_PRIORITY)
-
-		// Re-check inode state before waiting on the shared flusherCond.
-		// Between TryFlush() and flusherMu.Lock(), the flush goroutine may
-		// have already completed (e.g. CW conflict → EBUSY → flushError set,
-		// CacheState → ST_CACHED) and called WakeupFlusher(). If the Flusher()
-		// goroutine consumes flushPending before we check it, we'd block on
-		// flusherCond.Wait() for up to RetryInterval (default 30s).
-		// CacheState is accessed atomically so a lock-free check is safe here.
-		if atomic.LoadInt32(&inode.CacheState) <= ST_DEAD {
-			continue
-		}
-		inode.mu.Lock()
-		hasError := inode.flushError != nil
-		inode.mu.Unlock()
-		if hasError {
-			continue
-		}
 
 		// Split
 		inode.fs.flusherMu.Lock()
