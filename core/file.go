@@ -638,6 +638,18 @@ func (fh *FileHandle) Release() {
 		panic(fmt.Sprintf("Released more file handles than acquired, n = %v", n))
 	}
 	if n == 0 {
+		fh.inode.mu.Lock()
+		if fh.inode.flushError != nil && mapAwsError(fh.inode.flushError) == syscall.EBUSY {
+			// Drop local cache so the next open reloads fresh metadata/ETag
+			// instead of reusing the stale pre-conflict ETag.
+			fh.inode.resetCache()
+			fh.inode.knownETag = ""
+			fh.inode.knownSize = 0
+			fh.inode.flushError = nil
+			fh.inode.flushErrorTime = time.Time{}
+			fh.inode.renameExpectedETag = ""
+		}
+		fh.inode.mu.Unlock()
 		fh.inode.Parent.addModified(-1)
 	}
 	fh.inode.fs.WakeupFlusher()
