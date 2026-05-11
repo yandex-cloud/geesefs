@@ -2001,24 +2001,6 @@ func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *tim
 func (inode *Inode) SyncFile() (err error) {
 	inode.logFuse("SyncFile")
 	for {
-		// inode.mu.Lock()
-		// inode.forceFlush = false
-		// if inode.CacheState <= ST_DEAD {
-		// 	inode.mu.Unlock()
-		// 	break
-		// }
-		// if inode.flushError != nil {
-		// 	// Return the error to user
-		// 	err = inode.flushError
-		// 	inode.mu.Unlock()
-		// 	break
-		// }
-		// inode.forceFlush = true
-		// inode.mu.Unlock()
-		// inode.TryFlush(MAX_FLUSH_PRIORITY)
-
-		// Split
-
 		inode.mu.Lock()
 		inode.forceFlush = false
 		if inode.flushError != nil {
@@ -2035,7 +2017,6 @@ func (inode *Inode) SyncFile() (err error) {
 		inode.mu.Unlock()
 		inode.TryFlush(MAX_FLUSH_PRIORITY)
 
-		// Split
 		inode.fs.flusherMu.Lock()
 		if inode.fs.flushPending == 0 {
 			inode.fs.flusherCond.Wait()

@@ -665,9 +665,7 @@ func (fs *GoofysWin) Write(path string, buff []byte, ofst int64, fhId uint64) (r
 	return len(buff)
 }
 
-// Flush flushes cached file data.
-// When conditional writes are enabled, synchronously flush and return errors
-// so applications can detect conflicts.
+// Flush flushes cached file data. Ignore it.
 func (fs *GoofysWin) Flush(path string, fhId uint64) (ret int) {
 	if fuseLog.Level == logrus.DebugLevel {
 		fuseLog.Debugf("-> Flush %v %v", path, fhId)
@@ -676,6 +674,7 @@ func (fs *GoofysWin) Flush(path string, fhId uint64) (ret int) {
 		}()
 	}
 
+	// When conditional writes are enabled, synchronously wait for the flush to complete on S3.
 	if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
 		fs.mu.RLock()
 		fh := fs.fileHandles[fuseops.HandleID(fhId)]

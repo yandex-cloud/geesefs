@@ -45,16 +45,6 @@ const (
 	ST_DELETED  int32 = 4
 )
 
-// Under --use-conditional-writes, once an inode has had open file handles,
-// the background stat-cache-ttl refresh must NOT overwrite knownETag
-// until enough idle time has elapsed since the last handle was released.
-// This prevents the brief sub-second windows between rename/save steps
-// (e.g. MS Word: rename original -> write tmp -> rename tmp) from being
-// observed as "the file is idle, refresh OK". The threshold is generous
-// enough to cover Word's full save sequence but short enough that an
-// actual user-initiated close+reopen sees a fresh ETag.
-const cwETagRefreshCooldown = 5 * time.Second
-
 type NodeId uint64
 
 type Joinable interface {
@@ -265,21 +255,16 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 		}
 		if item.ETag != nil {
 			inode.s3Metadata["etag"] = []byte(*item.ETag)
-			// Under CW, we already have a known ETag from a prior interaction
-			// (a flush, a previous LIST/HEAD, or a direct read). We must NOT
-			// overwrite it from a background refresh while the inode is still
-			// "warm", because that would silently re-validate stale data on
-			// the next write (e.g. between MS Word's rename steps where the
-			// handle count momentarily drops to 0).
-			// Allow refresh only if:
-			//   - CW is off, OR
-			//   - knownETag was never set, OR
-			//   - the inode has been idle (no open handles) long enough that
-			//     this cannot be part of an in-progress save sequence.
-			allowETagRefresh := !useConditionalWrites ||
-				inode.knownETag == "" ||
-				(!inode.lastHandleReleaseTime.IsZero() &&
-					time.Since(inode.lastHandleReleaseTime) >= cwETagRefreshCooldown)
+			// Under --use-conditional-writes, once an inode has had open file handles,
+			// the background stat-cache-ttl refresh must NOT overwrite knownETag
+			// until enough idle time has elapsed since the last handle was released.
+			// This prevents the brief sub-second windows between rename/save steps
+			// (e.g. MS Word: rename original -> write tmp -> rename tmp) from being
+			// observed as "the file is idle, refresh OK". The threshold is generous
+			// enough to cover Word's full save sequence but short enough that an
+			// actual user-initiated close+reopen sees a fresh ETag.
+			allowETagRefresh := !useConditionalWrites || inode.knownETag == "" ||
+				(!inode.lastHandleReleaseTime.IsZero() && time.Since(inode.lastHandleReleaseTime) >= 2*time.Second)
 			if allowETagRefresh {
 				inode.knownETag = *item.ETag
 			}
