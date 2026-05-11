@@ -1653,22 +1653,10 @@ func (inode *Inode) flushSmallObject() {
 	inode.mu.Lock()
 
 	if err != nil {
-		switch mapAwsError(err) {
-		case syscall.EBUSY:
-			s3Log.Warnf("Conditional write conflict (inode %v): File %v was modified remotely, keeping local changes", inode.Id, inode.FullName())
-			inode.recordFlushError(err)
-			if params.Metadata != nil {
-				inode.userMetadataDirty = 2
-			}
-		case syscall.ENOENT, syscall.ERANGE:
-			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
-			inode.resetCache()
-		default:
-			inode.recordFlushError(err)
-			log.Warnf("Failed to flush small file %v: %v", key, err)
-			if params.Metadata != nil {
-				inode.userMetadataDirty = 2
-			}
+		inode.recordFlushError(err)
+		log.Warnf("Failed to flush small file %v: %v", key, err)
+		if params.Metadata != nil {
+			inode.userMetadataDirty = 2
 		}
 	} else {
 		log.Debugf("Flushed small file %v (inode %v): etag=%v, size=%v", key, inode.Id, NilStr(resp.ETag), sz)
@@ -1935,25 +1923,10 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 		return
 	}
 	if err != nil {
-		switch mapAwsError(err) {
-		case syscall.EBUSY:
-			// Conditional write failed (412): object modified by another client.
-			// Keep local dirty buffers so the file remains "modified" and propagate
-			// the error to FUSE so applications (Excel/Word) see the conflict.
-			s3Log.Warnf("Conditional write conflict (inode %v): File %v was modified remotely, keeping local changes", inode.Id, inode.FullName())
-			inode.recordFlushError(err)
-			if inode.mpu.Metadata != nil {
-				inode.userMetadataDirty = 2
-			}
-		case syscall.ENOENT, syscall.ERANGE:
-			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
-			inode.resetCache()
-		default:
-			inode.recordFlushError(err)
-			log.Warnf("Failed to finalize multi-part upload of object %v: %v", key, err)
-			if inode.mpu.Metadata != nil {
-				inode.userMetadataDirty = 2
-			}
+		inode.recordFlushError(err)
+		log.Warnf("Failed to finalize multi-part upload of object %v: %v", key, err)
+		if inode.mpu.Metadata != nil {
+			inode.userMetadataDirty = 2
 		}
 	} else {
 		log.Debugf("Finalized multi-part upload of object %v: etag=%v, size=%v", key, NilStr(resp.ETag), finalSize)
