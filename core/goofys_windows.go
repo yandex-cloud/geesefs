@@ -718,7 +718,6 @@ func (fs *GoofysWin) Release(path string, fhId uint64) (ret int) {
 	fs.mu.Unlock()
 
 	needSync := fs.flags.FsyncOnClose
-	forceError := false
 	verifyRename := false
 	expectedETag := ""
 	if !needSync {
@@ -733,15 +732,9 @@ func (fs *GoofysWin) Release(path string, fhId uint64) (ret int) {
 			}
 			if hasError && isDead {
 				needSync = true
-				forceError = true
 			}
 			fh.inode.mu.Unlock()
 		}
-	}
-	if forceError {
-		fh.inode.mu.Lock()
-		fh.inode.deferFlushError = false
-		fh.inode.mu.Unlock()
 	}
 	if needSync {
 		err := fh.inode.SyncFile()

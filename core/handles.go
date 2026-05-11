@@ -139,7 +139,6 @@ type Inode struct {
 	renamingTo bool
 	// Expected ETag after successful rename-overwrite (used to verify on close).
 	renameExpectedETag string
-	deferFlushError    bool
 
 	// multipart upload state
 	mpu *MultipartBlobCommitInput
