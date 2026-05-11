@@ -837,7 +837,6 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 	if param.Source != param.Destination {
 
 		// FIXME Remove additional HEAD query
-		origETag := param.ETag
 		if param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
 			(param.Metadata == nil || param.StorageClass == nil)) {
 			params := &HeadBlobInput{Key: param.Source}
@@ -846,14 +845,14 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 				return nil, err
 			}
 
+			if resp.ETag != nil && param.ETag != nil && *param.ETag != *resp.ETag {
+				s3Log.Warnf("CopyBlob source ETag changed: %v expected %v got %v", param.Source, *param.ETag, *resp.ETag)
+			}
 			if param.Size == nil {
 				param.Size = &resp.Size
 			}
 			if param.ETag == nil {
 				param.ETag = resp.ETag
-			}
-			if resp.ETag != nil && origETag != nil && *origETag != *resp.ETag {
-				s3Log.Warnf("CopyBlob source ETag changed: %v expected %v got %v", param.Source, *origETag, *resp.ETag)
 			}
 			if param.Metadata == nil {
 				param.Metadata = resp.Metadata

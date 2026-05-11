@@ -638,10 +638,6 @@ func (fh *FileHandle) Release() {
 		panic(fmt.Sprintf("Released more file handles than acquired, n = %v", n))
 	}
 	if n == 0 {
-		// Stamp the time the last handle was released. Under
-		// --use-conditional-writes, SetFromBlobItem will use this to
-		// decide whether the background stat-cache-ttl refresh is
-		// allowed to overwrite knownETag (see cwETagRefreshCooldown).
 		fh.inode.mu.Lock()
 		fh.inode.lastHandleReleaseTime = time.Now()
 		fh.inode.mu.Unlock()
@@ -823,10 +819,6 @@ func (inode *Inode) sendRename() {
 		skipRename = true
 	}
 	knownETag := inode.knownETag
-	// destETag := inode.renameDestETag
-	// renameDest := inode.renameDest
-	// inode.renameDestETag = ""
-	// inode.renameDest = nil
 	inode.renameExpectedETag = ""
 	useConditionalWrites := false
 	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok {
@@ -850,16 +842,6 @@ func (inode *Inode) sendRename() {
 				if knownETag != "" {
 					copyInput.ETag = PString(knownETag)
 				}
-				// if destETag != "" {
-				// 	// If-Match on the destination: prevent overwriting a file that was
-				// 	// modified by another client since we last saw it.
-				// 	copyInput.IfMatch = PString(destETag)
-				// } else if renameDest == nil {
-				// 	// Destination not known in cache: allow only create-if-not-exists.
-				// 	// Prevent overwriting a concurrently created object.
-				// 	copyInput.IfNoneMatch = PString("*")
-				// 	log.Debugf("CW rename: set If-None-Match for %v", key)
-				// }
 			} else if knownETag != "" {
 				copyInput.ETag = PString(knownETag)
 			}
@@ -878,13 +860,6 @@ func (inode *Inode) sendRename() {
 					notFoundIgnore = true
 				} else if mappedErr == syscall.EBUSY {
 					s3Log.Warnf("Conditional write conflict (inode %v): failed to copy %v to %v: %v", inode.Id, from, key, err)
-					// if renameDest != nil {
-					// 	renameDest.mu.Lock()
-					// 	renameDest.flushError = err
-					// 	renameDest.flushErrorTime = time.Now()
-					// 	renameDest.renameExpectedETag = ""
-					// 	renameDest.mu.Unlock()
-					// }
 					inode.mu.Lock()
 					if useConditionalWrites && knownETag != "" {
 						inode.renameExpectedETag = knownETag
@@ -916,12 +891,6 @@ func (inode *Inode) sendRename() {
 						inode.Name = oldName
 						inode.mu.Unlock()
 						oldParent.insertChildUnlocked(inode)
-						// if renameDest != nil {
-						// 	renameDest.mu.Lock()
-						// 	renameDest.SetCacheState(ST_CACHED)
-						// 	renameDest.mu.Unlock()
-						// 	newParent.insertChildUnlocked(renameDest)
-						// }
 					}
 
 					if !skipRename {
