@@ -776,16 +776,16 @@ func (parent *Inode) removeExpired(from string) {
 		if parent.dir.lastFromCloud != nil && childTmp.Name >= *parent.dir.lastFromCloud {
 			break
 		}
-		cwProtect := false
-		if c, ok := parent.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
-			if atomic.LoadInt64(&childTmp.refcnt) > 0 && childTmp.knownETag != "" {
-				cwProtect = true
-			}
-		}
+		// cwProtect := false
+		// if c, ok := parent.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+		// 	if atomic.LoadInt64(&childTmp.refcnt) > 0 && childTmp.knownETag != "" {
+		// 		cwProtect = true
+		// 	}
+		// }
 		if childTmp.AttrTime.Before(parent.dir.refreshStartTime) &&
 			atomic.LoadInt32(&childTmp.fileHandles) == 0 &&
 			atomic.LoadInt32(&childTmp.CacheState) <= ST_DEAD &&
-			(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) && !cwProtect {
+			(!childTmp.isDir() || atomic.LoadInt64(&childTmp.dir.ModifiedChildren) == 0) {
 			childTmp.mu.Lock()
 			childTmp.resetCache()
 			childTmp.SetCacheState(ST_DEAD)
