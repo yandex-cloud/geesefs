@@ -274,9 +274,8 @@ MISC OPTIONS:
 		},
 
 		cli.BoolFlag{
-			Name: "use-conditional-writes",
-			Usage: "Enable conditional writes (If-Match/If-None-Match) to prevent lost updates " +
-				"when multiple clients write the same file concurrently.",
+			Name:  "use-conditional-writes",
+			Usage: "Enable conditional writes (If-Match/If-None-Match) to prevent lost updates when multiple clients write the same file concurrently.",
 		},
 
 		cli.StringFlag{
@@ -498,12 +497,6 @@ MISC OPTIONS:
 			Usage: "If non-zero, allow to compose larger parts up to this number of megabytes" +
 				" in size from existing unchanged parts when doing server-side part copy." +
 				" Must be left at 0 for Yandex S3",
-		},
-
-		cli.BoolFlag{
-			Name: "open-block-updates",
-			Usage: "Do not update the tracked server ETag for a file from background directory" +
-				" listings while the file has open file handles. ",
 		},
 
 		cli.BoolFlag{
@@ -883,7 +876,6 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		ReadMergeKB:         uint64(c.Int("read-merge")),
 		SinglePartMB:        uint64(singlePart),
 		MaxMergeCopyMB:      uint64(c.Int("max-merge-copy")),
-		OpenBlockUpdates:    c.Bool("open-block-updates"),
 		IgnoreFsync:         c.Bool("ignore-fsync"),
 		FsyncOnClose:        c.Bool("fsync-on-close"),
 		EnablePerms:         c.Bool("enable-perms"),

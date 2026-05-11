@@ -616,9 +616,7 @@ func (fs *GoofysFuse) ReleaseFileHandle(
 	fs.mu.Unlock()
 
 	if fh.inode.fs.flags.FsyncOnClose {
-		err = fh.inode.SyncFile()
-		err = mapAwsError(err)
-		return
+		return mapAwsError(fh.inode.SyncFile())
 	}
 
 	return

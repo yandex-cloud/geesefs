@@ -661,17 +661,14 @@ func (s *S3Backend) mpuCopyPart(from string, to string, mpuId string, bytes stri
 	// XXX use CopySourceIfUnmodifiedSince to ensure that
 	// we are copying from the same object
 	params := &s3.UploadPartCopyInput{
-		Bucket:            &s.bucket,
-		Key:               &to,
-		CopySource:        aws.String(pathEscape(from)),
-		UploadId:          &mpuId,
-		CopySourceRange:   &bytes,
-		CopySourceIfMatch: srcEtag,
-		PartNumber:        &part,
-	}
-
-	if copySourceIfNoneMatch != nil {
-		params.CopySourceIfNoneMatch = copySourceIfNoneMatch
+		Bucket:                &s.bucket,
+		Key:                   &to,
+		CopySource:            aws.String(pathEscape(from)),
+		UploadId:              &mpuId,
+		CopySourceRange:       &bytes,
+		CopySourceIfMatch:     srcEtag,
+		CopySourceIfNoneMatch: copySourceIfNoneMatch,
+		PartNumber:            &part,
 	}
 
 	if s.config.SseC != "" {
@@ -753,7 +750,7 @@ func (s *S3Backend) defaultCopyPartSizes(size int64) []cfg.PartSizeConfig {
 
 func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuId string,
 	srcEtag *string, metadata map[string]*string, storageClass *string,
-	copySourceIfNoneMatch *string, ifMatch *string, ifNoneMatch *string) (requestId string, err error) {
+	ifMatch *string, ifNoneMatch *string, copySourceIfNoneMatch *string) (requestId string, err error) {
 
 	const MAX_S3_MPU_SIZE = 5 * 1024 * 1024 * 1024 * 1024
 	if size > MAX_S3_MPU_SIZE {
@@ -810,13 +807,8 @@ func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuI
 		MultipartUpload: &s3.CompletedMultipartUpload{
 			Parts: parts,
 		},
-	}
-
-	if ifMatch != nil {
-		params.IfMatch = ifMatch
-	}
-	if ifNoneMatch != nil {
-		params.IfNoneMatch = ifNoneMatch
+		IfMatch:     ifMatch,
+		IfNoneMatch: ifNoneMatch,
 	}
 
 	s3Log.Debug(params)
@@ -845,10 +837,9 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 	if param.Source != param.Destination {
 
 		// FIXME Remove additional HEAD query
-		needHead := param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
-			(param.Metadata == nil || param.StorageClass == nil))
 		origETag := param.ETag
-		if needHead {
+		if param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
+			(param.Metadata == nil || param.StorageClass == nil)) {
 			params := &HeadBlobInput{Key: param.Source}
 			resp, err := s.HeadBlob(params)
 			if err != nil {
@@ -860,15 +851,14 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 			}
 			if param.ETag == nil {
 				param.ETag = resp.ETag
-			} else if origETag != nil && resp.ETag != nil && *origETag != *resp.ETag {
+			}
+			if resp.ETag != nil && origETag != nil && *origETag != *resp.ETag {
 				s3Log.Warnf("CopyBlob source ETag changed: %v expected %v got %v", param.Source, *origETag, *resp.ETag)
 			}
 			if param.Metadata == nil {
 				param.Metadata = resp.Metadata
 			}
-			if param.StorageClass == nil {
-				param.StorageClass = resp.StorageClass
-			}
+			param.StorageClass = resp.StorageClass
 		}
 
 		if param.StorageClass == nil {
@@ -878,7 +868,7 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 		if !s.gcs && *param.Size > s.config.MultipartCopyThreshold {
 			reqId, err := s.copyObjectMultipart(int64(*param.Size), from, param.Destination, "",
 				param.ETag, param.Metadata, param.StorageClass,
-				param.CopySourceIfNoneMatch, param.IfMatch, param.IfNoneMatch)
+				param.IfMatch, param.IfNoneMatch, param.CopySourceIfNoneMatch)
 			if err != nil {
 				return nil, err
 			}
@@ -916,24 +906,11 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 		params.ACL = &s.config.ACL
 	}
 
-	// X-Amz-Copy-Source-If-Match: copy only if source ETag matches.
-	// This reuses the existing ETag field which was already present for multipart path.
-	// For the direct copy path we now wire it up too.
-	if param.ETag != nil {
-		params.CopySourceIfMatch = param.ETag
-	}
-	// X-Amz-Copy-Source-If-None-Match: copy only if source ETag does NOT match.
-	if param.CopySourceIfNoneMatch != nil {
-		params.CopySourceIfNoneMatch = param.CopySourceIfNoneMatch
-	}
-	// If-Match on destination: copy only if destination ETag matches (conditional write).
-	if param.IfMatch != nil {
-		params.IfMatch = param.IfMatch
-	}
-	// If-None-Match on destination: copy only if destination does NOT exist.
-	if param.IfNoneMatch != nil {
-		params.IfNoneMatch = param.IfNoneMatch
-	}
+	// Conditional Writes
+	params.CopySourceIfMatch = param.ETag
+	params.CopySourceIfNoneMatch = param.CopySourceIfNoneMatch
+	params.IfMatch = param.IfMatch
+	params.IfNoneMatch = param.IfNoneMatch
 
 	req, _ := s.CopyObjectRequest(params)
 	// make a shallow copy of the client so we can change the
@@ -1050,12 +1027,11 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 		put.ACL = &s.config.ACL
 	}
 
-	// Conditional write support (S3 feature since August 2024)
-	// IfMatch: only write if ETag matches (optimistic locking for updates)
-	// IfNoneMatch: only write if object doesn't exist (create-if-not-exists)
+	// If-Match: succeed only if object's current ETag matches.
 	if param.IfMatch != nil {
 		put.IfMatch = param.IfMatch
 	}
+	// If-None-Match: succeed only if object does not exist.
 	if param.IfNoneMatch != nil {
 		put.IfNoneMatch = param.IfNoneMatch
 	}
@@ -1195,7 +1171,6 @@ func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*Multipart
 		params.SSECustomerKeyMD5 = &s.config.SseCDigest
 	}
 
-	// Conditional copy-source headers (X-Amz-Copy-Source-If-Match / If-None-Match).
 	// Ensures the source object hasn't changed between parts during a multi-part copy.
 	if param.CopySourceIfMatch != nil {
 		params.CopySourceIfMatch = param.CopySourceIfMatch
@@ -1239,7 +1214,6 @@ func (s *S3Backend) MultipartBlobCommit(param *MultipartBlobCommitInput) (*Multi
 		},
 	}
 
-	// Conditional write headers are applied at Complete stage per S3 spec.
 	// If-Match: succeed only if object's current ETag matches.
 	if param.IfMatch != nil {
 		mpu.IfMatch = param.IfMatch

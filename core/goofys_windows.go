@@ -167,8 +167,6 @@ func mapWinError(err error) int {
 		return -fuse.EOPNOTSUPP
 	case syscall.EPERM:
 		return -fuse.EPERM
-	case syscall.EROFS:
-		return -fuse.EROFS
 	case syscall.ERANGE:
 		return -fuse.ERANGE
 	case syscall.ESPIPE:

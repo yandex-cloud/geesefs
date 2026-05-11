@@ -441,7 +441,7 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 			inode.fillXattrFromHead(&(*resp).HeadBlobOutput)
 		}
 		if resp.ETag != nil && inode.flushError == nil && inode.knownETag == "" {
-			inode.knownETag = *resp.ETag
+			inode.knownETag = *resp.ETag // ??
 		}
 		allocated += inode.buffers.Add(offset, buf, BUF_CLEAN, false)
 		inode.mu.Unlock()
@@ -816,10 +816,10 @@ func (inode *Inode) sendRename() {
 		skipRename = true
 	}
 	knownETag := inode.knownETag
-	destETag := inode.renameDestETag
-	renameDest := inode.renameDest
-	inode.renameDestETag = ""
-	inode.renameDest = nil
+	// destETag := inode.renameDestETag
+	// renameDest := inode.renameDest
+	// inode.renameDestETag = ""
+	// inode.renameDest = nil
 	inode.renameExpectedETag = ""
 	useConditionalWrites := false
 	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok {
@@ -839,20 +839,20 @@ func (inode *Inode) sendRename() {
 				Destination: key,
 			}
 			if useConditionalWrites {
-				log.Debugf("CW rename: %v -> %v srcEtag=%v destEtag=%v destKnown=%v", from, key, knownETag, destETag, renameDest != nil)
+				// log.Debugf("CW rename: %v -> %v srcEtag=%v destEtag=%v destKnown=%v", from, key, knownETag, destETag, renameDest != nil)
 				if knownETag != "" {
 					copyInput.ETag = PString(knownETag)
 				}
-				if destETag != "" {
-					// If-Match on the destination: prevent overwriting a file that was
-					// modified by another client since we last saw it.
-					copyInput.IfMatch = PString(destETag)
-				} else if renameDest == nil {
-					// Destination not known in cache: allow only create-if-not-exists.
-					// Prevent overwriting a concurrently created object.
-					copyInput.IfNoneMatch = PString("*")
-					log.Debugf("CW rename: set If-None-Match for %v", key)
-				}
+				// if destETag != "" {
+				// 	// If-Match on the destination: prevent overwriting a file that was
+				// 	// modified by another client since we last saw it.
+				// 	copyInput.IfMatch = PString(destETag)
+				// } else if renameDest == nil {
+				// 	// Destination not known in cache: allow only create-if-not-exists.
+				// 	// Prevent overwriting a concurrently created object.
+				// 	copyInput.IfNoneMatch = PString("*")
+				// 	log.Debugf("CW rename: set If-None-Match for %v", key)
+				// }
 			} else if knownETag != "" {
 				copyInput.ETag = PString(knownETag)
 			}
@@ -871,13 +871,13 @@ func (inode *Inode) sendRename() {
 					notFoundIgnore = true
 				} else if mappedErr == syscall.EBUSY {
 					s3Log.Warnf("Conditional write conflict (inode %v): failed to copy %v to %v: %v", inode.Id, from, key, err)
-					if renameDest != nil {
-						renameDest.mu.Lock()
-						renameDest.flushError = err
-						renameDest.flushErrorTime = time.Now()
-						renameDest.renameExpectedETag = ""
-						renameDest.mu.Unlock()
-					}
+					// if renameDest != nil {
+					// 	renameDest.mu.Lock()
+					// 	renameDest.flushError = err
+					// 	renameDest.flushErrorTime = time.Now()
+					// 	renameDest.renameExpectedETag = ""
+					// 	renameDest.mu.Unlock()
+					// }
 					inode.mu.Lock()
 					if useConditionalWrites && knownETag != "" {
 						inode.renameExpectedETag = knownETag
@@ -909,12 +909,12 @@ func (inode *Inode) sendRename() {
 						inode.Name = oldName
 						inode.mu.Unlock()
 						oldParent.insertChildUnlocked(inode)
-						if renameDest != nil {
-							renameDest.mu.Lock()
-							renameDest.SetCacheState(ST_CACHED)
-							renameDest.mu.Unlock()
-							newParent.insertChildUnlocked(renameDest)
-						}
+						// if renameDest != nil {
+						// 	renameDest.mu.Lock()
+						// 	renameDest.SetCacheState(ST_CACHED)
+						// 	renameDest.mu.Unlock()
+						// 	newParent.insertChildUnlocked(renameDest)
+						// }
 					}
 
 					if !skipRename {

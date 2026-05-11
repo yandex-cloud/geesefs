@@ -110,8 +110,8 @@ type CopyBlobInput struct {
 	Metadata     map[string]*string // if nil, copy from Source
 	StorageClass *string            // if nil, copy from Source
 
-	IfMatch     *string // If-Match on CompleteMultipartUpload
-	IfNoneMatch *string // If-None-Match on CompleteMultipartUpload
+	IfMatch     *string
+	IfNoneMatch *string
 
 	CopySourceIfNoneMatch *string
 }
@@ -144,11 +144,7 @@ type PutBlobInput struct {
 	Body io.ReadSeeker
 	Size *uint64
 
-	// IfMatch specifies an ETag; the request succeeds only if the object's ETag matches.
-	// Used for optimistic locking / conditional updates.
-	IfMatch *string
-	// IfNoneMatch specifies that the request should succeed only if the object does not exist.
-	// Set to "*" to prevent overwriting an existing object.
+	IfMatch     *string
 	IfNoneMatch *string
 }
 
