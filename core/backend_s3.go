@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -59,6 +60,8 @@ type S3Backend struct {
 	iamToken           atomic.Value
 	iamTokenExpiration time.Time
 	iamRefreshTimer    *time.Timer
+	iamMu              sync.Mutex
+	iamTokenExpUnix    atomic.Int64
 }
 
 func NewS3(bucket string, flags *cfg.FlagStorage, config *cfg.S3Config) (*S3Backend, error) {
@@ -191,6 +194,7 @@ func (s *S3Backend) TryIAM() (err error) {
 	s.iam = true
 	s.iamToken.Store(token)
 	s.iamTokenExpiration = now.Add(ttl)
+	s.iamTokenExpUnix.Store(now.Add(ttl).UnixNano())
 	if ttl > 5*time.Minute {
 		ttl = ttl - 5*time.Minute
 	} else if ttl > 30*time.Second {
@@ -204,11 +208,52 @@ func (s *S3Backend) TryIAM() (err error) {
 }
 
 func (s *S3Backend) RefreshIAM() {
+	s.iamMu.Lock()
+	defer s.iamMu.Unlock()
 	err := s.TryIAM()
 	if err != nil {
 		s.iamRefreshTimer = time.AfterFunc(10*time.Second, func() {
 			s.RefreshIAM()
 		})
+	}
+}
+
+// iamLazyRefreshMargin is the wall-clock head start used by the on-demand
+// refresh. It is kept small relative to the background timer's typical head
+// start (see TryIAM, ~5 min for long-lived tokens) so the background timer
+// normally refreshes first and this path stays a fallback. For very
+// short-lived tokens the background head start can be smaller; that is
+// acceptable because either path produces a valid token.
+const iamLazyRefreshMargin = 60 * time.Second
+
+// ensureFreshIAMToken refreshes the IAM token on demand when it is close to
+// expiry by wall-clock time. The background refresh relies on time.AfterFunc,
+// whose deadline is measured against the monotonic clock. If the process is
+// paused for a long time (e.g. a suspended or migrated VM), the monotonic
+// clock does not advance during the pause while wall-clock time does, so the
+// timer can fire too late and the token may already be expired when execution
+// resumes. This check compares against a wall-clock deadline (time.Now().UnixNano()
+// uses only the wall clock, with no monotonic component) and runs from the
+// request signer, i.e. on the hot path that executes after the process
+// resumes. It is a best-effort safety net that assumes the wall clock is
+// reasonably accurate after a resume; it does not replace the background timer.
+func (s *S3Backend) ensureFreshIAMToken() {
+	// exp == 0 means TryIAM has never stored a deadline (IAM disabled, or the
+	// initial fetch failed and the retry timer owns recovery). This fast path
+	// reads only the atomic deadline, so it needs no lock and cannot race with
+	// a concurrent refresh.
+	exp := s.iamTokenExpUnix.Load()
+	if exp == 0 || time.Now().UnixNano() < exp-int64(iamLazyRefreshMargin) {
+		return
+	}
+	s.iamMu.Lock()
+	defer s.iamMu.Unlock()
+	exp = s.iamTokenExpUnix.Load()
+	if exp == 0 || time.Now().UnixNano() < exp-int64(iamLazyRefreshMargin) {
+		return // refreshed by a concurrent caller
+	}
+	if err := s.TryIAM(); err != nil {
+		s3Log.Infof("Lazy IAM refresh failed: %v", err)
 	}
 }
 
@@ -218,6 +263,7 @@ func (s *S3Backend) setIAMSigner(handlers *request.Handlers) {
 		if req.Config.Credentials == credentials.AnonymousCredentials {
 			return
 		}
+		s.ensureFreshIAMToken()
 		req.HTTPRequest.Header.Set(s.config.IAMHeader, s.iamToken.Load().(string))
 	})
 	handlers.Sign.PushBackNamed(corehandlers.BuildContentLengthHandler)
