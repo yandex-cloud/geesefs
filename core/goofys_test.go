@@ -1500,7 +1500,7 @@ func (s *GoofysTest) anonymous(t *C) {
 	t.Assert(err, IsNil)
 	s.removeBucket = append(s.removeBucket, cloud)
 
-	acl, err := s3.S3.GetBucketAcl(&aws_s3.GetBucketAclInput{Bucket: PString(bucket)})
+	acl, err := s3.GetBucketAcl(&aws_s3.GetBucketAclInput{Bucket: PString(bucket)})
 	t.Assert(err, IsNil)
 	if len(acl.Grants) == 0 {
 		t.Skip("cloud does not support canned ACL")

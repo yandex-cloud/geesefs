@@ -11,7 +11,7 @@ require (
 	github.com/Azure/go-autorest/autorest/adal v0.9.24
 	github.com/Azure/go-autorest/autorest/azure/auth v0.5.13
 	github.com/Azure/go-autorest/autorest/azure/cli v0.4.7
-	github.com/aws/aws-sdk-go v1.55.8
+	github.com/aws/aws-sdk-go v1.38.7
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/golang/protobuf v1.5.4
 	github.com/google/uuid v1.6.0
@@ -93,8 +93,6 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 )
-
-replace github.com/aws/aws-sdk-go => ./s3ext
 
 replace github.com/winfsp/cgofuse => github.com/vitalif/cgofuse v0.0.0-20230609211427-22e8fa44f6b8
 
