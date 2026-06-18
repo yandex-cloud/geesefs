@@ -500,15 +500,12 @@ func (s *S3Backend) Init(key string) error {
 func (s *S3Backend) ListObjectsV2(params *s3.ListObjectsV2Input) (*s3.ListObjectsV2Output, string, error) {
 	if s.config.ListV1Ext {
 		in := ycs3ext.ListObjectsV1ExtInput(*params)
-		req, resp := s.ListObjectsV1ExtRequest(&in)
-		err := req.Send()
+		resp, req, err := s.ListObjectsV1Ext(&in)
 		if err != nil {
-			if awsErr, ok := err.(awserr.Error); ok {
-				if awsErr.Code() == "InvalidArgument" || awsErr.Code() == "NotImplemented" {
-					// Fallback to list v1
-					s.config.ListV1Ext = false
-					return s.ListObjectsV2(params)
-				}
+			if ycs3ext.IsUnsupportedListV1Ext(err) {
+				// Fallback to list v1
+				s.config.ListV1Ext = false
+				return s.ListObjectsV2(params)
 			}
 			return nil, "", err
 		}
@@ -629,18 +626,15 @@ func (s *S3Backend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 			StartAfter:        param.StartAfter,
 			ContinuationToken: param.ContinuationToken,
 		})
-		req, resp := s.ListObjectsV1ExtRequest(&in)
-		err := req.Send()
+		resp, req, err := s.ListObjectsV1Ext(&in)
 		if err != nil {
-			if awsErr, ok := err.(awserr.Error); ok {
-				if awsErr.Code() == "InvalidArgument" || awsErr.Code() == "NotImplemented" {
-					s.config.ListV1Ext = false
-					return s.ListBlobs(param)
-				}
+			if ycs3ext.IsUnsupportedListV1Ext(err) {
+				s.config.ListV1Ext = false
+				return s.ListBlobs(param)
 			}
 			return nil, err
 		}
-		return s.listBlobsFromV1Ext(resp, s.getRequestId(req))
+		return listBlobsFromV1Ext(resp, s.getRequestId(req))
 	}
 
 	resp, reqId, err := s.ListObjectsV2(&s3.ListObjectsV2Input{
@@ -680,25 +674,21 @@ func (s *S3Backend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 	}, nil
 }
 
-func (s *S3Backend) listBlobsFromV1Ext(resp *ycs3ext.ListObjectsV1ExtOutput, reqId string) (*ListBlobsOutput, error) {
-	prefixes := make([]BlobPrefixOutput, 0)
-	items := make([]BlobItemOutput, 0)
-
+func listBlobsFromV1Ext(resp *ycs3ext.ListObjectsV1ExtOutput, reqId string) (*ListBlobsOutput, error) {
+	prefixes := make([]BlobPrefixOutput, 0, len(resp.CommonPrefixes))
 	for _, p := range resp.CommonPrefixes {
 		prefixes = append(prefixes, BlobPrefixOutput{Prefix: p.Prefix})
 	}
-	for _, i := range resp.Contents {
-		meta := i.UserMetadata
-		if meta == nil {
-			meta = make(map[string]*string)
-		}
+
+	items := make([]BlobItemOutput, 0, len(resp.Contents))
+	for _, i := range ycs3ext.ListBlobItemsFromV1Ext(resp) {
 		items = append(items, BlobItemOutput{
 			Key:          i.Key,
 			ETag:         i.ETag,
 			LastModified: i.LastModified,
-			Size:         uint64(*i.Size),
+			Size:         i.Size,
 			StorageClass: i.StorageClass,
-			Metadata:     meta,
+			Metadata:     i.Metadata,
 		})
 	}
 
@@ -1132,7 +1122,7 @@ func (s *S3Backend) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
 	err := req.Send()
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
-			if awsErr.Code() == "NotImplemented" {
+			if awsErr.Code() == ycs3ext.ErrCodeNotImplemented {
 				return nil, syscall.ENOSYS
 			}
 		}
