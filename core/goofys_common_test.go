@@ -44,10 +44,11 @@ import (
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureauth "github.com/Azure/go-autorest/autorest/azure/auth"
 
+	"runtime/debug"
+
 	"github.com/sirupsen/logrus"
 
 	. "gopkg.in/check.v1"
-	"runtime/debug"
 )
 
 // so I don't get complains about unused imports
@@ -526,7 +527,11 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		t.Assert(err, IsNil)
 
 		s.cloud = s3
-		s3.config.ListV1Ext = hasEnv("YANDEX")
+
+		isYandex := hasEnv("YANDEX")
+		s3.config.ListV1Ext = isYandex
+		s3.flags.UsePatch = isYandex
+
 		if hasEnv("EVENTUAL_CONSISTENCY") {
 			s.cloud = NewS3BucketEventualConsistency(s3)
 		}

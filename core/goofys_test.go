@@ -3098,3 +3098,42 @@ func (s *GoofysTest) TestCreateHardlinkRelativePath(t *C) {
 	t.Assert(err, IsNil)
 	t.Assert(target, Equals, "../testfile")
 }
+
+// TestPatchObject tests that partial updates work correctly.
+// To verify PATCH (not PUT) is used, run with DEBUG=1 and check logs for "PATCH /path".
+func (s *GoofysTest) TestPatchObject(t *C) {
+	fileName := "testPatchObject"
+	fileSize := int64(10 * 1024 * 1024) // 10MB - triggers multipart upload
+	partSize := int64(5 * 1024 * 1024)  // 5MB parts
+
+	// Create and write the file
+	fh := s.testCreateAndWrite(t, fileName, fileSize, 128*1024, true)
+	err := fh.inode.SyncFile()
+	t.Assert(err, IsNil)
+
+	// Modify the middle of the file (second part)
+	in, err := s.fs.LookupPath(fileName)
+	t.Assert(err, IsNil)
+
+	fh2, err := in.OpenFile()
+	t.Assert(err, IsNil)
+	defer fh2.Release()
+
+	modifiedData := make([]byte, 1024*1024)
+	for i := range modifiedData {
+		modifiedData[i] = byte((i + 1) % 256)
+	}
+	err = fh2.WriteFile(partSize, modifiedData, true)
+	t.Assert(err, IsNil)
+
+	err = fh2.inode.SyncFile()
+	t.Assert(err, IsNil)
+
+	// Verify the modification was applied at the correct offset
+	fr := &FileHandleReader{s.fs, fh2, partSize}
+	readBuf := make([]byte, len(modifiedData))
+	n, err := fr.Read(readBuf)
+	t.Assert(err, IsNil)
+	t.Assert(n, Equals, len(modifiedData))
+	t.Assert(string(readBuf), Equals, string(modifiedData))
+}
