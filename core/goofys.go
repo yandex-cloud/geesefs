@@ -684,6 +684,11 @@ func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
 		childTmp.isDir() && atomic.LoadInt64(&childTmp.dir.ModifiedChildren) > 0 {
 		return false
 	}
+	if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+		if atomic.LoadInt64(&childTmp.refcnt) > 0 && childTmp.knownETag != "" {
+			return false
+		}
+	}
 	if !childTmp.mu.TryLock() {
 		return false
 	}
@@ -1010,6 +1015,8 @@ func mapHttpError(status int) error {
 		return syscall.ENOTSUP
 	case http.StatusConflict:
 		return syscall.EINTR
+	case http.StatusPreconditionFailed:
+		return syscall.EBUSY
 	case http.StatusRequestedRangeNotSatisfiable:
 		return syscall.ERANGE
 	case 429:

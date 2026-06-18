@@ -25,6 +25,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/yandex-cloud/geesefs/core/cfg"
 )
 
 type FileHandle struct {
@@ -633,6 +635,9 @@ func (fh *FileHandle) Release() {
 		panic(fmt.Sprintf("Released more file handles than acquired, n = %v", n))
 	}
 	if n == 0 {
+		fh.inode.mu.Lock()
+		fh.inode.lastHandleReleaseTime = time.Now()
+		fh.inode.mu.Unlock()
 		fh.inode.Parent.addModified(-1)
 	}
 	fh.inode.fs.WakeupFlusher()
@@ -818,10 +823,17 @@ func (inode *Inode) sendRename() {
 			// a parallel read could hit a non-existing name. So, with S3, we do it in 2 passes.
 			// First we copy the object, change the inode name, and then we delete the old copy.
 			inode.fs.addInflightChange(key)
-			_, err = cloud.CopyBlob(&CopyBlobInput{
+			copyInput := &CopyBlobInput{
 				Source:      from,
 				Destination: key,
-			})
+			}
+			if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+				if inode.knownETag != "" {
+					copyInput.ETag = PString(inode.knownETag)
+				}
+			}
+			_, err = cloud.CopyBlob(copyInput)
+
 			inode.fs.completeInflightChange(key)
 			notFoundIgnore := false
 			if err != nil {
@@ -832,6 +844,32 @@ func (inode *Inode) sendRename() {
 				if mappedErr == syscall.ENOENT && skipRename {
 					err = nil
 					notFoundIgnore = true
+				} else if mappedErr == syscall.EBUSY {
+					s3Log.Warnf("Conditional write conflict (inode %v): failed to copy %v to %v: %v", inode.Id, from, key, err)
+					inode.mu.Lock()
+					inode.recordFlushError(err)
+					newParent := inode.Parent
+					oldParent := inode.oldParent
+					oldName := inode.oldName
+
+					inode.oldParent = nil
+					inode.oldName = ""
+					inode.renamingTo = false
+					if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) && !inode.isStillDirty() {
+						inode.SetCacheState(ST_CACHED)
+						inode.SetAttrTime(time.Now())
+					}
+					inode.mu.Unlock()
+
+					// Revert the rename in cache
+					if oldParent != nil && newParent != nil {
+						newParent.removeChild(inode)
+						inode.mu.Lock()
+						inode.Parent = oldParent
+						inode.Name = oldName
+						inode.mu.Unlock()
+						oldParent.insertChildUnlocked(inode)
+					}
 				} else if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 					s3Log.Warnf("Conflict detected (inode %v): failed to copy %v to %v: %v. File is removed remotely, dropping cache", inode.Id, from, key, err)
 					inode.mu.Lock()
@@ -863,8 +901,7 @@ func (inode *Inode) sendRename() {
 						inode.oldName = ""
 						inode.renamingTo = false
 						inode.Parent.addModified(-1)
-						if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) &&
-							!inode.isStillDirty() {
+						if (inode.CacheState == ST_MODIFIED || inode.CacheState == ST_CREATED) && !inode.isStillDirty() {
 							inode.SetCacheState(ST_CACHED)
 							inode.SetAttrTime(time.Now())
 						}
@@ -962,6 +999,13 @@ func (inode *Inode) sendUpdateMeta() {
 		ETag:        PString(inode.knownETag),
 		Metadata:    escapeMetadata(inode.userMetadata),
 	}
+	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+		if inode.knownETag != "" {
+			copyIn.IfMatch = PString(inode.knownETag)
+		} else {
+			copyIn.IfNoneMatch = PString("*")
+		}
+	}
 	go func() {
 		inode.fs.addInflightChange(key)
 		_, err := cloud.CopyBlob(copyIn)
@@ -969,9 +1013,11 @@ func (inode *Inode) sendUpdateMeta() {
 		inode.mu.Lock()
 		inode.recordFlushError(err)
 		if err != nil {
-			mappedErr := mapAwsError(err)
 			inode.userMetadataDirty = 2
-			if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
+			switch mapAwsError(err) {
+			case syscall.EBUSY:
+				s3Log.Warnf("Conditional write conflict (inode %v): metadata COPY for %v failed, keeping local changes", inode.Id, inode.FullName())
+			case syscall.ENOENT, syscall.ERANGE:
 				// Object is deleted or resized remotely (416). Discard local version
 				s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
 				inode.resetCache()
@@ -1024,6 +1070,13 @@ func (inode *Inode) beginMultipartUpload(cloud StorageBackend, key string) {
 	} else {
 		log.Debugf("Started multi-part upload of object %v", key)
 		inode.mpu = resp
+		if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+			if inode.knownETag != "" {
+				inode.mpu.IfMatch = PString(inode.knownETag)
+			} else {
+				inode.mpu.IfNoneMatch = PString("*")
+			}
+		}
 	}
 }
 
@@ -1529,6 +1582,14 @@ func (inode *Inode) flushSmallObject() {
 		inode.userMetadataDirty = 0
 	}
 
+	if c, ok := inode.fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+		if inode.knownETag != "" {
+			params.IfMatch = PString(inode.knownETag)
+		} else {
+			params.IfNoneMatch = PString("*")
+		}
+	}
+
 	if inode.mpu != nil {
 		// Abort and forget abort multipart upload, because otherwise we may
 		// not be able to proceed to rename - it waits until inode.mpu == nil
@@ -1604,6 +1665,11 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 			key = appendChildName(key, inode.oldName)
 		}
 		mpu := inode.mpu
+		var copySourceIfMatch *string
+		if mpu.IfMatch != nil {
+			copySourceIfMatch = mpu.IfMatch
+		}
+
 		guard := make(chan int, inode.fs.flags.MaxParallelCopy)
 		var wg sync.WaitGroup
 		inode.mu.Unlock()
@@ -1624,11 +1690,12 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 					log.Debugf("Copying unmodified range %v-%v MB of object %v",
 						offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key)
 					resp, requestErr := cloud.MultipartBlobCopy(&MultipartBlobCopyInput{
-						Commit:     mpu,
-						PartNumber: uint32(partNum + 1),
-						CopySource: key,
-						Offset:     offset,
-						Size:       size,
+						Commit:            mpu,
+						PartNumber:        uint32(partNum + 1),
+						CopySource:        key,
+						Offset:            offset,
+						Size:              size,
+						CopySourceIfMatch: copySourceIfMatch,
 					})
 					if requestErr != nil {
 						log.Warnf("Failed to copy unmodified range %v-%v MB of object %v: %v",
@@ -1765,6 +1832,11 @@ func (inode *Inode) completeMultipart() {
 		return
 	}
 	mappedErr := mapAwsError(err)
+	if mappedErr == syscall.EBUSY {
+		s3Log.Warnf("Conditional write conflict (inode %v): File %v was modified remotely during multipart copy, keeping local changes", inode.Id, inode.FullName())
+		inode.recordFlushError(err)
+		return
+	}
 	if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 		// Object is deleted or resized remotely (416). Discard local version
 		s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
@@ -1843,13 +1915,13 @@ func (inode *Inode) SyncFile() (err error) {
 	for {
 		inode.mu.Lock()
 		inode.forceFlush = false
-		if inode.CacheState <= ST_DEAD {
+		if inode.flushError != nil {
+			err = inode.flushError
+			inode.flushError = nil
 			inode.mu.Unlock()
 			break
 		}
-		if inode.flushError != nil {
-			// Return the error to user
-			err = inode.flushError
+		if inode.CacheState <= ST_DEAD {
 			inode.mu.Unlock()
 			break
 		}

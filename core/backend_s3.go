@@ -703,18 +703,20 @@ func (s *S3Backend) RenameBlob(param *RenameBlobInput) (*RenameBlobOutput, error
 	return nil, syscall.ENOTSUP
 }
 
-func (s *S3Backend) mpuCopyPart(from string, to string, mpuId string, bytes string, part int64, srcEtag *string) (*string, error) {
+func (s *S3Backend) mpuCopyPart(from string, to string, mpuId string, bytes string, part int64, srcEtag *string, copySourceIfNoneMatch *string) (*string, error) {
 	// XXX use CopySourceIfUnmodifiedSince to ensure that
 	// we are copying from the same object
 	params := &s3.UploadPartCopyInput{
-		Bucket:            &s.bucket,
-		Key:               &to,
-		CopySource:        aws.String(pathEscape(from)),
-		UploadId:          &mpuId,
-		CopySourceRange:   &bytes,
-		CopySourceIfMatch: srcEtag,
-		PartNumber:        &part,
+		Bucket:                &s.bucket,
+		Key:                   &to,
+		CopySource:            aws.String(pathEscape(from)),
+		UploadId:              &mpuId,
+		CopySourceRange:       &bytes,
+		CopySourceIfMatch:     srcEtag,
+		CopySourceIfNoneMatch: copySourceIfNoneMatch,
+		PartNumber:            &part,
 	}
+
 	if s.config.SseC != "" {
 		params.SSECustomerAlgorithm = PString("AES256")
 		params.SSECustomerKey = &s.config.SseC
@@ -748,7 +750,7 @@ func (s *S3Backend) partsRequired(partSizes []cfg.PartSizeConfig, size int64) in
 	return partsRequired
 }
 
-func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId string, srcEtag *string, partSizes []cfg.PartSizeConfig) ([]*s3.CompletedPart, error) {
+func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId string, srcEtag *string, partSizes []cfg.PartSizeConfig, copySourceIfNoneMatch *string) ([]*s3.CompletedPart, error) {
 	parts := make([]*s3.CompletedPart, s.partsRequired(partSizes, size))
 
 	wg := errgroup.Group{}
@@ -763,7 +765,7 @@ func (s *S3Backend) mpuCopyParts(size int64, from string, to string, mpuId strin
 
 			partNum := int64(partIdx + 1)
 			wg.Go(func() error {
-				etag, err := s.mpuCopyPart(from, to, mpuId, bytes, partNum, srcEtag)
+				etag, err := s.mpuCopyPart(from, to, mpuId, bytes, partNum, srcEtag, copySourceIfNoneMatch)
 				if err != nil {
 					return err
 				}
@@ -793,7 +795,8 @@ func (s *S3Backend) defaultCopyPartSizes(size int64) []cfg.PartSizeConfig {
 }
 
 func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuId string,
-	srcEtag *string, metadata map[string]*string, storageClass *string) (requestId string, err error) {
+	srcEtag *string, metadata map[string]*string, storageClass *string,
+	ifMatch *string, ifNoneMatch *string, copySourceIfNoneMatch *string) (requestId string, err error) {
 
 	const MAX_S3_MPU_SIZE = 5 * 1024 * 1024 * 1024 * 1024
 	if size > MAX_S3_MPU_SIZE {
@@ -838,7 +841,7 @@ func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuI
 		partSizes = s.flags.PartSizes
 	}
 
-	parts, err := s.mpuCopyParts(size, from, to, mpuId, srcEtag, partSizes)
+	parts, err := s.mpuCopyParts(size, from, to, mpuId, srcEtag, partSizes, copySourceIfNoneMatch)
 	if err != nil {
 		return
 	}
@@ -850,6 +853,8 @@ func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuI
 		MultipartUpload: &s3.CompletedMultipartUpload{
 			Parts: parts,
 		},
+		IfMatch:     ifMatch,
+		IfNoneMatch: ifNoneMatch,
 	}
 
 	s3Log.Debug(params)
@@ -880,15 +885,21 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 		// FIXME Remove additional HEAD query
 		if param.Size == nil || param.ETag == nil || (*param.Size > s.config.MultipartCopyThreshold &&
 			(param.Metadata == nil || param.StorageClass == nil)) {
-
 			params := &HeadBlobInput{Key: param.Source}
 			resp, err := s.HeadBlob(params)
 			if err != nil {
 				return nil, err
 			}
 
-			param.Size = &resp.Size
-			param.ETag = resp.ETag
+			if resp.ETag != nil && param.ETag != nil && *param.ETag != *resp.ETag {
+				s3Log.Warnf("CopyBlob source ETag changed: %v expected %v got %v", param.Source, *param.ETag, *resp.ETag)
+			}
+			if param.Size == nil {
+				param.Size = &resp.Size
+			}
+			if param.ETag == nil {
+				param.ETag = resp.ETag
+			}
 			if param.Metadata == nil {
 				param.Metadata = resp.Metadata
 			}
@@ -900,7 +911,9 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 		}
 
 		if !s.gcs && *param.Size > s.config.MultipartCopyThreshold {
-			reqId, err := s.copyObjectMultipart(int64(*param.Size), from, param.Destination, "", param.ETag, param.Metadata, param.StorageClass)
+			reqId, err := s.copyObjectMultipart(int64(*param.Size), from, param.Destination, "",
+				param.ETag, param.Metadata, param.StorageClass,
+				param.IfMatch, param.IfNoneMatch, param.CopySourceIfNoneMatch)
 			if err != nil {
 				return nil, err
 			}
@@ -938,6 +951,12 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 		params.ACL = &s.config.ACL
 	}
 
+	// Conditional Writes
+	params.CopySourceIfMatch = param.ETag
+	params.CopySourceIfNoneMatch = param.CopySourceIfNoneMatch
+	params.IfMatch = param.IfMatch
+	params.IfNoneMatch = param.IfNoneMatch
+
 	req, _ := s.CopyObjectRequest(params)
 	// make a shallow copy of the client so we can change the
 	// timeout only for this request but still re-use the
@@ -956,8 +975,12 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 
 func shouldRetry(err error) bool {
 	err = mapAwsError(err)
-	return err != syscall.ENOENT && err != syscall.EINVAL &&
-		err != syscall.EACCES && err != syscall.ENOTSUP && err != syscall.ERANGE
+	return err != syscall.ENOENT &&
+		err != syscall.EINVAL &&
+		err != syscall.EACCES &&
+		err != syscall.ENOTSUP &&
+		err != syscall.ERANGE &&
+		err != syscall.EBUSY
 }
 
 func (s *S3Backend) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
@@ -981,7 +1004,10 @@ func (s *S3Backend) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
 		}
 		get.Range = &bytes
 	}
-	// TODO handle IfMatch
+
+	if param.IfMatch != nil {
+		get.IfMatch = param.IfMatch
+	}
 
 	req, resp := s.GetObjectRequest(&get)
 	err := req.Send()
@@ -1044,6 +1070,15 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 
 	if s.config.ACL != "" {
 		put.ACL = &s.config.ACL
+	}
+
+	// If-Match: succeed only if object's current ETag matches.
+	if param.IfMatch != nil {
+		put.IfMatch = param.IfMatch
+	}
+	// If-None-Match: succeed only if object does not exist.
+	if param.IfNoneMatch != nil {
+		put.IfNoneMatch = param.IfNoneMatch
 	}
 
 	req, resp := s.PutObjectRequest(put)
@@ -1180,6 +1215,15 @@ func (s *S3Backend) MultipartBlobCopy(param *MultipartBlobCopyInput) (*Multipart
 		params.SSECustomerKey = &s.config.SseC
 		params.SSECustomerKeyMD5 = &s.config.SseCDigest
 	}
+
+	// Ensures the source object hasn't changed between parts during a multi-part copy.
+	if param.CopySourceIfMatch != nil {
+		params.CopySourceIfMatch = param.CopySourceIfMatch
+	}
+	if param.CopySourceIfNoneMatch != nil {
+		params.CopySourceIfNoneMatch = param.CopySourceIfNoneMatch
+	}
+
 	s3Log.Debug(params)
 
 	req, resp := s.UploadPartCopyRequest(&params)
@@ -1213,6 +1257,15 @@ func (s *S3Backend) MultipartBlobCommit(param *MultipartBlobCommitInput) (*Multi
 		MultipartUpload: &s3.CompletedMultipartUpload{
 			Parts: parts,
 		},
+	}
+
+	// If-Match: succeed only if object's current ETag matches.
+	if param.IfMatch != nil {
+		mpu.IfMatch = param.IfMatch
+	}
+	// If-None-Match: succeed only if object does not exist.
+	if param.IfNoneMatch != nil {
+		mpu.IfNoneMatch = param.IfNoneMatch
 	}
 
 	s3Log.Debug(mpu)

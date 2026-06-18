@@ -12200,6 +12200,14 @@ type CompleteMultipartUploadInput struct {
 	// error.
 	ExpectedBucketOwner *string `location:"header" locationName:"x-amz-expected-bucket-owner" type:"string"`
 
+	// If-Match: succeed only if object's current ETag matches this value.
+	// Applied at CompleteMultipartUpload, not at CreateMultipartUpload.
+	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
+
+	// If-None-Match: succeed only if object does NOT exist.
+	// Use "*" to prevent overwriting an existing object.
+	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
+
 	// Object key for which the multipart upload was initiated.
 	//
 	// Key is a required field
@@ -12272,6 +12280,18 @@ func (s *CompleteMultipartUploadInput) getBucket() (v string) {
 // SetExpectedBucketOwner sets the ExpectedBucketOwner field's value.
 func (s *CompleteMultipartUploadInput) SetExpectedBucketOwner(v string) *CompleteMultipartUploadInput {
 	s.ExpectedBucketOwner = &v
+	return s
+}
+
+// SetIfMatch sets the IfMatch field's value.
+func (s *CompleteMultipartUploadInput) SetIfMatch(v string) *CompleteMultipartUploadInput {
+	s.IfMatch = &v
+	return s
+}
+
+// SetIfNoneMatch sets the IfNoneMatch field's value.
+func (s *CompleteMultipartUploadInput) SetIfNoneMatch(v string) *CompleteMultipartUploadInput {
+	s.IfNoneMatch = &v
 	return s
 }
 
@@ -12731,6 +12751,14 @@ type CopyObjectInput struct {
 	// Denied) error.
 	ExpectedSourceBucketOwner *string `location:"header" locationName:"x-amz-source-expected-bucket-owner" type:"string"`
 
+	// If-Match: succeed only if the destination object's current ETag matches this value.
+	// Used for conditional writes / optimistic locking on CopyObject.
+	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
+
+	// If-None-Match: succeed only if the destination object does NOT exist.
+	// Use "*" to prevent overwriting an existing object.
+	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
+
 	// The date and time at which the object is no longer cacheable.
 	Expires *time.Time `location:"header" locationName:"Expires" type:"timestamp"`
 
@@ -12992,6 +13020,18 @@ func (s *CopyObjectInput) SetExpectedBucketOwner(v string) *CopyObjectInput {
 // SetExpectedSourceBucketOwner sets the ExpectedSourceBucketOwner field's value.
 func (s *CopyObjectInput) SetExpectedSourceBucketOwner(v string) *CopyObjectInput {
 	s.ExpectedSourceBucketOwner = &v
+	return s
+}
+
+// SetIfMatch sets the IfMatch field's value.
+func (s *CopyObjectInput) SetIfMatch(v string) *CopyObjectInput {
+	s.IfMatch = &v
+	return s
+}
+
+// SetIfNoneMatch sets the IfNoneMatch field's value.
+func (s *CopyObjectInput) SetIfNoneMatch(v string) *CopyObjectInput {
+	s.IfNoneMatch = &v
 	return s
 }
 
@@ -30628,6 +30668,10 @@ type PutObjectInput struct {
 	// This action is not supported by Amazon S3 on Outposts.
 	GrantWriteACP *string `location:"header" locationName:"x-amz-grant-write-acp" type:"string"`
 
+	IfMatch *string `location:"header" locationName:"If-Match" type:"string"`
+
+	IfNoneMatch *string `location:"header" locationName:"If-None-Match" type:"string"`
+
 	// Object key for which the PUT action was initiated.
 	//
 	// Key is a required field
@@ -30861,6 +30905,18 @@ func (s *PutObjectInput) SetGrantReadACP(v string) *PutObjectInput {
 // SetGrantWriteACP sets the GrantWriteACP field's value.
 func (s *PutObjectInput) SetGrantWriteACP(v string) *PutObjectInput {
 	s.GrantWriteACP = &v
+	return s
+}
+
+// SetIfMatch sets the IfMatch field's value.
+func (s *PutObjectInput) SetIfMatch(v string) *PutObjectInput {
+	s.IfMatch = &v
+	return s
+}
+
+// SetIfNoneMatch sets the IfNoneMatch field's value.
+func (s *PutObjectInput) SetIfNoneMatch(v string) *PutObjectInput {
+	s.IfNoneMatch = &v
 	return s
 }
 

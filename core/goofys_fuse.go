@@ -580,7 +580,18 @@ func (fs *GoofysFuse) FlushFile(
 	ctx context.Context,
 	op *fuseops.FlushFileOp) (err error) {
 
-	// FlushFile is a no-op because we flush changes to the server asynchronously
+	// When conditional writes are enabled, FlushFile must
+	// synchronously flush and return errors to the calling application.
+	if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+		in := fs.getInodeOrDie(op.Inode)
+		if !in.isDir() {
+			atomic.AddInt64(&fs.stats.metadataWrites, 1)
+			err = in.SyncFile()
+			err = mapAwsError(err)
+			return
+		}
+	}
+
 	// If the user really wants to persist a file to the server he should call fsync()
 
 	atomic.AddInt64(&fs.stats.noops, 1)
@@ -601,7 +612,7 @@ func (fs *GoofysFuse) ReleaseFileHandle(
 	fs.mu.Unlock()
 
 	if fh.inode.fs.flags.FsyncOnClose {
-		return fh.inode.SyncFile()
+		return mapAwsError(fh.inode.SyncFile())
 	}
 
 	return
@@ -836,6 +847,18 @@ func (fs *GoofysFuse) Rename(
 
 	err = parent.Rename(op.OldName, newParent, op.NewName)
 	err = mapAwsError(err)
+
+	// When conditional writes are enabled, Rename must synchronously wait for
+	// the rename to complete and return errors to the calling application.
+	if err == nil {
+		if c, ok := fs.flags.Backend.(*cfg.S3Config); ok && c.UseConditionalWrites {
+			renamed := newParent.findChild(op.NewName)
+			if renamed != nil && !renamed.isDir() {
+				err = renamed.SyncFile()
+				err = mapAwsError(err)
+			}
+		}
+	}
 
 	return
 }
