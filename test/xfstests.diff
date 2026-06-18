@@ -20,12 +20,12 @@ diff --git a/common/rc b/common/rc
 index 5c4429e..21f0718 100644
 --- a/common/rc
 +++ b/common/rc
-@@ -4545,7 +4545,7 @@ init_rc()
+@@ -5130,7 +5130,7 @@ init_rc()
  
  	# Sanity check that TEST partition is not mounted at another mount point
  	# or as another fs type
--	_check_mounted_on TEST_DEV $TEST_DEV TEST_DIR $TEST_DIR $FSTYP || exit 1
-+	_check_mounted_on TEST_DEV $TEST_DEV TEST_DIR $TEST_DIR $FSTYP$FUSE_SUBTYP || exit 1
+-	_check_mounted_on TEST_DEV $TEST_DEV TEST_DIR $TEST_DIR $FSTYP || _exit 1
++	_check_mounted_on TEST_DEV $TEST_DEV TEST_DIR $TEST_DIR $FSTYP$FUSE_SUBTYP || _exit 1
  	if [ -n "$SCRATCH_DEV" ]; then
  		# Sanity check that SCRATCH partition is not mounted at another
  		# mount point, because it is about to be unmounted and formatted.
