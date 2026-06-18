@@ -20,7 +20,6 @@ func IsUnsupportedListV1Ext(err error) bool {
 	switch awsErr.Code() {
 	case ErrCodeInvalidArgument, ErrCodeNotImplemented:
 		return true
-	default:
-		return false
 	}
+	return false
 }
