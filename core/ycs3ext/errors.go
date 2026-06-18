@@ -9,6 +9,9 @@ import (
 const (
 	ErrCodeInvalidArgument = "InvalidArgument"
 	ErrCodeNotImplemented  = "NotImplemented"
+
+	HeaderAmzContentSHA256 = "X-Amz-Content-Sha256"
+	UnsignedPayload        = "UNSIGNED-PAYLOAD"
 )
 
 // IsUnsupportedListV1Ext reports whether err means the backend does not implement ext-v1 listing.

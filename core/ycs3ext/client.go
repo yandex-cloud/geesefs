@@ -25,7 +25,7 @@ func AddUnsignedPayloadHandler(client *S3Client) {
 		Name: "ycs3ext.UnsignedPayload",
 		Fn: func(req *request.Request) {
 			if aws.BoolValue(req.Config.S3DisableContentMD5Validation) {
-				req.HTTPRequest.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+				req.HTTPRequest.Header.Set(HeaderAmzContentSHA256, UnsignedPayload)
 			}
 		},
 	})
