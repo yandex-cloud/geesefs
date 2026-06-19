@@ -11,7 +11,7 @@ xfstests:
 	cd xfstests && patch -p1 -l < ../test/xfstests.diff
 
 s3proxy.jar:
-	wget https://github.com/gaul/s3proxy/releases/download/s3proxy-1.8.0/s3proxy -O s3proxy.jar
+	wget https://github.com/gaul/s3proxy/releases/download/s3proxy-2.1.0/s3proxy -O s3proxy.jar
 
 get-deps: s3proxy.jar
 	go get -t ./...
