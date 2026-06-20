@@ -5,7 +5,7 @@ on:
     branches:
     - master
   pull_request:
-    branches: 
+    branches:
     - master
 
 jobs:
@@ -13,12 +13,26 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v7
 
     - name: Set up Go
-      uses: actions/setup-go@v2
+      uses: actions/setup-go@v6
       with:
         go-version: 1.25
+
+    - name: Cache s3proxy
+      uses: actions/cache@v4
+      with:
+        path: s3proxy.jar
+        key: s3proxy-1.8.0
+
+    - name: Cache xfstests
+      uses: actions/cache@v4
+      with:
+        path: xfstests
+        key: xfstests-${{ runner.os }}-v1
+        restore-keys: |
+          xfstests-${{ runner.os }}-
 
     - name: Build linux amd64
       run: env CGO_ENABLED=0 go build -o geesefs-linux-amd64 -v && ln -s geesefs-linux-amd64 geesefs
