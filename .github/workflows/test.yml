@@ -42,7 +42,5 @@ jobs:
       timeout-minutes: 12
 
     - name: Run xfstests
-      # Often crashes in CI due to memory limits
-      continue-on-error: true
       run: make run-xfstests
       timeout-minutes: 10
