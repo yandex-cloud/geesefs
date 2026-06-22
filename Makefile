@@ -6,12 +6,15 @@ run-test: s3proxy.jar
 run-xfstests: s3proxy.jar xfstests
 	./test/run-xfstests.sh
 
+.PHONY: xfstests
 xfstests:
-	git clone --depth=1 https://github.com/kdave/xfstests
-	cd xfstests && patch -p1 -l < ../test/xfstests.diff
+	@if [ ! -d xfstests ]; then git clone --depth=1 https://github.com/kdave/xfstests; fi
+	@if ! grep -q 'if \[ -z "$$UMOUNT_PROG" \]' xfstests/common/config 2>/dev/null; then \
+		cd xfstests && patch -p1 -l < ../test/xfstests.diff; \
+	fi
 
 s3proxy.jar:
-	wget https://github.com/gaul/s3proxy/releases/download/s3proxy-1.8.0/s3proxy -O s3proxy.jar
+	@if [ ! -f s3proxy.jar ]; then wget --tries=3 --timeout=60 https://github.com/gaul/s3proxy/releases/download/s3proxy-1.8.0/s3proxy -O s3proxy.jar; fi
 
 get-deps: s3proxy.jar
 	go get -t ./...
