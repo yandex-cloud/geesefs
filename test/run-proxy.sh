@@ -29,7 +29,7 @@ if [ $CLOUD == "s3" ]; then
 elif [ $CLOUD == "azblob" ]; then
     export AZURE_STORAGE_ACCOUNT=${AZURE_STORAGE_ACCOUNT:-devstoreaccount1}
     export AZURE_STORAGE_KEY=${AZURE_STORAGE_KEY:-Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==}
-    export ENDPOINT=http://127.0.0.1:$PORT/$AZURE_STORAGE_ACCOUNT
+    export ENDPOINT=http://127.0.0.1:$PROXY_PORT/$AZURE_STORAGE_ACCOUNT
     if [ ${AZURE_STORAGE_ACCOUNT} == "devstoreaccount1" ]; then
         if ! which azurite >/dev/null; then
             echo "Azurite missing, run:" >&1
@@ -38,7 +38,7 @@ elif [ $CLOUD == "azblob" ]; then
         fi
         rm -Rf /tmp/azblob
         mkdir -p /tmp/azblob
-        PROXY_BIN="azurite-blob -l /tmp/azblob --blobPort $PORT -s"
+        PROXY_BIN="azurite-blob -l /tmp/azblob --blobPort $PROXY_PORT -s"
     fi
 fi
 
