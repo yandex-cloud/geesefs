@@ -41,10 +41,11 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/private/protocol/rest"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/yandex-cloud/geesefs/core/ycs3ext"
 )
 
 type S3Backend struct {
-	*s3.S3
+	*ycs3ext.S3Client
 	cap Capabilities
 
 	bucket    string
@@ -302,23 +303,24 @@ func (s *S3Backend) setV2Signer(handlers *request.Handlers) {
 }
 
 func (s *S3Backend) newS3() {
-	s.S3 = s3.New(s.config.Session, s.awsConfig)
+	s.S3Client = ycs3ext.NewS3Client(s3.New(s.config.Session, s.awsConfig))
 	if s.config.RequesterPays {
-		s.S3.Handlers.Build.PushBack(addRequestPayer)
+		s.Handlers.Build.PushBack(addRequestPayer)
 	}
 	if s.iam {
-		s.setIAMSigner(&s.S3.Handlers)
+		s.setIAMSigner(&s.Handlers)
 	} else if s.v2Signer {
-		s.setV2Signer(&s.S3.Handlers)
+		s.setV2Signer(&s.Handlers)
 	}
-	s.S3.Handlers.Sign.PushBack(addAcceptEncoding)
-	s.S3.Handlers.Build.RemoveByName("core.SDKVersionUserAgentHandler")
-	s.S3.Handlers.Build.PushBackNamed(request.NamedHandler{
+	s.Handlers.Sign.PushBack(addAcceptEncoding)
+	ycs3ext.AddUnsignedPayloadHandler(s.S3Client)
+	s.Handlers.Build.RemoveByName("core.SDKVersionUserAgentHandler")
+	s.Handlers.Build.PushBackNamed(request.NamedHandler{
 		Name: "core.SDKVersionUserAgentHandler",
 		Fn: request.MakeAddToUserAgentHandler("GeeseFS", cfg.GEESEFS_VERSION,
 			runtime.Version(), runtime.GOOS, runtime.GOARCH),
 	})
-	s.S3.Handlers.Build.PushBack(func(req *request.Request) {
+	s.Handlers.Build.PushBack(func(req *request.Request) {
 		if s.config.Subdomain {
 			req.HTTPRequest.URL.RawPath = rest.EscapePath(req.HTTPRequest.URL.Path, false)
 		}
@@ -352,7 +354,7 @@ func (s *S3Backend) detectBucketLocationByHEAD() (err error, isAws bool) {
 
 	allowFails := 3
 	for i := 0; i < allowFails; i++ {
-		resp, err = s.S3.Config.HTTPClient.Transport.RoundTrip(req)
+		resp, err = s.Config.HTTPClient.Transport.RoundTrip(req)
 		if err != nil {
 			return
 		}
@@ -497,29 +499,20 @@ func (s *S3Backend) Init(key string) error {
 
 func (s *S3Backend) ListObjectsV2(params *s3.ListObjectsV2Input) (*s3.ListObjectsV2Output, string, error) {
 	if s.config.ListV1Ext {
-		in := s3.ListObjectsV1ExtInput(*params)
-		req, resp := s.S3.ListObjectsV1ExtRequest(&in)
-		err := req.Send()
+		in := ycs3ext.ListObjectsV1ExtInput(*params)
+		resp, req, err := s.ListObjectsV1Ext(&in)
 		if err != nil {
-			if awsErr, ok := err.(awserr.Error); ok {
-				if awsErr.Code() == "InvalidArgument" || awsErr.Code() == "NotImplemented" {
-					// Fallback to list v1
-					s.config.ListV1Ext = false
-					return s.ListObjectsV2(params)
-				}
+			if ycs3ext.IsUnsupportedListV1Ext(err) {
+				// Fallback to list v1
+				s.config.ListV1Ext = false
+				return s.ListObjectsV2(params)
 			}
 			return nil, "", err
 		}
-		out := s3.ListObjectsV2Output(*resp)
-		for _, obj := range out.Contents {
-			// Make non-nil maps for all objects so that we know metadata is empty
-			if obj.UserMetadata == nil {
-				obj.UserMetadata = make(map[string]*string)
-			}
-		}
-		return &out, s.getRequestId(req), nil
+		out := ycs3ext.ToListObjectsV2Output(resp)
+		return out, s.getRequestId(req), nil
 	} else if s.config.ListV2 {
-		req, resp := s.S3.ListObjectsV2Request(params)
+		req, resp := s.ListObjectsV2Request(params)
 		err := req.Send()
 		if err != nil {
 			return nil, "", err
@@ -540,7 +533,7 @@ func (s *S3Backend) ListObjectsV2(params *s3.ListObjectsV2Input) (*s3.ListObject
 			v1.Marker = params.ContinuationToken
 		}
 
-		objs, err := s.S3.ListObjects(&v1)
+		objs, err := s.ListObjects(&v1)
 		if err != nil {
 			return nil, "", err
 		}
@@ -597,7 +590,7 @@ func (s *S3Backend) HeadBlob(param *HeadBlobInput) (*HeadBlobOutput, error) {
 		head.SSECustomerKeyMD5 = &s.config.SseCDigest
 	}
 
-	req, resp := s.S3.HeadObjectRequest(&head)
+	req, resp := s.HeadObjectRequest(&head)
 	err := req.Send()
 	if err != nil {
 		return nil, err
@@ -622,6 +615,26 @@ func (s *S3Backend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 
 	if param.MaxKeys != nil {
 		maxKeys = aws.Int64(int64(*param.MaxKeys))
+	}
+
+	if s.config.ListV1Ext {
+		in := ycs3ext.ListObjectsV1ExtInput(s3.ListObjectsV2Input{
+			Bucket:            &s.bucket,
+			Prefix:            param.Prefix,
+			Delimiter:         param.Delimiter,
+			MaxKeys:           maxKeys,
+			StartAfter:        param.StartAfter,
+			ContinuationToken: param.ContinuationToken,
+		})
+		resp, req, err := s.ListObjectsV1Ext(&in)
+		if err != nil {
+			if ycs3ext.IsUnsupportedListV1Ext(err) {
+				s.config.ListV1Ext = false
+				return s.ListBlobs(param)
+			}
+			return nil, err
+		}
+		return listBlobsFromV1Ext(resp, s.getRequestId(req))
 	}
 
 	resp, reqId, err := s.ListObjectsV2(&s3.ListObjectsV2Input{
@@ -649,7 +662,33 @@ func (s *S3Backend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 			LastModified: i.LastModified,
 			Size:         uint64(*i.Size),
 			StorageClass: i.StorageClass,
-			Metadata:     i.UserMetadata,
+		})
+	}
+
+	return &ListBlobsOutput{
+		Prefixes:              prefixes,
+		Items:                 items,
+		NextContinuationToken: resp.NextContinuationToken,
+		IsTruncated:           *resp.IsTruncated,
+		RequestId:             reqId,
+	}, nil
+}
+
+func listBlobsFromV1Ext(resp *ycs3ext.ListObjectsV1ExtOutput, reqId string) (*ListBlobsOutput, error) {
+	prefixes := make([]BlobPrefixOutput, 0, len(resp.CommonPrefixes))
+	for _, p := range resp.CommonPrefixes {
+		prefixes = append(prefixes, BlobPrefixOutput{Prefix: p.Prefix})
+	}
+
+	items := make([]BlobItemOutput, 0, len(resp.Contents))
+	for _, i := range ycs3ext.ListBlobItemsFromV1Ext(resp) {
+		items = append(items, BlobItemOutput{
+			Key:          i.Key,
+			ETag:         i.ETag,
+			LastModified: i.LastModified,
+			Size:         i.Size,
+			StorageClass: i.StorageClass,
+			Metadata:     i.Metadata,
 		})
 	}
 
@@ -1069,7 +1108,7 @@ func (s *S3Backend) selectStorageClass(size *uint64) *string {
 }
 
 func (s *S3Backend) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
-	patch := &s3.PatchObjectInput{
+	patch := &ycs3ext.PatchObjectInput{
 		Bucket:       &s.bucket,
 		Key:          &param.Key,
 		ContentRange: PString(fmt.Sprintf("bytes %d-%d/*", param.Offset, param.Offset+param.Size-1)),
@@ -1083,7 +1122,7 @@ func (s *S3Backend) PatchBlob(param *PatchBlobInput) (*PatchBlobOutput, error) {
 	err := req.Send()
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
-			if awsErr.Code() == "NotImplemented" {
+			if awsErr.Code() == ycs3ext.ErrCodeNotImplemented {
 				return nil, syscall.ENOSYS
 			}
 		}
