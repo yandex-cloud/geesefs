@@ -1,3 +1,10 @@
+geesefs (0.43.8) unstable; urgency=medium
+
+  * Refresh IAM token lazily so it survives a long process pause (#179)
+  * Fix xfstests.diff for current xfstests version (#182)
+
+ -- Artem Ikchurin <aikch@yandex-team.ru>  Sun, 22 Jun 2026 18:00:00 +0300
+
 geesefs (0.43.7) unstable; urgency=medium
 
   * Fix multipart part boundary handling without allowing out-of-range parts (#177)
