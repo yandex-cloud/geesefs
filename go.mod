@@ -11,7 +11,7 @@ require (
 	github.com/Azure/go-autorest/autorest/adal v0.9.24
 	github.com/Azure/go-autorest/autorest/azure/auth v0.5.13
 	github.com/Azure/go-autorest/autorest/azure/cli v0.4.7
-	github.com/aws/aws-sdk-go v1.38.7
+	github.com/aws/aws-sdk-go v1.55.8
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/golang/protobuf v1.5.4
 	github.com/google/uuid v1.6.0
