@@ -50,7 +50,7 @@ type heldFileLock struct {
 	etag    string
 }
 
-// FileLockManager holds path rules (include/exclude/subject map) and, when enabled,
+// FileLockManager holds path rules (include/exclude) and, when enabled,
 // coordinates advisory locks stored as S3 sidecar objects.
 type FileLockManager struct {
 	fs      *Goofys
@@ -91,14 +91,6 @@ func (m *FileLockManager) excluded(dataKey string) bool {
 
 func (m *FileLockManager) included(dataKey string) bool {
 	return m.rules.included(dataKey)
-}
-
-func (m *FileLockManager) subjectDataKey(dataKey string, inode *Inode) string {
-	return m.rules.subjectDataKey(dataKey, inode)
-}
-
-func (m *FileLockManager) subjectForNewChild(parent *Inode, name string) string {
-	return m.rules.subjectForNewChild(parent, name)
 }
 
 // Start runs a single background heartbeat for all locks held by this mount.

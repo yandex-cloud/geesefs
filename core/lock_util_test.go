@@ -121,11 +121,11 @@ func TestLockSubjectInode(t *testing.T) {
 	if got := lockSubjectInode(fs, doc); got != doc {
 		t.Fatal("main document inode should map to itself")
 	}
-	if got := lockSubjectInode(fs, marker); got != doc {
-		t.Fatalf("MS Office marker should map to main document, got %v", got)
+	if got := lockSubjectInode(fs, marker); got != nil {
+		t.Fatalf("marker without subject map should not resolve to main doc, got %v", got)
 	}
-	if got := lockSubjectDataKey(marker); got != "geesefs-test.docx" {
-		t.Fatalf("marker subject key: got %q", got)
+	if got := lockSubjectDataKey(marker); got != "" {
+		t.Fatalf("marker subject key without map: got %q", got)
 	}
 	_, ownKey := marker.cloud()
 	if shouldLockDataKey(fs, ownKey) {

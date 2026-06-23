@@ -1,5 +1,7 @@
-// Lock path rules: include/exclude globs (--lock-include, --lock-exclude) and
-// built-in subject mapping (auxiliary editor paths → main document key).
+// Lock path rules: include/exclude globs (--lock-include, --lock-exclude).
+//
+// Subject mapping (auxiliary editor paths → main document) was removed for
+// manual testing. To restore: cp lock_rules.go.with-subject-map lock_rules.go
 
 package core
 
@@ -17,34 +19,11 @@ var defaultLockExcludeGlobs = []string{
 	"*~WR*",
 }
 
-// subjectMap describes how an auxiliary path maps to the main lock subject.
-type subjectMap struct {
-	glob string
-	kind subjectMapKind
-	arg  string
-}
-
-type subjectMapKind int
-
-const (
-	// Strip arg from the first matching path component, prepend prior components.
-	subjectPathComponentStripAt subjectMapKind = iota
-	// Strip arg prefix from basename; if no direct child, suffix-match siblings in parent.
-	subjectParentPrefixMatch
-)
-
-// Built-in subject maps (Office on macOS). Not user-configurable for now.
-var defaultLockSubjectMaps = []subjectMap{
-	{glob: "*.sb-*", kind: subjectPathComponentStripAt, arg: ".sb-"},
-	{glob: "~$*", kind: subjectParentPrefixMatch, arg: "~$"},
-}
-
-// lockRules holds include/exclude globs and subject-mapping rules for one mount.
+// lockRules holds include/exclude globs for one mount.
 // Embedded in FileLockManager (always present; path rules apply even when locking is off).
 type lockRules struct {
-	include    []string
-	exclude    []string
-	subjectMap []subjectMap
+	include []string
+	exclude []string
 }
 
 func newLockRules(flags *cfg.FlagStorage) *lockRules {
@@ -56,11 +35,7 @@ func newLockRules(flags *cfg.FlagStorage) *lockRules {
 	if flags != nil {
 		include = parseLockGlobs(flags.LockInclude)
 	}
-	return &lockRules{
-		include:    include,
-		exclude:    exclude,
-		subjectMap: append([]subjectMap(nil), defaultLockSubjectMaps...),
-	}
+	return &lockRules{include: include, exclude: exclude}
 }
 
 func parseLockGlobs(s string) []string {
@@ -116,120 +91,4 @@ func (r *lockRules) included(dataKey string) bool {
 		}
 	}
 	return false
-}
-
-func (r *lockRules) subjectDataKey(dataKey string, inode *Inode) string {
-	if r == nil {
-		return ""
-	}
-	for _, m := range r.subjectMap {
-		if subject := subjectDataKeyFromMap(m, dataKey, inode); subject != "" {
-			return subject
-		}
-	}
-	return ""
-}
-
-func (r *lockRules) subjectForNewChild(parent *Inode, name string) string {
-	if r == nil || parent == nil {
-		return ""
-	}
-	for _, m := range r.subjectMap {
-		if subject := subjectForNewChildFromMap(m, parent, name); subject != "" {
-			return subject
-		}
-	}
-	return ""
-}
-
-func subjectDataKeyFromMap(m subjectMap, dataKey string, inode *Inode) string {
-	switch m.kind {
-	case subjectPathComponentStripAt:
-		return subjectByPathComponentStripAt(dataKey, m.glob, m.arg)
-	case subjectParentPrefixMatch:
-		dir, base := path.Split(dataKey)
-		if !matchLockGlob(m.glob, base) {
-			return ""
-		}
-		if inode != nil && inode.Parent != nil {
-			if subject := resolvePrefixMarker(inode.Parent, base, m.arg); subject != "" {
-				return subject
-			}
-		}
-		return joinDataKey(strings.TrimSuffix(dir, "/"), strings.TrimPrefix(base, m.arg))
-	}
-	return ""
-}
-
-func subjectForNewChildFromMap(m subjectMap, parent *Inode, name string) string {
-	switch m.kind {
-	case subjectPathComponentStripAt:
-		if matchLockGlob(m.glob, name) {
-			if base, ok := stripAt(name, m.arg); ok {
-				_, parentKey := parent.cloud()
-				return joinDataKey(parentKey, base)
-			}
-		}
-	case subjectParentPrefixMatch:
-		if matchLockGlob(m.glob, name) {
-			return resolvePrefixMarker(parent, name, m.arg)
-		}
-	}
-	return ""
-}
-
-func subjectByPathComponentStripAt(cloudKey, glob, at string) string {
-	parts := strings.Split(strings.Trim(cloudKey, "/"), "/")
-	var prefix []string
-	for _, part := range parts {
-		if matchLockGlob(glob, part) {
-			if base, ok := stripAt(part, at); ok {
-				return joinDataKey(strings.Join(prefix, "/"), base)
-			}
-		}
-		prefix = append(prefix, part)
-	}
-	return ""
-}
-
-func stripAt(name, at string) (string, bool) {
-	i := strings.Index(name, at)
-	if i <= 0 {
-		return "", false
-	}
-	return name[:i], true
-}
-
-// resolvePrefixMarker maps ~$doc.xlsx to the locked data object key.
-// Editors on macOS may truncate the marker (~$esefs-test.docx for geesefs-test.docx).
-func resolvePrefixMarker(parent *Inode, markerName, prefix string) string {
-	if !strings.HasPrefix(markerName, prefix) || parent == nil {
-		return ""
-	}
-	_, parentKey := parent.cloud()
-	suffix := strings.TrimPrefix(markerName, prefix)
-	direct := joinDataKey(parentKey, suffix)
-
-	parent.mu.Lock()
-	defer parent.mu.Unlock()
-
-	if parent.findChildUnlocked(suffix) != nil {
-		return direct
-	}
-	var bestName string
-	for _, child := range parent.dir.Children {
-		if child == nil || child.isDir() || isLockSidecarName(child.Name) || strings.HasPrefix(child.Name, prefix) {
-			continue
-		}
-		if !strings.HasSuffix(child.Name, suffix) {
-			continue
-		}
-		if bestName == "" || len(child.Name) > len(bestName) {
-			bestName = child.Name
-		}
-	}
-	if bestName == "" {
-		return direct
-	}
-	return joinDataKey(parentKey, bestName)
 }

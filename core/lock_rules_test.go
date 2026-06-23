@@ -55,28 +55,3 @@ func TestLockRulesUserExclude(t *testing.T) {
 		t.Fatal("built-in office excludes must remain")
 	}
 }
-
-func TestLockRulesSubjectMap(t *testing.T) {
-	r := newLockRules(nil)
-	if got := r.subjectDataKey("geesefs-test.docx.sb-15d02470-CWByZs/.~WRD0000", nil); got != "geesefs-test.docx" {
-		t.Fatalf("sandbox temp: got %q", got)
-	}
-	if got := r.subjectDataKey("finance/Q1.xlsx.sb-1-abc/.~WRD0000", nil); got != "finance/Q1.xlsx" {
-		t.Fatalf("nested sandbox: got %q", got)
-	}
-
-	fs := testGoofys(nil)
-	parent := NewInode(fs, nil, "")
-	parent.dir = &DirInodeData{Children: []*Inode{
-		NewInode(fs, parent, "geesefs-test.docx"),
-	}}
-	if got := r.subjectForNewChild(parent, "geesefs-test.docx.sb-15d02470-CWByZs"); got != "geesefs-test.docx" {
-		t.Fatalf("sandbox mkdir: got %q", got)
-	}
-	if got := r.subjectForNewChild(parent, "~$geesefs-test.docx"); got != "geesefs-test.docx" {
-		t.Fatalf("marker create: got %q", got)
-	}
-	if got := r.subjectForNewChild(parent, "~$esefs-test.docx"); got != "geesefs-test.docx" {
-		t.Fatalf("macOS truncated marker create: got %q", got)
-	}
-}

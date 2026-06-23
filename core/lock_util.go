@@ -119,17 +119,14 @@ func joinDataKey(prefix, name string) string {
 
 // lockSubjectForChild returns the data key whose sidecar governs a new child name.
 func lockSubjectForChild(parent *Inode, name string) string {
-	if parent != nil && parent.fs != nil {
-		if subject := parent.fs.locks.subjectForNewChild(parent, name); subject != "" {
-			return subject
-		}
-	}
 	var parentKey string
+	var fs *Goofys
 	if parent != nil {
 		_, parentKey = parent.cloud()
+		fs = parent.fs
 	}
 	full := joinDataKey(parentKey, name)
-	if shouldLockDataKey(parent.fs, full) {
+	if shouldLockDataKey(fs, full) {
 		return full
 	}
 	return ""
@@ -177,11 +174,6 @@ func lockSubjectDataKey(inode *Inode) string {
 	}
 	if shouldLockDataKey(inode.fs, dataKey) {
 		return dataKey
-	}
-	if inode.fs != nil {
-		if subject := inode.fs.locks.subjectDataKey(dataKey, inode); subject != "" {
-			return subject
-		}
 	}
 	return ""
 }
