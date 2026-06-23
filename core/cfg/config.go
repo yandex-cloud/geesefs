@@ -117,6 +117,8 @@ type FlagStorage struct {
 	HideLockSidecars bool
 	LockTTL          time.Duration
 	LockOwner        string
+	LockInclude      string // comma-separated globs on basename; empty = all non-excluded
+	LockExclude      string // extra exclude globs (built-in Office defaults always apply)
 
 	// Debugging
 	DebugMain  bool

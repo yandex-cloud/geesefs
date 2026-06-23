@@ -50,9 +50,13 @@ type heldFileLock struct {
 	etag    string
 }
 
-// FileLockManager coordinates advisory locks stored as S3 sidecar objects.
+// FileLockManager holds path rules (include/exclude/subject map) and, when enabled,
+// coordinates advisory locks stored as S3 sidecar objects.
 type FileLockManager struct {
 	fs      *Goofys
+	rules   lockRules
+	enabled bool
+
 	session string
 	owner   string
 	client  string
@@ -62,25 +66,44 @@ type FileLockManager struct {
 	releaseWg sync.WaitGroup
 }
 
-func NewFileLockManager(fs *Goofys) *FileLockManager {
-	if !fs.flags.EnableFileLocks {
-		return nil
+func NewFileLockManager(fs *Goofys) FileLockManager {
+	m := FileLockManager{
+		fs:      fs,
+		rules:   *newLockRules(fs.flags),
+		enabled: fs.flags.EnableFileLocks,
+	}
+	if !m.enabled {
+		return m
 	}
 	host, _ := os.Hostname()
-	m := &FileLockManager{
-		fs:      fs,
-		session: uuid.New().String(),
-		owner:   defaultLockOwner(fs.flags.LockOwner),
-		client:  host,
-		held:    make(map[string]*heldFileLock),
-	}
-	lockLog.Infof("file locks enabled owner=%q session=%v client=%q", m.owner, m.session, m.client)
+	m.session = uuid.New().String()
+	m.owner = defaultLockOwner(fs.flags.LockOwner)
+	m.client = host
+	m.held = make(map[string]*heldFileLock)
+	lockLog.Infof("file locks enabled owner=%q session=%v client=%q include=%q exclude=%q",
+		m.owner, m.session, m.client, fs.flags.LockInclude, fs.flags.LockExclude)
 	return m
+}
+
+func (m *FileLockManager) excluded(dataKey string) bool {
+	return m.rules.excluded(dataKey)
+}
+
+func (m *FileLockManager) included(dataKey string) bool {
+	return m.rules.included(dataKey)
+}
+
+func (m *FileLockManager) subjectDataKey(dataKey string, inode *Inode) string {
+	return m.rules.subjectDataKey(dataKey, inode)
+}
+
+func (m *FileLockManager) subjectForNewChild(parent *Inode, name string) string {
+	return m.rules.subjectForNewChild(parent, name)
 }
 
 // Start runs a single background heartbeat for all locks held by this mount.
 func (m *FileLockManager) Start() {
-	if m == nil {
+	if !m.enabled {
 		return
 	}
 	interval := m.fs.flags.LockTTL / 3
@@ -91,7 +114,7 @@ func (m *FileLockManager) Start() {
 }
 
 func (m *FileLockManager) ReleaseAll() {
-	if m == nil {
+	if !m.enabled {
 		return
 	}
 	m.mu.Lock()
@@ -107,7 +130,7 @@ func (m *FileLockManager) ReleaseAll() {
 }
 
 func (m *FileLockManager) OnOpen(inode *Inode, writeIntent bool, fh *FileHandle) error {
-	if m == nil || inode.isDir() {
+	if !m.enabled || inode.isDir() {
 		return nil
 	}
 	dataKey := lockSubjectDataKey(inode)
@@ -229,7 +252,7 @@ func (m *FileLockManager) hasLocalRef(dataKey string) bool {
 }
 
 func (m *FileLockManager) OnRelease(fh *FileHandle) {
-	if m == nil {
+	if !m.enabled {
 		return
 	}
 	fh.waitLockReady()
@@ -239,12 +262,12 @@ func (m *FileLockManager) OnRelease(fh *FileHandle) {
 // OnInodeClosed releases the sidecar when the last FUSE handle on the main document closes.
 // Office markers (~$) and sandbox files must not trigger release while the document is open.
 func (m *FileLockManager) OnInodeClosed(inode *Inode) {
-	if m == nil {
+	if !m.enabled {
 		return
 	}
 
 	_, ownKey := inode.cloud()
-	if !shouldLockDataKey(ownKey) {
+	if !shouldLockDataKey(inode.fs, ownKey) {
 		return
 	}
 	if atomic.LoadInt32(&inode.lockInodeHeld) == lockFlagOff && !m.hasLocalRef(ownKey) {
@@ -274,7 +297,7 @@ func (m *FileLockManager) finalizeRelease(inode *Inode, dataKey string) {
 }
 
 func (m *FileLockManager) CheckWrite(inode *Inode, fh *FileHandle) error {
-	if m == nil || inode.isDir() {
+	if !m.enabled || inode.isDir() {
 		return nil
 	}
 	if fh != nil {
@@ -336,7 +359,7 @@ func (m *FileLockManager) CheckWrite(inode *Inode, fh *FileHandle) error {
 }
 
 func (m *FileLockManager) CheckCreate(parent *Inode, name string) error {
-	if m == nil {
+	if !m.enabled {
 		return nil
 	}
 	if isLockSidecarName(name) {
@@ -346,7 +369,7 @@ func (m *FileLockManager) CheckCreate(parent *Inode, name string) error {
 }
 
 func (m *FileLockManager) CheckMkDir(parent *Inode, name string) error {
-	if m == nil {
+	if !m.enabled {
 		return nil
 	}
 	return m.checkForeignLock(lockSubjectForChild(parent, name))

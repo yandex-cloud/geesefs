@@ -28,9 +28,17 @@ func isLockSidecarName(name string) bool {
 }
 
 // shouldLockDataKey reports whether advisory locking applies to this object (main document only).
-func shouldLockDataKey(dataKey string) bool {
-	if dataKey == "" || auxiliaryExcludedFromLock(dataKey) {
+func shouldLockDataKey(fs *Goofys, dataKey string) bool {
+	if dataKey == "" {
 		return false
+	}
+	if fs != nil {
+		if fs.locks.excluded(dataKey) {
+			return false
+		}
+		if !fs.locks.included(dataKey) {
+			return false
+		}
 	}
 	_, base := path.Split(dataKey)
 	return !isLockSidecarName(base)
@@ -111,15 +119,17 @@ func joinDataKey(prefix, name string) string {
 
 // lockSubjectForChild returns the data key whose sidecar governs a new child name.
 func lockSubjectForChild(parent *Inode, name string) string {
-	if subject := resolveSubjectForNewChild(parent, name); subject != "" {
-		return subject
+	if parent != nil && parent.fs != nil {
+		if subject := parent.fs.locks.subjectForNewChild(parent, name); subject != "" {
+			return subject
+		}
 	}
 	var parentKey string
 	if parent != nil {
 		_, parentKey = parent.cloud()
 	}
 	full := joinDataKey(parentKey, name)
-	if shouldLockDataKey(full) {
+	if shouldLockDataKey(parent.fs, full) {
 		return full
 	}
 	return ""
@@ -131,7 +141,7 @@ func lockSubjectInode(fs *Goofys, inode *Inode) *Inode {
 		return nil
 	}
 	_, dataKey := inode.cloud()
-	if shouldLockDataKey(dataKey) {
+	if shouldLockDataKey(fs, dataKey) {
 		return inode
 	}
 	subjectKey := lockSubjectDataKey(inode)
@@ -165,11 +175,13 @@ func lockSubjectDataKey(inode *Inode) string {
 	if dataKey == "" {
 		return ""
 	}
-	if shouldLockDataKey(dataKey) {
+	if shouldLockDataKey(inode.fs, dataKey) {
 		return dataKey
 	}
-	if subject := resolveSubjectDataKey(dataKey, inode); subject != "" {
-		return subject
+	if inode.fs != nil {
+		if subject := inode.fs.locks.subjectDataKey(dataKey, inode); subject != "" {
+			return subject
+		}
 	}
 	return ""
 }

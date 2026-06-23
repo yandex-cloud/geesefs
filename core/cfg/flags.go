@@ -170,6 +170,16 @@ MISC OPTIONS:
 			Name:  "lock-owner",
 			Usage: "Display name stored in lock sidecar (default: OS username)",
 		},
+
+		cli.StringFlag{
+			Name:  "lock-include",
+			Usage: "Comma-separated globs (basename) for files that may have lock sidecars; empty = all non-excluded (e.g. \"*.docx,*.xlsx,*.pptx\")",
+		},
+
+		cli.StringFlag{
+			Name:  "lock-exclude",
+			Usage: "Extra comma-separated globs to skip locking; Office defaults (~$*, *.sb-*, *~WR*) always apply",
+		},
 	}
 
 	s3Flags := []cli.Flag{
@@ -867,6 +877,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		HideLockSidecars:                   c.Bool("hide-lock-sidecars"),
 		LockTTL:                            c.Duration("lock-ttl"),
 		LockOwner:                          c.String("lock-owner"),
+		LockInclude:                        c.String("lock-include"),
+		LockExclude:                        c.String("lock-exclude"),
 
 		// Tuning,
 		MemoryLimit:         uint64(1024 * 1024 * c.Int("memory-limit")),
