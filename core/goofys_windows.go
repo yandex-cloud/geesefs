@@ -272,6 +272,10 @@ func (fs *GoofysWin) Unlink(path string) (ret int) {
 		return mapWinError(err)
 	}
 
+	if shouldHideLockSidecar(fs.flags, child) && fs.flags.EnableFileLocks {
+		return mapWinError(syscall.EACCES)
+	}
+
 	err = parent.Unlink(child)
 	return mapWinError(err)
 }
@@ -478,6 +482,15 @@ func (fs *GoofysWin) Create(path string, flags int, mode uint32) (ret int, fhId 
 
 	handleID := fs.AddFileHandle(fh)
 
+	err = fs.locksOnOpen(inode, openWantsWrite(uint32(flags)), fh)
+	if err != nil {
+		fs.mu.Lock()
+		delete(fs.fileHandles, fuseops.HandleID(handleID))
+		fs.mu.Unlock()
+		fh.Release()
+		return mapWinError(err), 0
+	}
+
 	return 0, uint64(handleID)
 }
 
@@ -533,6 +546,15 @@ func (fs *GoofysWin) Open(path string, flags int) (ret int, fhId uint64) {
 	}
 
 	handleID := fs.AddFileHandle(fh)
+
+	err = fs.locksOnOpen(inode, openWantsWrite(uint32(flags)), fh)
+	if err != nil {
+		fs.mu.Lock()
+		delete(fs.fileHandles, fuseops.HandleID(handleID))
+		fs.mu.Unlock()
+		fh.Release()
+		return mapWinError(err), 0
+	}
 
 	return 0, uint64(handleID)
 }

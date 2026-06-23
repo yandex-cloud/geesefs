@@ -112,6 +112,12 @@ type FlagStorage struct {
 	NoVerifySSL         bool
 	WinRefreshDirs      bool
 
+	// Advisory file locking (sidecar in S3)
+	EnableFileLocks   bool
+	HideLockSidecars  bool
+	LockTTL           time.Duration
+	LockOwner        string
+
 	// Debugging
 	DebugMain  bool
 	DebugFuse  bool

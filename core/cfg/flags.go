@@ -149,6 +149,27 @@ MISC OPTIONS:
 			Name:  "ignore-setting-attrs-for-root-dir-erros",
 			Usage: "Ignore changing attributes for root of geesefs (ex. 'touch ./mountpoint')",
 		},
+
+		cli.BoolFlag{
+			Name:  "enable-file-locks",
+			Usage: "Enable advisory file locking via S3 sidecar objects (lock-at-open for Office files)",
+		},
+
+		cli.BoolTFlag{
+			Name:  "hide-lock-sidecars",
+			Usage: "Hide .*.geesefs-lock sidecar files from directory listings and lookup (default: on)",
+		},
+
+		cli.DurationFlag{
+			Name:  "lock-ttl",
+			Value: 30 * time.Minute,
+			Usage: "TTL for advisory file locks; stale locks can be reacquired after expiry",
+		},
+
+		cli.StringFlag{
+			Name:  "lock-owner",
+			Usage: "Display name stored in lock sidecar (default: OS username)",
+		},
 	}
 
 	s3Flags := []cli.Flag{
@@ -842,6 +863,10 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		Setgid:                             c.Int("setgid"),
 		WinRefreshDirs:                     c.Bool("refresh-dirs"),
 		IgnoreSettingAttrsForRootDirErrors: c.Bool("ignore-setting-attrs-for-root-dir-erros"),
+		EnableFileLocks:                    c.Bool("enable-file-locks"),
+		HideLockSidecars:                   c.Bool("hide-lock-sidecars"),
+		LockTTL:                            c.Duration("lock-ttl"),
+		LockOwner:                          c.String("lock-owner"),
 
 		// Tuning,
 		MemoryLimit:         uint64(1024 * 1024 * c.Int("memory-limit")),
@@ -1096,6 +1121,8 @@ func DefaultFlags() *FlagStorage {
 		MaxDiskCacheFD:      512,
 		RefreshFilename:     ".invalidate",
 		FlushFilename:       ".fsyncdir",
+		HideLockSidecars:    true,
+		LockTTL:             30 * time.Minute,
 		PartSizes: []PartSizeConfig{
 			{PartSize: 5 * 1024 * 1024, PartCount: 1000},
 			{PartSize: 25 * 1024 * 1024, PartCount: 1000},

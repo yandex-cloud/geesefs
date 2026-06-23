@@ -35,9 +35,18 @@ type FileHandle struct {
 	lastReadTotal uint64
 	lastReadSizes []uint64
 	lastReadIdx   int
+
+	lockHeld     bool
+	writeBlocked bool
+	lockWait     chan struct{} // closed when background acquire finishes; nil if sync
 }
 
-// On Linux and MacOS, IOV_MAX = 1024
+func (fh *FileHandle) waitLockReady() {
+	if fh.lockWait == nil {
+		return
+	}
+	<-fh.lockWait
+}
 const IOV_MAX = 1024
 const READ_BUF_SIZE = 128 * 1024
 const MAX_FLUSH_PRIORITY = 3
@@ -173,6 +182,14 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 	}
 
 	fh.inode.mu.Lock()
+
+	if err := fh.inode.fs.locksCheckWrite(fh.inode, fh); err != nil {
+		if fh.inode.fs.flags.UseEnomem {
+			fh.inode.fs.bufferPool.Use(-int64(len(data)), false)
+		}
+		fh.inode.mu.Unlock()
+		return err
+	}
 
 	if fh.inode.CacheState == ST_DELETED || fh.inode.CacheState == ST_DEAD {
 		// Oops, it's a deleted file. We don't support changing invisible files
@@ -628,12 +645,18 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 
 func (fh *FileHandle) Release() {
 	// LookUpInode accesses fileHandles without mutex taken, so use atomics for now
+	if fh.inode.fs.locks != nil {
+		fh.inode.fs.locks.OnRelease(fh)
+	}
 	n := atomic.AddInt32(&fh.inode.fileHandles, -1)
 	if n == -1 {
 		panic(fmt.Sprintf("Released more file handles than acquired, n = %v", n))
 	}
 	if n == 0 {
 		fh.inode.Parent.addModified(-1)
+		if fh.inode.fs.locks != nil {
+			fh.inode.fs.locks.OnInodeClosed(fh.inode)
+		}
 	}
 	fh.inode.fs.WakeupFlusher()
 }

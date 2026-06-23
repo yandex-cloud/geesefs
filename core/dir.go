@@ -276,6 +276,9 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, sealEnd b
 			continue
 		}
 		baseName := (*obj.Key)[len(prefix):]
+		if shouldHideLockSidecar(parent.fs.flags, baseName) {
+			continue
+		}
 		if !isInvalidName(baseName) {
 			parent.insertSubTree(baseName, &obj, dirs)
 		}
@@ -844,6 +847,23 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 		return
 	}
 
+	for dh.lastInternalOffset-2 < len(dh.inode.dir.Children) {
+		child := dh.inode.dir.Children[dh.lastInternalOffset-2]
+		if shouldHideLockSidecar(dh.inode.fs.flags, child.Name) {
+			dh.lastInternalOffset++
+			continue
+		}
+		break
+	}
+	if dh.lastInternalOffset-2 >= len(dh.inode.dir.Children) {
+		parent.dir.listDone = false
+		if parent.dir.forgetDuringList {
+			parent.dir.DirTime = time.Time{}
+			parent.dir.Gaps = nil
+		}
+		return
+	}
+
 	child := dh.inode.dir.Children[dh.lastInternalOffset-2]
 	if dh.inode.dir.lastFromCloud != nil && child.Name == *dh.inode.dir.lastFromCloud {
 		dh.inode.dir.lastFromCloud = nil
@@ -1212,6 +1232,10 @@ func (parent *Inode) CreateOrOpen(name string, open bool) (inode *Inode, fh *Fil
 
 	fs := parent.fs
 
+	if err := fs.locksCheckCreate(parent, name); err != nil {
+		return nil, nil, err
+	}
+
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
 
@@ -1258,6 +1282,10 @@ func (parent *Inode) MkDir(
 	name string) (inode *Inode, err error) {
 
 	parent.logFuse("MkDir", name)
+
+	if err := parent.fs.locksCheckMkDir(parent, name); err != nil {
+		return nil, err
+	}
 
 	parent.mu.Lock()
 	defer parent.mu.Unlock()
@@ -1808,6 +1836,10 @@ func (parent *Inode) insertSubTree(path string, obj *BlobItemOutput, dirs map[*I
 	fs := parent.fs
 	slash := strings.Index(path, "/")
 	if slash == -1 {
+		if shouldHideLockSidecar(fs.flags, path) {
+			sealPastDirs(dirs, parent)
+			return
+		}
 		inode := parent.findChildUnlocked(path)
 		if inode == nil {
 			// don't revive deleted items
@@ -1895,6 +1927,9 @@ func (parent *Inode) findChildMaxTime() (maxMtime, maxCtime time.Time) {
 }
 
 func (parent *Inode) LookUpCached(name string) (inode *Inode, err error) {
+	if shouldHideLockSidecar(parent.fs.flags, name) {
+		return nil, syscall.ENOENT
+	}
 	parent.mu.Lock()
 	ok := false
 	inode = parent.findChildUnlocked(name)

@@ -1045,8 +1045,17 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	if s.config.ACL != "" {
 		put.ACL = &s.config.ACL
 	}
+	if param.Tagging != nil {
+		put.Tagging = param.Tagging
+	}
 
 	req, resp := s.PutObjectRequest(put)
+	if param.IfMatch != nil {
+		req.HTTPRequest.Header.Set("If-Match", *param.IfMatch)
+	}
+	if param.IfNoneMatch != nil {
+		req.HTTPRequest.Header.Set("If-None-Match", *param.IfNoneMatch)
+	}
 	err := req.Send()
 	if err != nil {
 		return nil, err

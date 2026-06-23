@@ -512,6 +512,16 @@ func (fs *GoofysFuse) OpenFile(
 
 	op.Handle = fs.AddFileHandle(fh)
 
+	err = fs.locksOnOpen(in, openWantsWrite(uint32(op.OpenFlags)), fh)
+	if err != nil {
+		fs.mu.Lock()
+		delete(fs.fileHandles, op.Handle)
+		fs.mu.Unlock()
+		fh.Release()
+		err = mapAwsError(err)
+		return
+	}
+
 	// this flag appears to tell the kernel if this open should
 	// use the page cache or not. "use" here means:
 	//
@@ -810,6 +820,10 @@ func (fs *GoofysFuse) Unlink(
 	if atomic.LoadInt32(&parent.CacheState) == ST_DEAD {
 		// Stale inode
 		return syscall.ESTALE
+	}
+
+	if shouldHideLockSidecar(fs.flags, op.Name) && fs.flags.EnableFileLocks {
+		return syscall.EACCES
 	}
 
 	err = parent.Unlink(op.Name)

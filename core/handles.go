@@ -107,6 +107,8 @@ type Inode struct {
 	dir *DirInodeData
 
 	fileHandles  int32
+	lockInodeHeld int32 // advisory lock held on the main document inode only
+	lockForeignBusy int32 // another client holds the lock; strip write bits in attrs
 	lastWriteEnd uint64
 
 	// cached/buffered data
@@ -339,7 +341,24 @@ func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 		attr.Nlink = 1
 	}
 
+	if inode.isLockForeignBusy() {
+		attr.Mode &^= 0222
+	}
+
 	return
+}
+
+// isLockForeignBusy reports whether another client holds the advisory lock.
+// The flag lives on the main document inode; office markers inherit from it.
+func (inode *Inode) isLockForeignBusy() bool {
+	if atomic.LoadInt32(&inode.lockForeignBusy) != 0 {
+		return true
+	}
+	subject := lockSubjectInode(inode.fs, inode)
+	if subject != nil && subject != inode {
+		return atomic.LoadInt32(&subject.lockForeignBusy) != 0
+	}
+	return false
 }
 
 func (inode *Inode) logFuse(op string, args ...interface{}) {
