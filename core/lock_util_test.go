@@ -36,7 +36,7 @@ func TestShouldLockDataKey(t *testing.T) {
 		t.Fatal("main document should be locked")
 	}
 	if shouldLockDataKey("~$geesefs-test.docx") {
-		t.Fatal("office marker should be skipped")
+		t.Fatal("MS Office marker should be skipped")
 	}
 	if shouldLockDataKey("geesefs-test.docx.sb-15d02470-gHvegY/.~WRD0000") {
 		t.Fatal("MS Office sandbox temp should be skipped")
