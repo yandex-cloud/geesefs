@@ -120,7 +120,7 @@ type Goofys struct {
 
 	NotifyCallback func(notifications []interface{})
 
-	locks *FileLockManager
+	locks *FileLockManager // nil when --enable-file-locks is off; all (*FileLockManager) methods are nil-safe
 }
 
 type OpStats struct {
@@ -394,9 +394,7 @@ func newGoofys(ctx context.Context, bucket string, flags *cfg.FlagStorage,
 
 func (fs *Goofys) Shutdown() {
 	atomic.StoreInt32(&fs.shutdown, 1)
-	if fs.locks != nil {
-		fs.locks.ReleaseAll()
-	}
+	fs.locks.ReleaseAll()
 	close(fs.shutdownCh)
 	fs.WakeupFlusher()
 	if fs.diskFdQueue != nil {

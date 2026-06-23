@@ -107,9 +107,11 @@ type Inode struct {
 	dir *DirInodeData
 
 	fileHandles  int32
-	lockInodeHeld int32 // advisory lock held on the main document inode only
-	lockForeignBusy int32 // another client holds the lock; strip write bits in attrs
 	lastWriteEnd uint64
+
+	// Advisory file locks (atomics; read from FUSE without inode.mu).
+	lockInodeHeld   int32 // we hold the sidecar for this document in this geesefs process
+	lockForeignBusy int32 // another client holds the lock; strip write bits in FUSE attrs
 
 	// cached/buffered data
 	CacheState     int32
@@ -342,7 +344,7 @@ func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 	}
 
 	if inode.isLockForeignBusy() {
-		attr.Mode &^= 0222
+		attr.Mode &^= modeWriteAll
 	}
 
 	return
@@ -351,12 +353,12 @@ func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 // isLockForeignBusy reports whether another client holds the advisory lock.
 // The flag lives on the main document inode; office markers inherit from it.
 func (inode *Inode) isLockForeignBusy() bool {
-	if atomic.LoadInt32(&inode.lockForeignBusy) != 0 {
+	if atomic.LoadInt32(&inode.lockForeignBusy) != lockFlagOff {
 		return true
 	}
 	subject := lockSubjectInode(inode.fs, inode)
 	if subject != nil && subject != inode {
-		return atomic.LoadInt32(&subject.lockForeignBusy) != 0
+		return atomic.LoadInt32(&subject.lockForeignBusy) != lockFlagOff
 	}
 	return false
 }

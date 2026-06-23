@@ -90,6 +90,12 @@ type DirHandle struct {
 	lastName           string
 }
 
+// dirChildIndex maps ReadDir cursor to dir.Children index.
+// Cursor values: 0=".", 1="..", 2=Children[0], 3=Children[1], ...
+func dirChildIndex(cursor int) int {
+	return cursor - 2
+}
+
 func NewDirHandle(inode *Inode) (dh *DirHandle) {
 	dh = &DirHandle{inode: inode}
 	return
@@ -837,7 +843,7 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 		dh.checkDirPosition()
 	}
 
-	if dh.lastInternalOffset-2 >= len(dh.inode.dir.Children) {
+	if dirChildIndex(dh.lastInternalOffset) >= len(dh.inode.dir.Children) {
 		// we've reached the end
 		parent.dir.listDone = false
 		if parent.dir.forgetDuringList {
@@ -847,15 +853,17 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 		return
 	}
 
-	for dh.lastInternalOffset-2 < len(dh.inode.dir.Children) {
-		child := dh.inode.dir.Children[dh.lastInternalOffset-2]
+	// ReadDir cursor encoding (see checkDirPosition): 0=".", 1="..", 2+=Children[i-2].
+	// Skip hidden lock sidecars without exposing them to the kernel.
+	for dirChildIndex(dh.lastInternalOffset) < len(dh.inode.dir.Children) {
+		child := dh.inode.dir.Children[dirChildIndex(dh.lastInternalOffset)]
 		if shouldHideLockSidecar(dh.inode.fs.flags, child.Name) {
 			dh.lastInternalOffset++
 			continue
 		}
 		break
 	}
-	if dh.lastInternalOffset-2 >= len(dh.inode.dir.Children) {
+	if dirChildIndex(dh.lastInternalOffset) >= len(dh.inode.dir.Children) {
 		parent.dir.listDone = false
 		if parent.dir.forgetDuringList {
 			parent.dir.DirTime = time.Time{}
@@ -864,7 +872,7 @@ func (dh *DirHandle) ReadDir() (inode *Inode, err error) {
 		return
 	}
 
-	child := dh.inode.dir.Children[dh.lastInternalOffset-2]
+	child := dh.inode.dir.Children[dirChildIndex(dh.lastInternalOffset)]
 	if dh.inode.dir.lastFromCloud != nil && child.Name == *dh.inode.dir.lastFromCloud {
 		dh.inode.dir.lastFromCloud = nil
 	}

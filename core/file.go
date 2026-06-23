@@ -36,17 +36,12 @@ type FileHandle struct {
 	lastReadSizes []uint64
 	lastReadIdx   int
 
-	lockHeld     bool
-	writeBlocked bool
-	lockWait     chan struct{} // closed when background acquire finishes; nil if sync
+	lockHeld     bool          // this handle/session owns the sidecar lock
+	writeBlocked bool          // foreign lock: open succeeded but writes must fail (EACCES)
+	lockWait     chan struct{} // async acquire on open; closed when background tryAcquire finishes
 }
 
-func (fh *FileHandle) waitLockReady() {
-	if fh.lockWait == nil {
-		return
-	}
-	<-fh.lockWait
-}
+// On Linux and MacOS, IOV_MAX = 1024
 const IOV_MAX = 1024
 const READ_BUF_SIZE = 128 * 1024
 const MAX_FLUSH_PRIORITY = 3
@@ -185,6 +180,7 @@ func (fh *FileHandle) WriteFile(offset int64, data []byte, copyData bool) (err e
 
 	if err := fh.inode.fs.locksCheckWrite(fh.inode, fh); err != nil {
 		if fh.inode.fs.flags.UseEnomem {
+			// Undo the reservation above: negative size releases buffer pool quota.
 			fh.inode.fs.bufferPool.Use(-int64(len(data)), false)
 		}
 		fh.inode.mu.Unlock()
@@ -645,20 +641,24 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 
 func (fh *FileHandle) Release() {
 	// LookUpInode accesses fileHandles without mutex taken, so use atomics for now
-	if fh.inode.fs.locks != nil {
-		fh.inode.fs.locks.OnRelease(fh)
-	}
+	fh.inode.fs.locks.OnRelease(fh)
 	n := atomic.AddInt32(&fh.inode.fileHandles, -1)
 	if n == -1 {
 		panic(fmt.Sprintf("Released more file handles than acquired, n = %v", n))
 	}
 	if n == 0 {
 		fh.inode.Parent.addModified(-1)
-		if fh.inode.fs.locks != nil {
-			fh.inode.fs.locks.OnInodeClosed(fh.inode)
-		}
+		fh.inode.fs.locks.OnInodeClosed(fh.inode)
 	}
 	fh.inode.fs.WakeupFlusher()
+}
+
+// waitLockReady blocks until async lock acquire (OnOpen) completes, if any.
+func (fh *FileHandle) waitLockReady() {
+	if fh.lockWait == nil {
+		return
+	}
+	<-fh.lockWait
 }
 
 func (inode *Inode) getMultiReader(offset, size uint64) (reader *MultiReader, ids map[uint64]bool, err error) {

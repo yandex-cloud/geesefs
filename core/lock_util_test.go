@@ -25,9 +25,9 @@ func TestIsLockSidecarName(t *testing.T) {
 	}
 }
 
-func TestIsOfficeMarkerName(t *testing.T) {
-	if !isOfficeMarkerName("~$Q1.xlsx") {
-		t.Fatal("expected office marker")
+func TestIsMSOfficeMarkerName(t *testing.T) {
+	if !isMSOfficeMarkerName("~$Q1.xlsx") {
+		t.Fatal("expected MS Office lock marker")
 	}
 }
 
@@ -39,13 +39,13 @@ func TestShouldLockDataKey(t *testing.T) {
 		t.Fatal("office marker should be skipped")
 	}
 	if shouldLockDataKey("geesefs-test.docx.sb-15d02470-gHvegY/.~WRD0000") {
-		t.Fatal("word sandbox temp should be skipped")
+		t.Fatal("MS Office sandbox temp should be skipped")
 	}
 	if shouldLockDataKey("geesefs-test.docx.sb-15d02470-gHvegY/..~WRD0002") {
-		t.Fatal("word sandbox temp with extra dot should be skipped")
+		t.Fatal("MS Office sandbox temp with extra dot should be skipped")
 	}
 	if shouldLockDataKey("geesefs-test.docx.sb-15d02470-ECklaz/.~WRL0001") {
-		t.Fatal("word write-lock temp should be skipped")
+		t.Fatal("MS Office write-lock temp should be skipped")
 	}
 	if !shouldLockDataKey("finance/Q1.xlsx") {
 		t.Fatal("nested document should be locked")
@@ -106,11 +106,11 @@ func TestOpenWantsWrite(t *testing.T) {
 	}
 }
 
-func TestSandboxSubjectDataKey(t *testing.T) {
-	if got := sandboxSubjectDataKey("geesefs-test.docx.sb-15d02470-CWByZs/.~WRD0000"); got != "geesefs-test.docx" {
+func TestMSOfficeSandboxSubjectDataKey(t *testing.T) {
+	if got := msOfficeSandboxSubjectDataKey("geesefs-test.docx.sb-15d02470-CWByZs/.~WRD0000"); got != "geesefs-test.docx" {
 		t.Fatalf("sandbox temp: got %q", got)
 	}
-	if got := sandboxSubjectDataKey("finance/Q1.xlsx.sb-1-abc/.~WRD0000"); got != "finance/Q1.xlsx" {
+	if got := msOfficeSandboxSubjectDataKey("finance/Q1.xlsx.sb-1-abc/.~WRD0000"); got != "finance/Q1.xlsx" {
 		t.Fatalf("nested sandbox: got %q", got)
 	}
 	fs := &Goofys{flags: &cfg.FlagStorage{}}
@@ -122,10 +122,10 @@ func TestSandboxSubjectDataKey(t *testing.T) {
 		t.Fatalf("sandbox mkdir: got %q", got)
 	}
 	if got := lockSubjectForChild(parent, "~$geesefs-test.docx"); got != "geesefs-test.docx" {
-		t.Fatalf("office marker create: got %q", got)
+		t.Fatalf("MS Office marker create: got %q", got)
 	}
 	if got := lockSubjectForChild(parent, "~$esefs-test.docx"); got != "geesefs-test.docx" {
-		t.Fatalf("word mac marker create: got %q", got)
+		t.Fatalf("MS Office macOS marker create: got %q", got)
 	}
 }
 
@@ -140,7 +140,7 @@ func TestLockSubjectInode(t *testing.T) {
 		t.Fatal("main document inode should map to itself")
 	}
 	if got := lockSubjectInode(fs, marker); got != doc {
-		t.Fatalf("office marker should map to main document, got %v", got)
+		t.Fatalf("MS Office marker should map to main document, got %v", got)
 	}
 	if got := lockSubjectDataKey(marker); got != "geesefs-test.docx" {
 		t.Fatalf("marker subject key: got %q", got)

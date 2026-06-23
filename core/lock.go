@@ -1,17 +1,3 @@
-// Copyright 2026 Yandex LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package core
 
 import (
@@ -31,6 +17,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/jacobsa/fuse/fuseops"
 )
+
+// Advisory file locking: one S3 sidecar per data object
+// - FUSE hooks in this file
+// - path/name mapping in lock_util.go
+//
+// Lifecycle:
+//   - NewFileLockManager: once per mount; random session UUID identifies this geesefs process.
+//   - Start: one heartbeat goroutine for the whole mount (not per file); renews every held sidecar.
+//   - OnOpen/CheckWrite: read or create sidecar; held map tracks objects we locked.
+//   - OnInodeClosed: clear sidecar when the last handle on the main document inode closes.
+//   - ReleaseAll: on unmount, release all sidecars still in held.
 
 type lockRecord struct {
 	Version   int    `json:"version"`
@@ -61,7 +58,7 @@ type FileLockManager struct {
 	client  string
 
 	mu        sync.Mutex
-	held      map[string]*heldFileLock // dataKey -> state
+	held      map[string]*heldFileLock // dataKey (S3 object key) -> local holder state
 	releaseWg sync.WaitGroup
 }
 
@@ -81,6 +78,7 @@ func NewFileLockManager(fs *Goofys) *FileLockManager {
 	return m
 }
 
+// Start runs a single background heartbeat for all locks held by this mount.
 func (m *FileLockManager) Start() {
 	if m == nil {
 		return
@@ -197,15 +195,15 @@ func (m *FileLockManager) setForeignBusy(inode *Inode, busy bool) {
 		subject = inode
 	}
 	if busy {
-		atomic.StoreInt32(&subject.lockForeignBusy, 1)
+		atomic.StoreInt32(&subject.lockForeignBusy, lockFlagOn)
 	} else {
-		atomic.StoreInt32(&subject.lockForeignBusy, 0)
+		atomic.StoreInt32(&subject.lockForeignBusy, lockFlagOff)
 	}
 }
 
 func (m *FileLockManager) inodeLockedLocally(inode *Inode) bool {
 	if subject := lockSubjectInode(m.fs, inode); subject != nil {
-		if atomic.LoadInt32(&subject.lockInodeHeld) != 0 {
+		if atomic.LoadInt32(&subject.lockInodeHeld) != lockFlagOff {
 			return true
 		}
 	}
@@ -214,7 +212,7 @@ func (m *FileLockManager) inodeLockedLocally(inode *Inode) bool {
 
 func (m *FileLockManager) markInodeLocked(inode *Inode, dataKey string) {
 	if subject := lockSubjectInode(m.fs, inode); subject != nil {
-		atomic.StoreInt32(&subject.lockInodeHeld, 1)
+		atomic.StoreInt32(&subject.lockInodeHeld, lockFlagOn)
 	}
 	m.mu.Lock()
 	if m.held[dataKey] == nil {
@@ -249,7 +247,7 @@ func (m *FileLockManager) OnInodeClosed(inode *Inode) {
 	if !shouldLockDataKey(ownKey) {
 		return
 	}
-	if atomic.LoadInt32(&inode.lockInodeHeld) == 0 && !m.hasLocalRef(ownKey) {
+	if atomic.LoadInt32(&inode.lockInodeHeld) == lockFlagOff && !m.hasLocalRef(ownKey) {
 		return
 	}
 	if atomic.LoadInt32(&inode.fileHandles) > 0 {
@@ -264,10 +262,10 @@ func (m *FileLockManager) finalizeRelease(inode *Inode, dataKey string) {
 		lockLog.Debugf("finalizeRelease %v: skipped, handles reopened", dataKey)
 		return
 	}
-	if atomic.LoadInt32(&inode.lockInodeHeld) == 0 && !m.hasLocalRef(dataKey) {
+	if atomic.LoadInt32(&inode.lockInodeHeld) == lockFlagOff && !m.hasLocalRef(dataKey) {
 		return
 	}
-	atomic.StoreInt32(&inode.lockInodeHeld, 0)
+	atomic.StoreInt32(&inode.lockInodeHeld, lockFlagOff)
 	m.mu.Lock()
 	delete(m.held, dataKey)
 	m.mu.Unlock()
@@ -293,7 +291,7 @@ func (m *FileLockManager) CheckWrite(inode *Inode, fh *FileHandle) error {
 		return nil
 	}
 	if subject := lockSubjectInode(m.fs, inode); subject != nil {
-		if atomic.LoadInt32(&subject.lockInodeHeld) != 0 {
+		if atomic.LoadInt32(&subject.lockInodeHeld) != lockFlagOff {
 			if fh != nil {
 				fh.lockHeld = true
 			}
@@ -582,6 +580,7 @@ func (m *FileLockManager) releaseKey(dataKey string) {
 }
 
 func (m *FileLockManager) heartbeatLoop(interval time.Duration) {
+	// One ticker per mount; each tick renews expires_at on every sidecar in held.
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for atomic.LoadInt32(&m.fs.shutdown) == 0 {
@@ -681,30 +680,18 @@ func (m *FileLockManager) storeHeldEtag(lk, etag string) {
 }
 
 func (fs *Goofys) locksCheckWrite(inode *Inode, fh *FileHandle) error {
-	if fs.locks == nil {
-		return nil
-	}
 	return fs.locks.CheckWrite(inode, fh)
 }
 
 func (fs *Goofys) locksOnOpen(inode *Inode, writeIntent bool, fh *FileHandle) error {
-	if fs.locks == nil {
-		return nil
-	}
 	return fs.locks.OnOpen(inode, writeIntent, fh)
 }
 
 func (fs *Goofys) locksCheckCreate(parent *Inode, name string) error {
-	if fs.locks == nil {
-		return nil
-	}
 	return fs.locks.CheckCreate(parent, name)
 }
 
 func (fs *Goofys) locksCheckMkDir(parent *Inode, name string) error {
-	if fs.locks == nil {
-		return nil
-	}
 	return fs.locks.CheckMkDir(parent, name)
 }
 
