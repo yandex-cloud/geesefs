@@ -52,6 +52,6 @@ func TestLockRulesUserExclude(t *testing.T) {
 		t.Fatal("user exclude patterns must apply")
 	}
 	if !r.excluded("~$file.docx") {
-		t.Fatal("built-in office excludes must remain")
+		t.Fatal("built-in editor excludes must remain")
 	}
 }

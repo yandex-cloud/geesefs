@@ -1,7 +1,4 @@
 // Lock path rules: include/exclude globs (--lock-include, --lock-exclude).
-//
-// Subject mapping (auxiliary editor paths → main document) was removed for
-// manual testing. To restore: cp lock_rules.go.with-subject-map lock_rules.go
 
 package core
 
@@ -12,15 +9,13 @@ import (
 	"github.com/yandex-cloud/geesefs/core/cfg"
 )
 
-// Built-in exclude globs for MS Office auxiliary paths on macOS (always active).
+// Built-in exclude globs for editor auxiliary paths (MS Office on macOS).
 var defaultLockExcludeGlobs = []string{
 	"~$*",
 	"*.sb-*",
 	"*~WR*",
 }
 
-// lockRules holds include/exclude globs for one mount.
-// Embedded in FileLockManager (always present; path rules apply even when locking is off).
 type lockRules struct {
 	include []string
 	exclude []string
@@ -59,9 +54,6 @@ func matchLockGlob(pattern, name string) bool {
 }
 
 func (r *lockRules) excluded(dataKey string) bool {
-	if r == nil {
-		return false
-	}
 	_, base := path.Split(dataKey)
 	for _, pat := range r.exclude {
 		if matchLockGlob(pat, base) {
@@ -81,7 +73,7 @@ func (r *lockRules) excluded(dataKey string) bool {
 // included reports whether dataKey may be a direct lock subject (sidecar owner).
 // Empty include list means all non-excluded paths.
 func (r *lockRules) included(dataKey string) bool {
-	if r == nil || len(r.include) == 0 {
+	if len(r.include) == 0 {
 		return true
 	}
 	_, base := path.Split(dataKey)

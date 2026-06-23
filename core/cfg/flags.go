@@ -152,7 +152,7 @@ MISC OPTIONS:
 
 		cli.BoolFlag{
 			Name:  "enable-file-locks",
-			Usage: "Enable advisory file locking via S3 sidecar objects (lock-at-open for Office files)",
+			Usage: "Enable advisory file locking via S3 sidecar objects",
 		},
 
 		cli.BoolTFlag{

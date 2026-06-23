@@ -18,9 +18,10 @@ import (
 	"github.com/jacobsa/fuse/fuseops"
 )
 
-// Advisory file locking: one S3 sidecar per data object
-// - FUSE hooks in this file
-// - path/name mapping in lock_util.go
+// Advisory file locking: one S3 sidecar per lockable data object.
+// - FUSE hooks and S3 protocol: lock.go
+// - include/exclude globs: lock_rules.go
+// - path helpers: lock_util.go
 //
 // Lifecycle:
 //   - NewFileLockManager: once per mount; random session UUID identifies this geesefs process.
@@ -251,8 +252,8 @@ func (m *FileLockManager) OnRelease(fh *FileHandle) {
 	fh.lockHeld = false
 }
 
-// OnInodeClosed releases the sidecar when the last FUSE handle on the main document closes.
-// Office markers (~$) and sandbox files must not trigger release while the document is open.
+// OnInodeClosed releases the sidecar when the last handle on a lock subject closes.
+// Excluded paths (~$, sandbox temps) are not lock subjects and never release here.
 func (m *FileLockManager) OnInodeClosed(inode *Inode) {
 	if !m.enabled {
 		return

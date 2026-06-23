@@ -31,16 +31,16 @@ func TestShouldLockDataKey(t *testing.T) {
 		t.Fatal("main document should be locked")
 	}
 	if shouldLockDataKey(fs, "~$geesefs-test.docx") {
-		t.Fatal("MS Office marker should be skipped")
+		t.Fatal("editor lock marker should be excluded")
 	}
 	if shouldLockDataKey(fs, "geesefs-test.docx.sb-15d02470-gHvegY/.~WRD0000") {
-		t.Fatal("MS Office sandbox temp should be skipped")
+		t.Fatal("sandbox temp should be excluded")
 	}
 	if shouldLockDataKey(fs, "geesefs-test.docx.sb-15d02470-gHvegY/..~WRD0002") {
-		t.Fatal("MS Office sandbox temp with extra dot should be skipped")
+		t.Fatal("sandbox temp with extra dot should be excluded")
 	}
 	if shouldLockDataKey(fs, "geesefs-test.docx.sb-15d02470-ECklaz/.~WRL0001") {
-		t.Fatal("MS Office write-lock temp should be skipped")
+		t.Fatal("sandbox write-lock temp should be excluded")
 	}
 	if !shouldLockDataKey(fs, "finance/Q1.xlsx") {
 		t.Fatal("nested document should be locked")
@@ -112,24 +112,16 @@ func TestOpenWantsWrite(t *testing.T) {
 }
 
 func TestLockSubjectInode(t *testing.T) {
-	fs := testGoofys(&cfg.FlagStorage{})
+	fs := testGoofys(nil)
 	parent := NewInode(fs, nil, "")
+	parent.ToDir()
 	doc := NewInode(fs, parent, "geesefs-test.docx")
-	marker := NewInode(fs, parent, "~$esefs-test.docx")
-	parent.dir = &DirInodeData{Children: []*Inode{doc, marker}}
 
 	if got := lockSubjectInode(fs, doc); got != doc {
-		t.Fatal("main document inode should map to itself")
+		t.Fatal("lock subject inode should be itself")
 	}
-	if got := lockSubjectInode(fs, marker); got != nil {
-		t.Fatalf("marker without subject map should not resolve to main doc, got %v", got)
-	}
-	if got := lockSubjectDataKey(marker); got != "" {
-		t.Fatalf("marker subject key without map: got %q", got)
-	}
-	_, ownKey := marker.cloud()
-	if shouldLockDataKey(fs, ownKey) {
-		t.Fatal("marker own key must not be a lock subject")
+	if got := lockSubjectDataKey(doc); got != "geesefs-test.docx" {
+		t.Fatalf("lock subject key: got %q", got)
 	}
 }
 

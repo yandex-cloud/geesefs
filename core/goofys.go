@@ -120,7 +120,7 @@ type Goofys struct {
 
 	NotifyCallback func(notifications []interface{})
 
-	locks FileLockManager
+	locks FileLockManager // always set; no-op when --enable-file-locks is off
 }
 
 type OpStats struct {

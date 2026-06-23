@@ -350,17 +350,9 @@ func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 	return
 }
 
-// isLockForeignBusy reports whether another client holds the advisory lock.
-// The flag lives on the main document inode; office markers inherit from it.
+// isLockForeignBusy reports whether another client holds the advisory lock on this inode.
 func (inode *Inode) isLockForeignBusy() bool {
-	if atomic.LoadInt32(&inode.lockForeignBusy) != lockFlagOff {
-		return true
-	}
-	subject := lockSubjectInode(inode.fs, inode)
-	if subject != nil && subject != inode {
-		return atomic.LoadInt32(&subject.lockForeignBusy) != lockFlagOff
-	}
-	return false
+	return atomic.LoadInt32(&inode.lockForeignBusy) != lockFlagOff
 }
 
 func (inode *Inode) logFuse(op string, args ...interface{}) {

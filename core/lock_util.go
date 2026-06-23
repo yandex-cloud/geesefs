@@ -1,4 +1,4 @@
-// Lock path helpers: sidecar naming, subject key resolution, record interpretation.
+// Lock path helpers: sidecar naming, lock subject resolution, record interpretation.
 
 package core
 
@@ -13,21 +13,18 @@ import (
 
 const lockSidecarSuffix = ".geesefs-lock"
 
-// dataKey is the S3 object key of the locked file (e.g. "geesefs-test.docx"), not the sidecar.
-
 const (
 	lockFlagOff int32 = 0
 	lockFlagOn  int32 = 1
 )
 
-// All write permission bits (user|group|other); stripped in FUSE attrs for foreign-busy viewers.
 const modeWriteAll = os.FileMode(syscall.S_IWUSR | syscall.S_IWGRP | syscall.S_IWOTH)
 
 func isLockSidecarName(name string) bool {
 	return strings.HasPrefix(name, ".") && strings.HasSuffix(name, lockSidecarSuffix)
 }
 
-// shouldLockDataKey reports whether advisory locking applies to this object (main document only).
+// shouldLockDataKey reports whether this object key may own a lock sidecar.
 func shouldLockDataKey(fs *Goofys, dataKey string) bool {
 	if dataKey == "" {
 		return false
@@ -44,7 +41,6 @@ func shouldLockDataKey(fs *Goofys, dataKey string) bool {
 	return !isLockSidecarName(base)
 }
 
-// lockRecordBusy reports whether another session holds a non-expired lock.
 func lockRecordBusy(rec *lockRecord, mySession string, expired func(*lockRecord) bool) bool {
 	if rec == nil || !rec.Held || expired(rec) {
 		return false
@@ -52,8 +48,6 @@ func lockRecordBusy(rec *lockRecord, mySession string, expired func(*lockRecord)
 	return rec.Session != mySession
 }
 
-// lockRecordReclaimable reports whether this process may take over the sidecar
-// (stale lock, same session, or geesefs restart on the same host).
 func lockRecordReclaimable(rec *lockRecord, mySession, myOwner, myClient string, expired func(*lockRecord) bool) bool {
 	if rec == nil || !rec.Held || expired(rec) {
 		return true
@@ -68,7 +62,6 @@ func shouldHideLockSidecar(flags *cfg.FlagStorage, name string) bool {
 	return flags.HideLockSidecars && isLockSidecarName(name)
 }
 
-// lockKey returns the S3 key for the sidecar lock object of a data object.
 func lockKey(dataKey string) string {
 	dir, base := path.Split(dataKey)
 	if dir != "" && !strings.HasSuffix(dir, "/") {
@@ -77,7 +70,6 @@ func lockKey(dataKey string) string {
 	return dir + "." + base + lockSidecarSuffix
 }
 
-// dataKeyFromLockSidecar inverts lockKey for a sidecar basename.
 func dataKeyFromLockSidecar(parentKey, sidecarName string) string {
 	if !isLockSidecarName(sidecarName) {
 		return ""
@@ -117,7 +109,7 @@ func joinDataKey(prefix, name string) string {
 	return strings.TrimSuffix(prefix, "/") + "/" + name
 }
 
-// lockSubjectForChild returns the data key whose sidecar governs a new child name.
+// lockSubjectForChild returns the data key to check on create/mkdir, or "".
 func lockSubjectForChild(parent *Inode, name string) string {
 	var parentKey string
 	var fs *Goofys
@@ -132,7 +124,7 @@ func lockSubjectForChild(parent *Inode, name string) string {
 	return ""
 }
 
-// lockSubjectInode returns the main document inode that owns the advisory lock.
+// lockSubjectInode returns inode if it is a lock subject, else nil.
 func lockSubjectInode(fs *Goofys, inode *Inode) *Inode {
 	if inode == nil {
 		return nil
@@ -141,39 +133,17 @@ func lockSubjectInode(fs *Goofys, inode *Inode) *Inode {
 	if shouldLockDataKey(fs, dataKey) {
 		return inode
 	}
-	subjectKey := lockSubjectDataKey(inode)
-	if subjectKey == "" {
-		return nil
-	}
-	if inode.Parent != nil {
-		_, base := path.Split(subjectKey)
-		inode.Parent.mu.Lock()
-		child := inode.Parent.findChildUnlocked(base)
-		inode.Parent.mu.Unlock()
-		if child != nil {
-			return child
-		}
-	}
-	if fs != nil {
-		child, err := fs.LookupPath(subjectKey)
-		if err == nil {
-			return child
-		}
-	}
 	return nil
 }
 
-// lockSubjectDataKey returns the main document key whose lock governs this inode.
+// lockSubjectDataKey returns the object key governed by advisory lock, or "".
 func lockSubjectDataKey(inode *Inode) string {
 	if inode == nil {
 		return ""
 	}
 	_, dataKey := inode.cloud()
-	if dataKey == "" {
+	if dataKey == "" || !shouldLockDataKey(inode.fs, dataKey) {
 		return ""
 	}
-	if shouldLockDataKey(inode.fs, dataKey) {
-		return dataKey
-	}
-	return ""
+	return dataKey
 }
