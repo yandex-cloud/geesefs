@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,7 +33,6 @@ import (
 	"github.com/Azure/azure-pipeline-go/pipeline"
 	azblob "github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2019-04-01/storage"
 	azblob2 "github.com/Azure/azure-storage-blob-go/azblob"
-	"github.com/mitchellh/go-homedir"
 	ini "gopkg.in/ini.v1"
 )
 
@@ -321,7 +321,11 @@ func AzureBlobConfig(endpoint string, location string, storageType string) (conf
 
 	if account == "" || key == "" {
 		if configDir == "" {
-			configDir, _ = homedir.Expand("~/.azure")
+			if home, err := os.UserHomeDir(); err == nil {
+				configDir = filepath.Join(home, ".azure")
+			} else {
+				azbLog.Errorf("Unable to determine home directory: %v", err)
+			}
 		}
 		if config, err := ini.Load(configDir + "/config"); err == nil {
 			if sect, err := config.GetSection("storage"); err == nil {
