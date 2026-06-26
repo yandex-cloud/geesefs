@@ -280,10 +280,6 @@ func (s *GoofysTest) TestClientForkExec(t *C) {
 }
 
 func (s *GoofysTest) TestXAttrFuse(t *C) {
-	if _, ok := s.cloud.(*ADLv1); ok {
-		t.Skip("ADLv1 doesn't support metadata")
-	}
-
 	_, checkETag := s.cloud.Delegate().(*S3Backend)
 	xattrPrefix := s.cloud.Capabilities().Name + "."
 

@@ -26,7 +26,7 @@ USAGE:
 [ ENDPOINT=.. ] \
 [ EMULATOR=1 ] \
 [ EVENTUAL_CONSISTENCY=1 ] \
-CLOUD=s3|gcs|azblob|adlv1|adlv2 \
+CLOUD=s3|gcs|azblob|adlv2 \
     go test -v github.com/yandex-cloud/geesefs/core \
     [ -check.f TestName ]
 
@@ -364,11 +364,8 @@ func (s *GoofysTest) TestCreateFiles(t *C) {
 
 	resp, err = s.cloud.GetBlob(&GetBlobInput{Key: fileName})
 	t.Assert(err, IsNil)
-	// ADLv1 doesn't return size when we do a GET
-	if _, adlv1 := s.cloud.(*ADLv1); !adlv1 {
-		t.Assert(resp.HeadBlobOutput.Size, Equals, uint64(1))
-	}
 	defer resp.Body.Close()
+	t.Assert(resp.HeadBlobOutput.Size, Equals, uint64(1))
 }
 
 func (s *GoofysTest) TestUnlink(t *C) {
@@ -877,9 +874,6 @@ func (s *GoofysTest) TestRmDir(t *C) {
 }
 
 func (s *GoofysTest) TestRenamePreserveMetadata(t *C) {
-	if _, ok := s.cloud.(*ADLv1); ok {
-		t.Skip("ADLv1 doesn't support metadata")
-	}
 	root := s.getRoot(t)
 
 	from, to := "file1", "new_file"
@@ -1009,9 +1003,6 @@ func (s *GoofysTest) TestRenameOpenedUnmodified(t *C) {
 }
 
 func (s *GoofysTest) TestBackendListPagination(t *C) {
-	if _, ok := s.cloud.(*ADLv1); ok {
-		t.Skip("ADLv1 doesn't have pagination")
-	}
 	if s.azurite {
 		// https://github.com/Azure/Azurite/issues/262
 		t.Skip("Azurite doesn't support pagination")
@@ -1039,7 +1030,7 @@ func (s *GoofysTest) TestBackendListPagination(t *C) {
 	}
 
 	switch s.cloud.(type) {
-	case *ADLv1, *ADLv2:
+	case *ADLv2:
 		// these backends don't support parallel delete so I
 		// am doing this here
 		defer func() {
@@ -1133,7 +1124,7 @@ func (s *GoofysTest) TestBackendListPrefix(t *C) {
 	t.Assert(len(res.Prefixes), Equals, 1)
 	t.Assert(*res.Prefixes[0].Prefix, Equals, "test_list_prefix/dir2/dir3/")
 	if len(res.Items) == 1 {
-		// azblob(with hierarchial ns on), adlv1, adlv2.
+		// azblob(with hierarchial ns on), adlv2.
 		t.Assert(*res.Items[0].Key, Equals, "test_list_prefix/dir2/")
 	} else {
 		// s3, azblob(with hierarchial ns off)
@@ -1158,7 +1149,7 @@ func (s *GoofysTest) TestBackendListPrefix(t *C) {
 	t.Assert(err, IsNil)
 	t.Assert(len(res.Prefixes), Equals, 0)
 	if len(res.Items) == 3 {
-		// azblob(with hierarchial ns on), adlv1, adlv2.
+		// azblob(with hierarchial ns on), adlv2.
 		t.Assert(*res.Items[0].Key, Equals, "test_list_prefix/dir2/")
 		t.Assert(*res.Items[1].Key, Equals, "test_list_prefix/dir2/dir3/")
 		t.Assert(*res.Items[2].Key, Equals, "test_list_prefix/dir2/dir3/file4")
@@ -1400,11 +1391,6 @@ func (s *GoofysTest) TestGetMimeType(t *C) {
 }
 
 func (s *GoofysTest) TestPutMimeType(t *C) {
-	if _, ok := s.cloud.(*ADLv1); ok {
-		// ADLv1 doesn't support content-type
-		t.Skip("ADLv1 doesn't support content-type")
-	}
-
 	s.fs.flags.UseContentType = true
 
 	root := s.getRoot(t)
@@ -1599,10 +1585,6 @@ func (s *GoofysTest) TestIssue162(t *C) {
 }
 
 func (s *GoofysTest) TestXAttrGet(t *C) {
-	if _, ok := s.cloud.(*ADLv1); ok {
-		t.Skip("ADLv1 doesn't support metadata")
-	}
-
 	_, checkETag := s.cloud.Delegate().(*S3Backend)
 	xattrPrefix := s.cloud.Capabilities().Name + "."
 
@@ -1728,10 +1710,6 @@ func (s *GoofysTest) TestXAttrGet(t *C) {
 }
 
 func (s *GoofysTest) TestXAttrGetCached(t *C) {
-	if _, ok := s.cloud.(*ADLv1); ok {
-		t.Skip("ADLv1 doesn't support metadata")
-	}
-
 	xattrPrefix := s.cloud.Capabilities().Name + "."
 
 	s.fs.flags.StatCacheTTL = 1 * time.Minute
@@ -1746,10 +1724,6 @@ func (s *GoofysTest) TestXAttrGetCached(t *C) {
 }
 
 func (s *GoofysTest) TestXAttrCopied(t *C) {
-	if _, ok := s.cloud.(*ADLv1); ok {
-		t.Skip("ADLv1 doesn't support metadata")
-	}
-
 	root := s.getRoot(t)
 
 	_, err := s.fs.LookupPath("file1")
@@ -1771,10 +1745,6 @@ func (s *GoofysTest) TestXAttrCopied(t *C) {
 }
 
 func (s *GoofysTest) TestXAttrRemove(t *C) {
-	if _, ok := s.cloud.(*ADLv1); ok {
-		t.Skip("ADLv1 doesn't support metadata")
-	}
-
 	in, err := s.fs.LookupPath("file1")
 	t.Assert(err, IsNil)
 
@@ -1789,10 +1759,6 @@ func (s *GoofysTest) TestXAttrRemove(t *C) {
 }
 
 func (s *GoofysTest) TestXAttrSet(t *C) {
-	if _, ok := s.cloud.(*ADLv1); ok {
-		t.Skip("ADLv1 doesn't support metadata")
-	}
-
 	in, err := s.fs.LookupPath("file1")
 	t.Assert(err, IsNil)
 
@@ -2285,10 +2251,6 @@ func (s *GoofysTest) newBackend(t *C, bucket string, createBucket bool) (cloud S
 		config, _ := s.fs.flags.Backend.(*cfg.AZBlobConfig)
 		cloud, err = NewAZBlob(bucket, config)
 		t.Assert(err, IsNil)
-	case *ADLv1:
-		config, _ := s.fs.flags.Backend.(*cfg.ADLv1Config)
-		cloud, err = NewADLv1(bucket, s.fs.flags, config)
-		t.Assert(err, IsNil)
 	case *ADLv2:
 		config, _ := s.fs.flags.Backend.(*cfg.ADLv2Config)
 		cloud, err = NewADLv2(bucket, s.fs.flags, config)
@@ -2514,13 +2476,6 @@ func (s *GoofysTest) TestMountsError(t *C) {
 		var err error
 		cloud, err = NewS3(bucket, &flags, &config)
 		t.Assert(err, IsNil)
-	} else if _, ok := s.cloud.(*ADLv1); ok {
-		config, _ := s.fs.flags.Backend.(*cfg.ADLv1Config)
-		config.Authorizer = nil
-
-		var err error
-		cloud, err = NewADLv1(bucket, s.fs.flags, config)
-		t.Assert(err, IsNil)
 	} else if _, ok := s.cloud.(*ADLv2); ok {
 		// ADLv2 currently doesn't detect bucket doesn't exist
 		cloud = s.newBackend(t, bucket, false)
@@ -2722,9 +2677,6 @@ func checkSortedListsAreEqual(l1, l2 []string) error {
 }
 
 func (s *GoofysTest) TestReadDirDash(t *C) {
-	if s.azurite {
-		t.Skip("ADLv1 doesn't have pagination")
-	}
 	root := s.getRoot(t)
 	root.dir.mountPrefix = "prefix"
 
