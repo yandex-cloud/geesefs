@@ -35,3 +35,17 @@ func TestAzPutAccessConditions(t *testing.T) {
 		})
 	}
 }
+
+func TestAzPutBlobTags(t *testing.T) {
+	got := azPutBlobTags(&PutBlobInput{Tags: map[string]string{"geesefs-lock": "true"}})
+	if len(got) != 1 || got["geesefs-lock"] != "true" {
+		t.Fatalf("got %v", got)
+	}
+	hdr := azblob.SerializeBlobTagsHeader(got)
+	if hdr == nil || *hdr != "geesefs-lock=true" {
+		t.Fatalf("SerializeBlobTagsHeader = %v", hdr)
+	}
+	if len(azPutBlobTags(&PutBlobInput{})) != 0 {
+		t.Fatal("expected empty tags")
+	}
+}
