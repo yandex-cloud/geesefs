@@ -82,14 +82,6 @@ func (config *AZBlobConfig) WithAuthorization() autorest.PrepareDecorator {
 	}
 }
 
-type ADLv1Config struct {
-	Endpoint   string
-	Authorizer autorest.Authorizer
-}
-
-func (config *ADLv1Config) Init() {
-}
-
 type ADLv2Config struct {
 	Endpoint   string
 	Authorizer autorest.Authorizer
@@ -101,7 +93,6 @@ type AzureAuthorizerConfig struct {
 }
 
 var azbLog = GetLogger("azblob")
-var adls1Log = GetLogger("adlv1")
 
 func sptTest(spt *adal.ServicePrincipalToken) (autorest.Authorizer, error) {
 	err := spt.EnsureFresh()

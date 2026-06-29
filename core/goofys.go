@@ -144,8 +144,6 @@ func NewBackend(bucket string, flags *cfg.FlagStorage) (cloud StorageBackend, er
 
 	if config, ok := flags.Backend.(*cfg.AZBlobConfig); ok {
 		cloud, err = NewAZBlob(bucket, config)
-	} else if config, ok := flags.Backend.(*cfg.ADLv1Config); ok {
-		cloud, err = NewADLv1(bucket, flags, config)
 	} else if config, ok := flags.Backend.(*cfg.ADLv2Config); ok {
 		cloud, err = NewADLv2(bucket, flags, config)
 	} else if config, ok := flags.Backend.(*cfg.S3Config); ok {
@@ -215,26 +213,6 @@ func NewGoofys(ctx context.Context, bucketName string, flags *cfg.FlagStorage) (
 	if flags.Backend == nil {
 		if spec, err := ParseBucketSpec(bucketName); err == nil {
 			switch spec.Scheme {
-			case "adl":
-				auth, err := cfg.AzureAuthorizerConfig{
-					Log: cfg.GetLogger("adlv1"),
-				}.Authorizer()
-				if err != nil {
-					err = fmt.Errorf("couldn't load azure credentials: %v",
-						err)
-					return nil, err
-				}
-				flags.Backend = &cfg.ADLv1Config{
-					Endpoint:   spec.Bucket,
-					Authorizer: auth,
-				}
-				// adlv1 doesn't really have bucket
-				// names, but we will rebuild the
-				// prefix
-				bucketName = ""
-				if spec.Prefix != "" {
-					bucketName = ":" + spec.Prefix
-				}
 			case "wasb":
 				config, err := cfg.AzureBlobConfig(flags.Endpoint, spec.Bucket, "blob")
 				if err != nil {
