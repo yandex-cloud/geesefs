@@ -648,6 +648,9 @@ func (s *S3Backend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	if resp == nil || resp.IsTruncated == nil {
+		return nil, fmt.Errorf("invalid S3 ListObjects response: missing IsTruncated, likely an error body returned with a non-error HTTP status")
+	}
 
 	prefixes := make([]BlobPrefixOutput, 0)
 	items := make([]BlobItemOutput, 0)
@@ -656,6 +659,9 @@ func (s *S3Backend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 		prefixes = append(prefixes, BlobPrefixOutput{Prefix: p.Prefix})
 	}
 	for _, i := range resp.Contents {
+		if i.Size == nil {
+			return nil, fmt.Errorf("invalid S3 ListObjects response: Contents entry with missing Size, likely an error body returned with a non-error HTTP status")
+		}
 		items = append(items, BlobItemOutput{
 			Key:          i.Key,
 			ETag:         i.ETag,
@@ -675,6 +681,10 @@ func (s *S3Backend) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 }
 
 func listBlobsFromV1Ext(resp *ycs3ext.ListObjectsV1ExtOutput, reqId string) (*ListBlobsOutput, error) {
+	if resp == nil || resp.IsTruncated == nil {
+		return nil, fmt.Errorf("invalid S3 ListObjects response: missing IsTruncated, likely an error body returned with a non-error HTTP status")
+	}
+
 	prefixes := make([]BlobPrefixOutput, 0, len(resp.CommonPrefixes))
 	for _, p := range resp.CommonPrefixes {
 		prefixes = append(prefixes, BlobPrefixOutput{Prefix: p.Prefix})
@@ -866,6 +876,9 @@ func (s *S3Backend) copyObjectMultipart(size int64, from string, to string, mpuI
 		resp, err := s.CreateMultipartUpload(params)
 		if err != nil {
 			return "", err
+		}
+		if resp == nil || resp.UploadId == nil {
+			return "", fmt.Errorf("invalid S3 CreateMultipartUpload response: missing UploadId")
 		}
 
 		mpuId = *resp.UploadId
@@ -1317,7 +1330,7 @@ func (s *S3Backend) MultipartExpire(param *MultipartExpireInput) (*MultipartExpi
 					break
 				}
 			} else {
-				s3Log.Debugf("Keeping MPU Key=%v Id=%v", *upload.Key, *upload.UploadId)
+				s3Log.Debugf("Keeping MPU Key=%v Id=%v", NilStr(upload.Key), NilStr(upload.UploadId))
 			}
 		}
 	}()
