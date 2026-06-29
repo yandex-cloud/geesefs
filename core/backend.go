@@ -136,6 +136,9 @@ type PutBlobInput struct {
 	ContentType *string
 	DirBlob     bool
 
+	IfMatch     *string
+	IfNoneMatch *string
+
 	Body io.ReadSeeker
 	Size *uint64
 }
