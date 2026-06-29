@@ -1058,6 +1058,16 @@ func getDate(resp *http.Response) *time.Time {
 	return nil
 }
 
+// applyS3PutConditions sets If-Match / If-None-Match on a PutObject request.
+func applyS3PutConditions(req *request.Request, param *PutBlobInput) {
+	if param.IfMatch != nil {
+		req.HTTPRequest.Header.Set("If-Match", *param.IfMatch)
+	}
+	if param.IfNoneMatch != nil {
+		req.HTTPRequest.Header.Set("If-None-Match", *param.IfNoneMatch)
+	}
+}
+
 func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	storageClass := s.selectStorageClass(param.Size)
 
@@ -1086,6 +1096,7 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	}
 
 	req, resp := s.PutObjectRequest(put)
+	applyS3PutConditions(req, param)
 	err := req.Send()
 	if err != nil {
 		return nil, err
