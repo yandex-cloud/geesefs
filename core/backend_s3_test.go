@@ -71,3 +71,46 @@ func TestS3PutBlobConditionalHeaders(t *testing.T) {
 		t.Fatalf("If-None-Match = %q, want %q", ifNoneMatch, star)
 	}
 }
+
+func TestS3PutBlobTagging(t *testing.T) {
+	var tagging string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tagging = r.Header.Get("x-amz-tagging")
+		w.Header().Set("ETag", `"test-etag"`)
+		w.Header().Set("Date", "Mon, 01 Jan 2024 00:00:00 GMT")
+	}))
+	defer srv.Close()
+
+	s, err := NewS3("testbucket", &cfg.FlagStorage{Endpoint: srv.URL}, (&cfg.S3Config{
+		Region:    "us-east-1",
+		AccessKey: "test",
+		SecretKey: "test",
+	}).Init())
+	if err != nil {
+		t.Fatalf("NewS3: %v", err)
+	}
+
+	want := "geesefs-lock=true"
+	size := uint64(4)
+	if _, err := s.PutBlob(&PutBlobInput{
+		Key:  "obj",
+		Body: bytes.NewReader([]byte("data")),
+		Size: &size,
+		Tags: map[string]string{"geesefs-lock": "true"},
+	}); err != nil {
+		t.Fatalf("PutBlob: %v", err)
+	}
+	if tagging != want {
+		t.Fatalf("x-amz-tagging = %q, want %q", tagging, want)
+	}
+}
+
+func TestEncodePutBlobTags(t *testing.T) {
+	s := encodePutBlobTags(map[string]string{"geesefs-lock": "true"})
+	if s == nil || *s != "geesefs-lock=true" {
+		t.Fatalf("got %v", s)
+	}
+	if encodePutBlobTags(nil) != nil {
+		t.Fatal("expected nil for empty tags")
+	}
+}

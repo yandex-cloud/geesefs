@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/url"
 	"strings"
 	"sync"
 	"syscall"
@@ -139,6 +140,8 @@ type PutBlobInput struct {
 	IfMatch     *string
 	IfNoneMatch *string
 
+	Tags map[string]string
+
 	Body io.ReadSeeker
 	Size *uint64
 }
@@ -149,6 +152,20 @@ type PutBlobOutput struct {
 	StorageClass *string
 
 	RequestId string
+}
+
+// encodePutBlobTags formats object tags as an S3 x-amz-tagging header value
+// (URL-encoded query string: key=value&...).
+func encodePutBlobTags(tags map[string]string) *string {
+	if len(tags) == 0 {
+		return nil
+	}
+	vals := url.Values{}
+	for k, v := range tags {
+		vals.Set(k, v)
+	}
+	s := vals.Encode()
+	return &s
 }
 
 type PatchBlobInput struct {

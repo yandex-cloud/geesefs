@@ -784,6 +784,13 @@ func azPutAccessConditions(param *PutBlobInput) azblob.BlobAccessConditions {
 	return azblob.BlobAccessConditions{ModifiedAccessConditions: modified}
 }
 
+func azPutBlobTags(param *PutBlobInput) azblob.BlobTagsMap {
+	if len(param.Tags) == 0 {
+		return azblob.BlobTagsMap{}
+	}
+	return azblob.BlobTagsMap(param.Tags)
+}
+
 func (b *AZBlob) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	c, err := b.refreshToken()
 	if err != nil {
@@ -814,7 +821,7 @@ func (b *AZBlob) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 		azblob.BlobHTTPHeaders{
 			ContentType: NilStr(param.ContentType),
 		},
-		azblob.Metadata(nilMetadata(param.Metadata)), azPutAccessConditions(param), azblob.AccessTierNone, azblob.BlobTagsMap{}, azblob.ClientProvidedKeyOptions{}, azblob.ImmutabilityPolicyOptions{})
+		azblob.Metadata(nilMetadata(param.Metadata)), azPutAccessConditions(param), azblob.AccessTierNone, azPutBlobTags(param), azblob.ClientProvidedKeyOptions{}, azblob.ImmutabilityPolicyOptions{})
 	if err != nil {
 		return nil, mapAZBError(err)
 	}

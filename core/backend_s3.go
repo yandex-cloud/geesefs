@@ -1094,6 +1094,7 @@ func (s *S3Backend) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	if s.config.ACL != "" {
 		put.ACL = &s.config.ACL
 	}
+	put.Tagging = encodePutBlobTags(param.Tags)
 
 	req, resp := s.PutObjectRequest(put)
 	applyS3PutConditions(req, param)
