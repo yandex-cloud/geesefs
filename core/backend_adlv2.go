@@ -630,10 +630,10 @@ func (b *ADLv2) toADLProperties(metadata map[string]*string) string {
 }
 
 func (b *ADLv2) create(key string, pathType adl2.PathResourceType, contentType *string,
-	metadata map[string]*string, leaseId string) (resp autorest.Response, err error) {
+	metadata map[string]*string, leaseId, ifMatch, ifNoneMatch string) (resp autorest.Response, err error) {
 	resp, err = b.client.Create(context.TODO(), b.bucket, key,
 		pathType, "", "", "", "", "", "", "", NilStr(contentType),
-		"", "", "", "", leaseId, "", b.toADLProperties(metadata), "", "", "", "", "", "",
+		"", "", "", "", leaseId, "", b.toADLProperties(metadata), "", "", ifMatch, ifNoneMatch, "", "",
 		"", "", "", "", "", nil, "")
 	if err != nil {
 		err = mapADLv2Error(resp.Response, err, false)
@@ -668,7 +668,7 @@ func (b *ADLv2) flush(key string, offset int64, contentType string, leaseId stri
 func (b *ADLv2) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	if param.DirBlob {
 		res, err := b.create(param.Key, adl2.Directory, param.ContentType,
-			param.Metadata, "")
+			param.Metadata, "", NilStr(param.IfMatch), NilStr(param.IfNoneMatch))
 		if err != nil {
 			return nil, err
 		}
@@ -681,8 +681,12 @@ func (b *ADLv2) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 			panic("size cannot be nil")
 		}
 
+		// Conditional headers (If-None-Match:* / If-Match:<etag>) apply to this initial Create.
+		// NOTE: an ADLv2 PutBlob of a non-empty file is create + append + flush (not a single atomic op),
+		// the condition guards only the Create (which also sets the metadata atomically),
+		// the body is written by the subsequent unconditional append/flush.
 		create, err := b.create(param.Key, adl2.File, param.ContentType,
-			param.Metadata, "")
+			param.Metadata, "", NilStr(param.IfMatch), NilStr(param.IfNoneMatch))
 		if err != nil {
 			return nil, err
 		}
@@ -730,7 +734,7 @@ func (b *ADLv2) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBl
 	if err == syscall.ENOENT {
 		// the file didn't exist, we will create the file
 		// first and then acquire the lease
-		create, err := b.create(param.Key, adl2.File, param.ContentType, param.Metadata, "")
+		create, err := b.create(param.Key, adl2.File, param.ContentType, param.Metadata, "", "", "")
 		if err != nil {
 			return nil, err
 		}
@@ -755,7 +759,7 @@ func (b *ADLv2) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBl
 			}
 		}()
 
-		_, err = b.create(param.Key, adl2.File, param.ContentType, param.Metadata, leaseId)
+		_, err = b.create(param.Key, adl2.File, param.ContentType, param.Metadata, leaseId, "", "")
 		if err != nil {
 			return nil, err
 		}
