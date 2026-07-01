@@ -11,36 +11,96 @@ on:
 jobs:
 
   build:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go-version: ['1.23', '1.24', '1.25']
+
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v7
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version: 1.25
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache-dependency-path: go.sum
 
-    - name: Cache s3proxy
-      uses: actions/cache@v4
-      with:
-        path: s3proxy.jar
-        key: s3proxy-1.8.0
+      - name: Cache s3proxy
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/cache@v4
+        with:
+          path: s3proxy.jar
+          key: s3proxy-1.8.0
 
-    - name: Cache xfstests
-      uses: actions/cache@v4
-      with:
-        path: xfstests
-        key: xfstests-${{ runner.os }}-v1
-        restore-keys: |
-          xfstests-${{ runner.os }}-
+      - name: Cache xfstests
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/cache@v4
+        with:
+          path: xfstests
+          key: xfstests-${{ runner.os }}-v1
+          restore-keys: |
+            xfstests-${{ runner.os }}-
 
-    - name: Build linux amd64
-      run: env CGO_ENABLED=0 go build -o geesefs-linux-amd64 -v && ln -s geesefs-linux-amd64 geesefs
+      - name: Build
+        env:
+          CGO_ENABLED: 0
+        run: |
+          output="geesefs"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            output="${output}.exe"
+          fi
+          go build -o "$output" -v .
+          echo "output=$output" >> $GITHUB_OUTPUT
 
-    - name: Run tests
-      run: SAME_PROCESS_MOUNT=1 make run-test
-      timeout-minutes: 12
+      - name: Run tests (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: SAME_PROCESS_MOUNT=1 make run-test
+        timeout-minutes: 12
 
-    - name: Run xfstests
-      run: make run-xfstests
-      timeout-minutes: 10
+      - name: Run xfstests (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: make run-xfstests
+        timeout-minutes: 10
+
+      - name: Run tests (macOS)
+        if: matrix.os == 'macos-latest'
+        run: SAME_PROCESS_MOUNT=1 make run-test
+        timeout-minutes: 12
+
+      - name: Run tests (Windows)
+        if: matrix.os == 'windows-latest'
+        run: go test -v ./...
+        timeout-minutes: 10
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: go.sum
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Files not formatted with gofmt:"
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Run staticcheck
+        uses: reviewdog/action-staticcheck@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          tool_name: staticcheck
