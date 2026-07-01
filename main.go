@@ -16,8 +16,8 @@
 package main
 
 import (
-	"github.com/yandex-cloud/geesefs/core/cfg"
 	"github.com/yandex-cloud/geesefs/core"
+	"github.com/yandex-cloud/geesefs/core/cfg"
 
 	"fmt"
 	"os"
@@ -130,7 +130,7 @@ func main() {
 			go func() {
 				addr := pprof
 				if strings.Index(addr, ":") == -1 {
-					addr = "127.0.0.1:"+addr
+					addr = "127.0.0.1:" + addr
 				}
 				log.Println(http.ListenAndServe(addr, nil))
 			}()

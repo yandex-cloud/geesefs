@@ -143,8 +143,6 @@ func (s *GoofysTest) readDirFully(t *C, dh *DirHandle) (entries []*Inode) {
 		dh.Next(en.Name)
 	}
 
-	dh.mu.Unlock()
-	return
 }
 
 func nameMap(entries []*Inode) (names map[string]bool) {

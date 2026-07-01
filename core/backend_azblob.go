@@ -503,7 +503,7 @@ func (b *AZBlob) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 	if param.Delimiter != nil {
 		resp, err := c.ListBlobsHierarchySegment(context.TODO(),
 			azblob.Marker{
-				param.ContinuationToken,
+				Val: param.ContinuationToken,
 			},
 			NilStr(param.Delimiter),
 			options)
@@ -527,7 +527,7 @@ func (b *AZBlob) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 	} else {
 		resp, err := c.ListBlobsFlatSegment(context.TODO(),
 			azblob.Marker{
-				param.ContinuationToken,
+				Val: param.ContinuationToken,
 			},
 			options)
 		if err != nil {
