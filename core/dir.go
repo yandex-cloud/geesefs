@@ -543,14 +543,12 @@ func intelligentListCut(resp *ListBlobsOutput, flags *cfg.FlagStorage, cloud Sto
 		} else {
 			// Can't intelligently cut the list as more than 50% of it has the same prefix
 			// So, check for existence of the offending directory separately
-			// Simulate '>=' operator with start-after
-			// '.' = '/'-1
-			// \xF4\x8F\xBF\xBF = 0x10FFFF in UTF-8 = largest code point of 3-byte UTF-8
-			// \xEF\xBF\xBD = 0xFFFD in UTF-8 = largest valid symbol of 2-byte UTF-8
-			// So, > xxx.\xEF\xBF\xBF is the same as >= xxx/
+			// Use a prefix query to find any object under this directory path.
+			// This is more portable across S3-compatible backends than using
+			// StartAfter with special byte sequences.
 			dirobj, err := RetryListBlobs(flags, cloud, &ListBlobsInput{
-				StartAfter: PString(lastName[0:lastLtPos] + ".\xEF\xBF\xBD"),
-				MaxKeys:    PUInt32(1),
+				Prefix:  PString(lastName[0:lastLtPos] + "/"),
+				MaxKeys: PUInt32(1),
 			})
 			if err != nil {
 				return "", err
