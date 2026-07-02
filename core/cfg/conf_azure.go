@@ -73,7 +73,7 @@ func (config *AZBlobConfig) WithAuthorization() autorest.PrepareDecorator {
 			}
 
 			resp, err := cred.New(returnRequestPolicy{}, nil).Do(context.TODO(),
-				pipeline.Request{r})
+				pipeline.Request{Request: r})
 			if err != nil {
 				return nil, err
 			}
