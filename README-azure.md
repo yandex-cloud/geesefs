@@ -31,7 +31,7 @@ $ $GOPATH/bin/geesefs --endpoint https://myaccount.blob.core.windows.net wasb://
 
 Note that if full `wasb` URI is not specified, prefix separator is `:`.
 
-# Azure Data Lake Storage Gen1 and Gen2
+# Azure Data Lake Storage Gen2
 
-ADL v1 and v2 differ from Azure Blob so their support in GeeseFS is broken.
-Patches are welcome if you really want to fix it.
+ADL Gen2 differs from Azure Blob in some ways, so its support in GeeseFS may be
+incomplete. Patches are welcome if you really want to fix it.
