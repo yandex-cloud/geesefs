@@ -99,6 +99,11 @@ MISC OPTIONS:
 			Usage: "Directory to use for data cache. (default: off)",
 		},
 
+		cli.StringFlag{
+			Name:  "dns-server",
+			Usage: "DNS server to use for backend HTTP requests. The default port is 53.",
+		},
+
 		cli.IntFlag{
 			Name:  "dir-mode",
 			Value: 0755,
@@ -896,6 +901,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 
 		// Common Backend Config
 		Endpoint:       c.String("endpoint"),
+		DNSServer:      c.String("dns-server"),
 		UseContentType: c.Bool("use-content-type"),
 
 		// Debugging,
@@ -911,6 +917,9 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		// Cluster Mode
 		ClusterMode:           c.Bool("cluster"),
 		ClusterGrpcReflection: c.Bool("grpc-reflection"),
+	}
+	if err := ConfigureDNSServer(flags.DNSServer); err != nil {
+		panic("Invalid --dns-server: " + err.Error())
 	}
 
 	if runtime.GOOS == "windows" {

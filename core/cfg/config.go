@@ -18,10 +18,14 @@
 package cfg
 
 import (
+	"context"
+	"fmt"
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -55,6 +59,7 @@ type FlagStorage struct {
 	// Common Backend Config
 	UseContentType bool
 	Endpoint       string
+	DNSServer      string
 	Backend        interface{}
 
 	// Tuning
@@ -161,17 +166,65 @@ func (flags *FlagStorage) Cleanup() {
 }
 
 var defaultHTTPTransport = http.Transport{
-	Proxy: http.ProxyFromEnvironment,
-	DialContext: (&net.Dialer{
-		Timeout:   30 * time.Second,
-		KeepAlive: 30 * time.Second,
-		DualStack: true,
-	}).DialContext,
+	Proxy:                 http.ProxyFromEnvironment,
+	DialContext:           newHTTPDialer(nil).DialContext,
 	MaxIdleConns:          1000,
 	MaxIdleConnsPerHost:   1000,
 	IdleConnTimeout:       90 * time.Second,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 10 * time.Second,
+}
+
+func newHTTPDialer(resolver *net.Resolver) *net.Dialer {
+	return &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		DualStack: true,
+		Resolver:  resolver,
+	}
+}
+
+func normalizeDNSServer(server string) (string, error) {
+	server = strings.TrimSpace(server)
+	if server == "" {
+		return "", nil
+	}
+
+	host, port, err := net.SplitHostPort(server)
+	if err != nil {
+		if _, parseErr := netip.ParseAddr(server); parseErr != nil {
+			return "", fmt.Errorf("invalid DNS server address %q: expected an IP address with an optional port", server)
+		}
+		host, port = server, "53"
+	}
+	if _, err := netip.ParseAddr(host); err != nil {
+		return "", fmt.Errorf("invalid DNS server address %q: host must be an IP address", server)
+	}
+	portNumber, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || portNumber == 0 {
+		return "", fmt.Errorf("invalid DNS server address %q: port must be between 1 and 65535", server)
+	}
+
+	return net.JoinHostPort(host, port), nil
+}
+
+func ConfigureDNSServer(server string) error {
+	server, err := normalizeDNSServer(server)
+	if err != nil {
+		return err
+	}
+
+	var resolver *net.Resolver
+	if server != "" {
+		resolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, network, server)
+			},
+		}
+	}
+	defaultHTTPTransport.DialContext = newHTTPDialer(resolver).DialContext
+	return nil
 }
 
 func GetHTTPTransport() *http.Transport {

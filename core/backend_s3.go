@@ -133,18 +133,15 @@ func (s *S3Backend) TryIAM() (err error) {
 	now := time.Now()
 	token := ""
 	var ttl time.Duration
-	var resp *http.Response
-	if s.config.IAMFlavor == "gcp" {
-		req, err := http.NewRequest("GET", credUrl, nil)
-		if err != nil {
-			s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
-			return err
-		}
-		req.Header.Add("Metadata-Flavor", "Google")
-		resp, err = http.DefaultClient.Do(req)
-	} else {
-		resp, err = http.Get(credUrl)
+	req, err := http.NewRequest("GET", credUrl, nil)
+	if err != nil {
+		s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
+		return err
 	}
+	if s.config.IAMFlavor == "gcp" {
+		req.Header.Add("Metadata-Flavor", "Google")
+	}
+	resp, err := (&http.Client{Transport: cfg.GetHTTPTransport()}).Do(req)
 	if err != nil || resp == nil {
 		s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
 		if err == nil {
