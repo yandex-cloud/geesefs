@@ -299,8 +299,8 @@ func (s *GoofysTest) deleteBucket(cloud StorageBackend) error {
 			}
 			if len(keysToRemove) != 0 {
 				switch cloud.(type) {
-				case *ADLv1, *ADLv2, *AZBlob:
-					// ADLV{1|2} and AZBlob (sometimes) supports directories. => dir can be removed only
+				case *ADLv2, *AZBlob:
+					// ADLV2 and AZBlob (sometimes) supports directories. => dir can be removed only
 					// after the dir is empty. So we will remove the blobs in reverse depth order via
 					// DeleteADLBlobs after this for loop.
 					azureKeysToRemove = append(azureKeysToRemove, keysToRemove...)
@@ -601,25 +601,6 @@ func (s *GoofysTest) SetUpTest(t *C) {
 		flags.Backend = &config
 
 		s.cloud, err = NewAZBlob(bucket, &config)
-		t.Assert(err, IsNil)
-		t.Assert(s.cloud, NotNil)
-	} else if cloud == "adlv1" {
-		cred := azureauth.NewClientCredentialsConfig(
-			os.Getenv("ADLV1_CLIENT_ID"),
-			os.Getenv("ADLV1_CLIENT_CREDENTIAL"),
-			os.Getenv("ADLV1_TENANT_ID"))
-		auth, err := cred.Authorizer()
-		t.Assert(err, IsNil)
-
-		config := cfg.ADLv1Config{
-			Endpoint:   os.Getenv("ENDPOINT"),
-			Authorizer: auth,
-		}
-		config.Init()
-
-		flags.Backend = &config
-
-		s.cloud, err = NewADLv1(bucket, flags, &config)
 		t.Assert(err, IsNil)
 		t.Assert(s.cloud, NotNil)
 	} else if cloud == "adlv2" {

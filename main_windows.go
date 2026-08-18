@@ -19,11 +19,11 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/yandex-cloud/geesefs/core/cfg"
 	"github.com/yandex-cloud/geesefs/core"
+	"github.com/yandex-cloud/geesefs/core/cfg"
 )
 
-var signalsToHandle = []os.Signal{ os.Interrupt, syscall.SIGTERM }
+var signalsToHandle = []os.Signal{os.Interrupt, syscall.SIGTERM}
 
 func isSigUsr1(s os.Signal) bool {
 	return false

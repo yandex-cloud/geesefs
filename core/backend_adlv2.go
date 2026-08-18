@@ -883,7 +883,7 @@ func (b *ADLv2) MultipartExpire(param *MultipartExpireInput) (*MultipartExpireOu
 }
 
 func (b *ADLv2) RemoveBucket(param *RemoveBucketInput) (*RemoveBucketOutput, error) {
-	fs := adl2.FilesystemClient{b.client.BaseClient}
+	fs := adl2.FilesystemClient{BaseClient: b.client.BaseClient}
 	res, err := fs.Delete(context.TODO(), b.bucket, "", "", uuid.New().String(), nil, "")
 	if err != nil {
 		return nil, mapADLv2Error(res.Response, err, false)
@@ -892,7 +892,7 @@ func (b *ADLv2) RemoveBucket(param *RemoveBucketInput) (*RemoveBucketOutput, err
 }
 
 func (b *ADLv2) MakeBucket(param *MakeBucketInput) (*MakeBucketOutput, error) {
-	fs := adl2.FilesystemClient{b.client.BaseClient}
+	fs := adl2.FilesystemClient{BaseClient: b.client.BaseClient}
 	res, err := fs.Create(context.TODO(), b.bucket, "", uuid.New().String(), nil, "")
 	if err != nil {
 		return nil, mapADLv2Error(res.Response, err, false)

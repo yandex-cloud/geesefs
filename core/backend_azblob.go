@@ -503,7 +503,7 @@ func (b *AZBlob) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 	if param.Delimiter != nil {
 		resp, err := c.ListBlobsHierarchySegment(context.TODO(),
 			azblob.Marker{
-				param.ContinuationToken,
+				Val: param.ContinuationToken,
 			},
 			NilStr(param.Delimiter),
 			options)
@@ -527,7 +527,7 @@ func (b *AZBlob) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 	} else {
 		resp, err := c.ListBlobsFlatSegment(context.TODO(),
 			azblob.Marker{
-				param.ContinuationToken,
+				Val: param.ContinuationToken,
 			},
 			options)
 		if err != nil {
@@ -768,6 +768,29 @@ func (b *AZBlob) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
 	}, nil
 }
 
+// azPutAccessConditions maps PutBlobInput conditional headers to Azure BlobAccessConditions.
+// https://learn.microsoft.com/en-us/rest/api/storageservices/specifying-conditional-headers-for-blob-service-operations
+func azPutAccessConditions(param *PutBlobInput) azblob.BlobAccessConditions {
+	modified := azblob.ModifiedAccessConditions{}
+	if param.IfNoneMatch != nil {
+		if *param.IfNoneMatch == "*" {
+			modified.IfNoneMatch = azblob.ETagAny
+		} else {
+			modified.IfNoneMatch = azblob.ETag(*param.IfNoneMatch)
+		}
+	} else if param.IfMatch != nil {
+		modified.IfMatch = azblob.ETag(*param.IfMatch)
+	}
+	return azblob.BlobAccessConditions{ModifiedAccessConditions: modified}
+}
+
+func azPutBlobTags(param *PutBlobInput) azblob.BlobTagsMap {
+	if len(param.Tags) == 0 {
+		return azblob.BlobTagsMap{}
+	}
+	return azblob.BlobTagsMap(param.Tags)
+}
+
 func (b *AZBlob) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 	c, err := b.refreshToken()
 	if err != nil {
@@ -798,7 +821,7 @@ func (b *AZBlob) PutBlob(param *PutBlobInput) (*PutBlobOutput, error) {
 		azblob.BlobHTTPHeaders{
 			ContentType: NilStr(param.ContentType),
 		},
-		azblob.Metadata(nilMetadata(param.Metadata)), azblob.BlobAccessConditions{}, azblob.AccessTierNone, azblob.BlobTagsMap{}, azblob.ClientProvidedKeyOptions{}, azblob.ImmutabilityPolicyOptions{})
+		azblob.Metadata(nilMetadata(param.Metadata)), azPutAccessConditions(param), azblob.AccessTierNone, azPutBlobTags(param), azblob.ClientProvidedKeyOptions{}, azblob.ImmutabilityPolicyOptions{})
 	if err != nil {
 		return nil, mapAZBError(err)
 	}

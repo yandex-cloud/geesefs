@@ -1,4 +1,4 @@
-// +build !windows
+//go:build !windows
 
 // Copyright 2015 - 2017 Ka-Hing Cheung
 // Copyright 2021 Yandex LLC
@@ -26,14 +26,13 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/kardianos/osext"
 	daemon "github.com/sevlyar/go-daemon"
 
-	"github.com/yandex-cloud/geesefs/core/cfg"
 	"github.com/yandex-cloud/geesefs/core"
+	"github.com/yandex-cloud/geesefs/core/cfg"
 )
 
-var signalsToHandle = []os.Signal{ os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1 }
+var signalsToHandle = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1}
 
 func isSigUsr1(s os.Signal) bool {
 	return s == syscall.SIGUSR1
@@ -58,7 +57,7 @@ const canDaemonize = true
 
 type Daemonizer struct {
 	result os.Signal
-	wg sync.WaitGroup
+	wg     sync.WaitGroup
 }
 
 func NewDaemonizer() *Daemonizer {
@@ -150,7 +149,7 @@ func messagePath() {
 
 func messageArg0() {
 	var err error
-	os.Args[0], err = osext.Executable()
+	os.Args[0], err = os.Executable()
 	if err != nil {
 		panic(fmt.Sprintf("Unable to discover current executable: %v", err))
 	}

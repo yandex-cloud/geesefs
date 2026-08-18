@@ -501,21 +501,6 @@ func (s *GoofysTest) testReadMyOwnWriteFuse(t *C, externalUpdate bool) {
 	fh, err = os.Open(filePath)
 	t.Assert(err, IsNil)
 
-	if !externalUpdate {
-		// we flushed and ttl expired, next lookup should
-		// realize nothing is changed and NOT invalidate the
-		// cache. Except ADLv1 because PUT there doesn't
-		// return the mtime, so the open above will think the
-		// file is updated and not re-use cache
-		if _, adlv1 := s.cloud.(*ADLv1); !adlv1 {
-			cloud.err = syscall.EINVAL
-		}
-	} else {
-		// if there was externalUpdate, we wrote our own
-		// update with KeepPageCache=false, so we should read
-		// from the cloud her
-	}
-
 	buf, err = ioutil.ReadAll(fh)
 	t.Assert(err, IsNil)
 	t.Assert(string(buf), Equals, "file3")
