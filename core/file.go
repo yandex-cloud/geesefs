@@ -266,8 +266,9 @@ func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ign
 		_, key = inode.oldParent.cloud()
 		key = appendChildName(key, inode.oldName)
 	}
+	expectedETag := inode.knownETag
 	for _, rr := range readRanges {
-		go inode.retryRead(cloud, key, rr.Start, rr.End-rr.Start, ignoreMemoryLimit)
+		go inode.retryRead(cloud, key, expectedETag, rr.Start, rr.End-rr.Start, ignoreMemoryLimit)
 	}
 	return nil
 }
@@ -361,7 +362,7 @@ func (inode *Inode) LoadRange(offset, size uint64, readAheadSize uint64, ignoreM
 	return
 }
 
-func (inode *Inode) retryRead(cloud StorageBackend, key string, offset, size uint64, ignoreMemoryLimit bool) {
+func (inode *Inode) retryRead(cloud StorageBackend, key, expectedETag string, offset, size uint64, ignoreMemoryLimit bool) {
 	// Maybe free some buffers first
 	if inode.fs.flags.UseEnomem {
 		err := inode.fs.bufferPool.Use(int64(size), ignoreMemoryLimit)
@@ -384,7 +385,7 @@ func (inode *Inode) retryRead(cloud StorageBackend, key string, offset, size uin
 	allocated := int64(0)
 	curOffset, curSize := offset, size
 	err := ReadBackoff(inode.fs.flags, func(attempt int) error {
-		alloc, done, err := inode.sendRead(cloud, key, curOffset, curSize)
+		alloc, done, err := inode.sendRead(cloud, key, expectedETag, curOffset, curSize)
 		if err != nil && shouldRetry(err) {
 			s3Log.Warnf("Error reading %v +%v of %v (attempt %v): %v", curOffset, curSize, key, attempt, err)
 		}
@@ -408,14 +409,23 @@ func (inode *Inode) retryRead(cloud StorageBackend, key string, offset, size uin
 	}
 }
 
-func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint64) (allocated int64, totalDone uint64, err error) {
-	resp, err := cloud.GetBlob(&GetBlobInput{
+func (inode *Inode) sendRead(cloud StorageBackend, key, expectedETag string, offset, size uint64) (allocated int64, totalDone uint64, err error) {
+	param := &GetBlobInput{
 		Key:   key,
 		Start: offset,
 		Count: size,
-	})
+	}
+	// Azure backends map failed read preconditions to retryable errors, so use the response check there.
+	if expectedETag != "" && cloud.Capabilities().Name == "s3" {
+		param.IfMatch = &expectedETag
+	}
+	resp, err := cloud.GetBlob(param)
 	if err != nil {
 		return 0, 0, err
+	}
+	defer resp.Body.Close()
+	if expectedETag != "" && (resp.ETag == nil || *resp.ETag != expectedETag) {
+		return 0, 0, syscall.ESTALE
 	}
 	for size > 0 {
 		// Read the result in smaller parts so parallelism can be utilized better
@@ -434,6 +444,10 @@ func (inode *Inode) sendRead(cloud StorageBackend, key string, offset, size uint
 		}
 		// Cache part of the result
 		inode.mu.Lock()
+		if expectedETag != "" && inode.knownETag != expectedETag {
+			inode.mu.Unlock()
+			return allocated, totalDone, syscall.ESTALE
+		}
 		if inode.userMetadata == nil {
 			// Cache xattrs
 			inode.fillXattrFromHead(&(*resp).HeadBlobOutput)
@@ -596,9 +610,9 @@ func (fh *FileHandle) ReadFile(sOffset int64, sLen int64) (data [][]byte, bytesR
 	mappedErr := mapAwsError(requestErr)
 	if requestErr != nil {
 		err = requestErr
-		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
-			// Object is deleted or resized remotely (416). Discard local version
-			log.Warnf("File %v is deleted or resized remotely, discarding local changes", fh.inode.FullName())
+		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE || mappedErr == syscall.ESTALE {
+			// Object is deleted, resized, or replaced remotely. Discard local version
+			log.Warnf("File %v is deleted, resized, or replaced remotely, discarding local changes", fh.inode.FullName())
 			fh.inode.resetCache()
 		}
 		return
@@ -1340,8 +1354,8 @@ func (inode *Inode) patchFromBuffers(bufs []*FileBuffer, partSize uint64) {
 		_, err := inode.LoadRange(offset, size, 0, true)
 		if err != nil {
 			switch mapAwsError(err) {
-			case syscall.ENOENT, syscall.ERANGE:
-				s3Log.Warnf("File %s (inode %d) is deleted or resized remotely, discarding all local changes", key, inode.Id)
+			case syscall.ENOENT, syscall.ERANGE, syscall.ESTALE:
+				s3Log.Warnf("File %s (inode %d) is deleted, resized, or replaced remotely, discarding all local changes", key, inode.Id)
 				inode.resetCache()
 			default:
 				log.Errorf("Failed to load range %d-%d of file %s (inode %d) to patch it: %s", offset, offset+size, key, inode.Id, err)
@@ -1488,9 +1502,9 @@ func (inode *Inode) flushSmallObject() {
 	if inode.CacheState == ST_MODIFIED {
 		_, err := inode.LoadRange(0, sz, 0, true)
 		mappedErr := mapAwsError(err)
-		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
-			// Object is deleted or resized remotely (416). Discard local version
-			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
+		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE || mappedErr == syscall.ESTALE {
+			// Object is deleted, resized, or replaced remotely. Discard local version
+			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted, resized, or replaced remotely, discarding local changes", inode.Id, inode.FullName())
 			inode.resetCache()
 			inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.activeFlushers, -1)
@@ -1679,9 +1693,9 @@ func (inode *Inode) flushPart(part uint64) {
 			return
 		}
 		mappedErr := mapAwsError(err)
-		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
-			// Object is deleted or resized remotely (416). Discard local version
-			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
+		if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE || mappedErr == syscall.ESTALE {
+			// Object is deleted, resized, or replaced remotely. Discard local version
+			s3Log.Warnf("Conflict detected (inode %v): File %v is deleted, resized, or replaced remotely, discarding local changes", inode.Id, inode.FullName())
 			inode.resetCache()
 			return
 		}

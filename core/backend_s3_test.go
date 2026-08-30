@@ -2,8 +2,10 @@ package core
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"syscall"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws/request"
@@ -69,6 +71,71 @@ func TestS3PutBlobConditionalHeaders(t *testing.T) {
 	}
 	if ifNoneMatch != star {
 		t.Fatalf("If-None-Match = %q, want %q", ifNoneMatch, star)
+	}
+}
+
+func TestS3GetBlobConditionalHeader(t *testing.T) {
+	const etag = `"test-etag"`
+	var ifMatch string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ifMatch = r.Header.Get("If-Match")
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Date", "Mon, 01 Jan 2024 00:00:00 GMT")
+		_, _ = io.WriteString(w, "data")
+	}))
+	defer srv.Close()
+
+	s, err := NewS3("testbucket", &cfg.FlagStorage{Endpoint: srv.URL}, (&cfg.S3Config{
+		Region:    "us-east-1",
+		AccessKey: "test",
+		SecretKey: "test",
+	}).Init())
+	if err != nil {
+		t.Fatalf("NewS3: %v", err)
+	}
+
+	resp, err := s.GetBlob(&GetBlobInput{
+		Key:     "obj",
+		Count:   4,
+		IfMatch: PString(etag),
+	})
+	if err != nil {
+		t.Fatalf("GetBlob: %v", err)
+	}
+	defer resp.Body.Close()
+	if ifMatch != etag {
+		t.Fatalf("If-Match = %q, want %q", ifMatch, etag)
+	}
+}
+
+func TestS3GetBlobPreconditionFailed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPreconditionFailed)
+	}))
+	defer srv.Close()
+
+	s, err := NewS3("testbucket", &cfg.FlagStorage{Endpoint: srv.URL}, (&cfg.S3Config{
+		Region:    "us-east-1",
+		AccessKey: "test",
+		SecretKey: "test",
+	}).Init())
+	if err != nil {
+		t.Fatalf("NewS3: %v", err)
+	}
+
+	_, err = s.GetBlob(&GetBlobInput{
+		Key:     "obj",
+		Count:   4,
+		IfMatch: PString(`"old"`),
+	})
+	if err != syscall.ESTALE {
+		t.Fatalf("GetBlob error = %v, want %v", err, syscall.ESTALE)
+	}
+}
+
+func TestShouldNotRetryStaleRead(t *testing.T) {
+	if shouldRetry(syscall.ESTALE) {
+		t.Fatal("ESTALE must not be retried")
 	}
 }
 

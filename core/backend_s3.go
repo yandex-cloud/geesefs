@@ -996,7 +996,7 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 func shouldRetry(err error) bool {
 	err = mapAwsError(err)
 	return err != syscall.ENOENT && err != syscall.EINVAL &&
-		err != syscall.EACCES && err != syscall.ENOTSUP && err != syscall.ERANGE
+		err != syscall.EACCES && err != syscall.ENOTSUP && err != syscall.ERANGE && err != syscall.ESTALE
 }
 
 func (s *S3Backend) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
@@ -1020,11 +1020,14 @@ func (s *S3Backend) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
 		}
 		get.Range = &bytes
 	}
-	// TODO handle IfMatch
+	get.IfMatch = param.IfMatch
 
 	req, resp := s.GetObjectRequest(&get)
 	err := req.Send()
 	if err != nil {
+		if requestFailure, ok := err.(awserr.RequestFailure); ok && requestFailure.StatusCode() == http.StatusPreconditionFailed {
+			return nil, syscall.ESTALE
+		}
 		return nil, err
 	}
 
