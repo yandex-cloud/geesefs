@@ -24,7 +24,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: s3proxy.jar
-        key: s3proxy-1.8.0
+        key: s3proxy-1.9.0
 
     - name: Cache xfstests
       uses: actions/cache@v4
