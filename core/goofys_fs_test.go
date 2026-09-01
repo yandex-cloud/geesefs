@@ -537,6 +537,57 @@ func (s *GoofysTest) TestReadMyOwnNewFileFuse(t *C) {
 	//t.Assert(string(buf), Equals, "filex")
 }
 
+func (s *GoofysTest) TestRenameDirExpiredDestinationNoCloud(t *C) {
+	flags := cfg.DefaultFlags()
+	flags.StatCacheTTL = time.Minute
+
+	backend := &TestBackend{
+		err: syscall.ENOSYS,
+		ListBlobsFunc: func(param *ListBlobsInput) (*ListBlobsOutput, error) {
+			return &ListBlobsOutput{}, nil
+		},
+	}
+	s.cloud = backend
+	var err error
+	s.fs, err = newGoofys(context.Background(), "test", flags, func(string, *cfg.FlagStorage) (StorageBackend, error) {
+		return backend, nil
+	})
+	t.Assert(err, IsNil)
+
+	root := s.getRoot(t)
+	root.mu.Lock()
+	from := root.doMkDir("from")
+	from.mu.Unlock()
+	fromId := from.Id
+	to := root.doMkDir("to")
+	to.mu.Unlock()
+	root.mu.Unlock()
+
+	to.mu.Lock()
+	to.dir.DirTime = time.Time{}
+	to.mu.Unlock()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- root.Rename("from", root, "to")
+	}()
+
+	select {
+	case err = <-done:
+		t.Assert(err, IsNil)
+	case <-time.After(time.Second):
+		t.Fatal("Rename deadlocked while refreshing an expired destination directory")
+	}
+
+	root.mu.Lock()
+	fromAfter := root.findChildUnlocked("from")
+	toAfter := root.findChildUnlocked("to")
+	root.mu.Unlock()
+	t.Assert(fromAfter, IsNil)
+	t.Assert(toAfter, NotNil)
+	t.Assert(toAfter.Id, Equals, fromId)
+}
+
 func (s *GoofysTest) TestSlurpLookupNoCloud(t *C) {
 	var err error
 

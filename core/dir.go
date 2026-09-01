@@ -81,8 +81,9 @@ func locateLtSlash(inp string, prefixLen int) int {
 }
 
 type DirHandle struct {
-	inode *Inode
-	mu    sync.Mutex // everything below is protected by mu
+	inode   *Inode
+	noSlurp bool
+	mu      sync.Mutex // everything below is protected by mu
 	// readdir() is allowed either at zero (restart from the beginning)
 	// or from the previous offset
 	lastExternalOffset fuseops.DirOffset
@@ -671,7 +672,7 @@ func (dh *DirHandle) loadListing() error {
 	// we immediately switch to regular listings.
 	// Original implementation in Goofys in fact was similar in this aspect
 	// but it was ugly in several places, so ... sorry, it's reworked. O:-)
-	useSlurp := parent.dir.listMarker == "" && parent.fs.flags.StatCacheTTL != 0
+	useSlurp := !dh.noSlurp && parent.dir.listMarker == "" && parent.fs.flags.StatCacheTTL != 0
 
 	// the dir expired, so we need to fetch from the cloud. there
 	// may be static directories that we want to keep, so cloud
@@ -1449,6 +1450,7 @@ func appendChildName(parent, child string) string {
 
 func (inode *Inode) isEmptyDir() (bool, error) {
 	dh := NewDirHandle(inode)
+	dh.noSlurp = true
 	dh.mu.Lock()
 	dh.Seek(2)
 	en, err := dh.ReadDir()
