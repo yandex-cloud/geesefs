@@ -497,6 +497,7 @@ func (s *GoofysTest) SetUpTest(t *C) {
 	}
 
 	flags := cfg.DefaultFlags()
+	flags.EnableReadETagCheck = true
 	if strings.Index(t.TestName(), "Mem20M") >= 0 {
 		// has to be set before create FS
 		flags.MemoryLimit = 20 * 1024 * 1024

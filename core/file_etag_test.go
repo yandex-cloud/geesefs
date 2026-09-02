@@ -25,7 +25,7 @@ import (
 	"github.com/yandex-cloud/geesefs/core/cfg"
 )
 
-func newStaleReadTestFile(t *testing.T, backend *TestBackend, size uint64, etag string) (*Goofys, *Inode) {
+func newStaleReadTestFile(t *testing.T, backend *TestBackend, size uint64, etag string, enableETagCheck bool) (*Goofys, *Inode) {
 	t.Helper()
 
 	flags := cfg.DefaultFlags()
@@ -34,6 +34,7 @@ func newStaleReadTestFile(t *testing.T, backend *TestBackend, size uint64, etag 
 	flags.ReadAheadLargeKB = 0
 	flags.ReadRetryInterval = 0
 	flags.ReadRetryAttempts = 3
+	flags.EnableReadETagCheck = enableETagCheck
 
 	fs, err := newGoofys(context.Background(), "test", flags, func(string, *cfg.FlagStorage) (StorageBackend, error) {
 		return backend, nil
@@ -49,6 +50,44 @@ func newStaleReadTestFile(t *testing.T, backend *TestBackend, size uint64, etag 
 	inode.knownETag = etag
 	inode.userMetadata = make(map[string][]byte)
 	return fs, inode
+}
+
+func TestReadFileDoesNotCheckETagByDefault(t *testing.T) {
+	const oldETag = `"old"`
+	const newETag = `"new"`
+	newData := []byte("new-data")
+	requests := make(chan GetBlobInput, 1)
+
+	backend := &TestBackend{
+		err: syscall.ENOSYS,
+		GetBlobFunc: func(param *GetBlobInput) (*GetBlobOutput, error) {
+			requests <- *param
+			return &GetBlobOutput{
+				HeadBlobOutput: HeadBlobOutput{
+					BlobItemOutput: BlobItemOutput{ETag: PString(newETag)},
+				},
+				Body: io.NopCloser(bytes.NewReader(newData)),
+			}, nil
+		},
+	}
+	_, inode := newStaleReadTestFile(t, backend, uint64(len(newData)), oldETag, false)
+
+	fh := NewFileHandle(inode)
+	data, bytesRead, err := fh.ReadFile(0, int64(len(newData)))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if got := bytes.Join(data, nil); !bytes.Equal(got, newData) {
+		t.Fatalf("ReadFile data = %q, want %q", got, newData)
+	}
+	if bytesRead != len(newData) {
+		t.Fatalf("ReadFile bytesRead = %d, want %d", bytesRead, len(newData))
+	}
+
+	request := <-requests
+	if request.IfMatch != nil {
+		t.Fatalf("GetBlob IfMatch = %q, want nil", *request.IfMatch)
+	}
 }
 
 func TestReadFileRejectsChangedObject(t *testing.T) {
@@ -74,7 +113,7 @@ func TestReadFileRejectsChangedObject(t *testing.T) {
 			}, nil
 		},
 	}
-	fs, inode := newStaleReadTestFile(t, backend, uint64(len(newData)), oldETag)
+	fs, inode := newStaleReadTestFile(t, backend, uint64(len(newData)), oldETag, true)
 	allocated := inode.buffers.Add(0, []byte("old-"), BUF_CLEAN, false)
 	if err := fs.bufferPool.Use(allocated, true); err != nil {
 		t.Fatalf("reserve cached buffer: %v", err)
@@ -119,7 +158,7 @@ func TestReadFileRejectsMissingETag(t *testing.T) {
 			}, nil
 		},
 	}
-	_, inode := newStaleReadTestFile(t, backend, uint64(len(data)), oldETag)
+	_, inode := newStaleReadTestFile(t, backend, uint64(len(data)), oldETag, true)
 
 	fh := NewFileHandle(inode)
 	readData, bytesRead, err := fh.ReadFile(0, int64(len(data)))

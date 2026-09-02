@@ -266,7 +266,10 @@ func (inode *Inode) loadFromServer(readRanges []Range, readAheadSize uint64, ign
 		_, key = inode.oldParent.cloud()
 		key = appendChildName(key, inode.oldName)
 	}
-	expectedETag := inode.knownETag
+	expectedETag := ""
+	if inode.fs.flags.EnableReadETagCheck {
+		expectedETag = inode.knownETag
+	}
 	for _, rr := range readRanges {
 		go inode.retryRead(cloud, key, expectedETag, rr.Start, rr.End-rr.Start, ignoreMemoryLimit)
 	}

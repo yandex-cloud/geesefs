@@ -69,6 +69,7 @@ type FlagStorage struct {
 	MaxParallelParts    int
 	MaxParallelCopy     int
 	StatCacheTTL        time.Duration
+	EnableReadETagCheck bool
 	HTTPTimeout         time.Duration
 	ReadRetryInterval   time.Duration
 	ReadRetryMultiplier float64
