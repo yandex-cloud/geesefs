@@ -20,6 +20,7 @@ type TestBackend struct {
 	StorageBackend
 	ListBlobsFunc           func(param *ListBlobsInput) (*ListBlobsOutput, error)
 	HeadBlobFunc            func(param *HeadBlobInput) (*HeadBlobOutput, error)
+	GetBlobFunc             func(param *GetBlobInput) (*GetBlobOutput, error)
 	MultipartBlobAddFunc    func(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error)
 	MultipartBlobCopyFunc   func(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error)
 	MultipartBlobCommitFunc func(param *MultipartBlobCommitInput) (*MultipartBlobCommitOutput, error)
@@ -100,6 +101,9 @@ func (s *TestBackend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 }
 
 func (s *TestBackend) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
+	if s.GetBlobFunc != nil {
+		return s.GetBlobFunc(param)
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
