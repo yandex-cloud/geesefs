@@ -1856,11 +1856,18 @@ func (inode *Inode) SyncFile() (err error) {
 		inode.forceFlush = true
 		inode.mu.Unlock()
 		inode.TryFlush(MAX_FLUSH_PRIORITY)
-		inode.fs.flusherMu.Lock()
-		if inode.fs.flushPending == 0 {
-			inode.fs.flusherCond.Wait()
+		inode.mu.Lock()
+		if inode.CacheState > ST_DEAD && inode.flushError == nil {
+			// Register for the wakeup while flush completion cannot change inode state.
+			inode.fs.flusherMu.Lock()
+			inode.mu.Unlock()
+			if inode.fs.flushPending == 0 {
+				inode.fs.flusherCond.Wait()
+			}
+			inode.fs.flusherMu.Unlock()
+		} else {
+			inode.mu.Unlock()
 		}
-		inode.fs.flusherMu.Unlock()
 	}
 	inode.logFuse("Done SyncFile")
 	return
