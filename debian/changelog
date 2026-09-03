@@ -1,3 +1,15 @@
+geesefs (0.43.9) unstable; urgency=medium
+
+  * Fix rename deadlock when checking an existing destination directory (#199)
+  * Migrate S3 extensions to the official AWS SDK for Go (#181)
+  * Update aws-sdk-go to v1.55.8 (#185)
+  * Remove the deprecated Azure Data Lake Gen1 backend (#189)
+  * Support conditional writes in the PutBlob operation (#190)
+  * Support tagging in the PutBlob operation (#191)
+  * Improve GitHub Actions testing and linting (#183, #195, #196)
+
+ -- Artem Ikchurin <aikch@yandex-team.ru>  Thu, 03 Sep 2026 14:06:15 +0300
+
 geesefs (0.43.8) unstable; urgency=medium
 
   * Refresh IAM token lazily so it survives a long process pause (#179)
