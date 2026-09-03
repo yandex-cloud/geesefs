@@ -38,7 +38,7 @@ jobs:
       run: env CGO_ENABLED=0 go build -o geesefs-linux-amd64 -v && ln -s geesefs-linux-amd64 geesefs
 
     - name: Run tests
-      run: SAME_PROCESS_MOUNT=1 make run-test
+      run: make run-test
       timeout-minutes: 12
 
     - name: Run xfstests
