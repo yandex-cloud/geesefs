@@ -343,7 +343,6 @@ if you use it with non-Yandex S3.
 
 The following backends are inherited from Goofys code and still exist, but are broken:
 * Google Cloud Storage
-* Azure Data Lake Gen1
 * Azure Data Lake Gen2
 
 # References
