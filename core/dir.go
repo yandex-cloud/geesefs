@@ -36,6 +36,9 @@ type SlurpGap struct {
 	loadTime   time.Time
 }
 
+// Bound memory even when a client probes many distinct missing names.
+const maxNegativeLookups = 256
+
 type DirInodeData struct {
 	cloud       StorageBackend
 	mountPrefix string
@@ -60,6 +63,11 @@ type DirInodeData struct {
 	DeletedChildren map[string]*Inode
 	Gaps            []*SlurpGap
 	handles         []*DirHandle
+
+	// Protected by the containing inode's mu, like Children. The generation
+	// prevents an in-flight miss from repopulating the cache after a mutation.
+	negativeLookups  map[string]time.Time
+	lookupGeneration uint64
 }
 
 // Returns the position of first char < '/' in `inp` after prefixLen + any continued '/' characters.
@@ -880,6 +888,8 @@ func (inode *Inode) resetDirTimeRec() {
 	}
 	inode.dir.listDone = false
 	inode.dir.DirTime = time.Time{}
+	inode.dir.negativeLookups = nil
+	inode.dir.lookupGeneration++
 	// Make a copy of the child nodes before giving up the lock.
 	// This protects us from any addition/removal of child nodes
 	// under this node.
@@ -1014,6 +1024,8 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 	copy(parent.dir.Children[i:], parent.dir.Children[i+1:])
 	parent.dir.Children[l-1] = nil
 	parent.dir.Children = parent.dir.Children[:l-1]
+	delete(parent.dir.negativeLookups, inode.Name)
+	parent.dir.lookupGeneration++
 
 	if cap(parent.dir.Children) >= len(parent.dir.Children)*2 {
 		tmp := make([]*Inode, len(parent.dir.Children))
@@ -1042,6 +1054,8 @@ func (parent *Inode) removeAllChildrenUnlocked() {
 		dh.lastInternalOffset = -1
 	}
 	parent.dir.Children = nil
+	parent.dir.negativeLookups = nil
+	parent.dir.lookupGeneration++
 }
 
 // LOCKS_EXCLUDED(parent.fs.mu)
@@ -1073,6 +1087,8 @@ func (parent *Inode) insertChild(inode *Inode) {
 
 // LOCKS_REQUIRED(parent.mu)
 func (parent *Inode) insertChildUnlocked(inode *Inode) {
+	delete(parent.dir.negativeLookups, inode.Name)
+	parent.dir.lookupGeneration++
 	inode.Ref()
 
 	l := len(parent.dir.Children)
@@ -1898,6 +1914,8 @@ func (parent *Inode) findChildMaxTime() (maxMtime, maxCtime time.Time) {
 
 func (parent *Inode) LookUpCached(name string) (inode *Inode, err error) {
 	parent.mu.Lock()
+	lookupStart := time.Now()
+	generation := parent.dir.lookupGeneration
 	ok := false
 	inode = parent.findChildUnlocked(name)
 	if inode != nil {
@@ -1930,11 +1948,41 @@ func (parent *Inode) LookUpCached(name string) (inode *Inode, err error) {
 			parent.mu.Unlock()
 			return nil, syscall.ENOENT
 		}
+		if when, found := parent.dir.negativeLookups[name]; found {
+			if parent.fs.flags.StatCacheTTL > 0 && !expired(when, parent.fs.flags.StatCacheTTL) {
+				parent.mu.Unlock()
+				return nil, syscall.ENOENT
+			}
+			delete(parent.dir.negativeLookups, name)
+		}
 	}
 	parent.mu.Unlock()
 	if !ok {
 		inode, err = parent.recheckInode(inode, name)
 		err = mapAwsError(err)
+		if err == syscall.ENOENT {
+			parent.mu.Lock()
+			// A local create or a positive listing may have won the race with
+			// the backend request. Never hide that inode with a stale miss.
+			inode = parent.findChildUnlocked(name)
+			if inode == nil && generation == parent.dir.lookupGeneration &&
+				parent.fs.flags.StatCacheTTL > 0 && !expired(lookupStart, parent.fs.flags.StatCacheTTL) {
+				if len(parent.dir.negativeLookups) >= maxNegativeLookups {
+					parent.dir.negativeLookups = nil
+				}
+				if parent.dir.negativeLookups == nil {
+					parent.dir.negativeLookups = make(map[string]time.Time)
+				}
+				// Concurrent misses must not extend an existing entry's TTL.
+				if old, found := parent.dir.negativeLookups[name]; !found || lookupStart.Before(old) {
+					parent.dir.negativeLookups[name] = lookupStart
+				}
+			}
+			parent.mu.Unlock()
+			if inode != nil {
+				return inode, nil
+			}
+		}
 		if err != nil {
 			return nil, err
 		}

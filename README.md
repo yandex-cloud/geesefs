@@ -180,6 +180,16 @@ There's a lot of tuning you can do. Consult `geesefs -h` to view the list of opt
 
 # Common Issues
 
+## Missing Files
+
+Confirmed missing names are cached for up to `--stat-cache-ttl`, measured from
+the start of the lookup. Repeated misses do not extend this interval. Files
+created by another client may therefore remain invisible until it expires;
+use `--stat-cache-ttl 0` to disable this negative cache. Local namespace changes,
+positive listings and explicit cache invalidation take effect immediately.
+Each directory retains at most 256 negative entries; cache pressure can evict
+them earlier. Backend errors other than `ENOENT` are not cached.
+
 ## Memory Limit
 
 **New since 0.37.0:** metadata cache memory usage is now also limited, OOM errors
