@@ -1333,6 +1333,11 @@ func (s *S3Backend) MultipartExpire(param *MultipartExpireInput) (*MultipartExpi
 	go func() {
 		now := time.Now()
 		for _, upload := range mpu.Uploads {
+			if upload.Initiated == nil {
+				s3Log.Warnf("Keeping MPU Key=%v Id=%v: no Initiated timestamp",
+					aws.StringValue(upload.Key), aws.StringValue(upload.UploadId))
+				continue
+			}
 			expireTime := upload.Initiated.Add(s.config.MultipartAge)
 
 			if !expireTime.After(now) {

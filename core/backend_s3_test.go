@@ -2,9 +2,11 @@ package core
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/yandex-cloud/geesefs/core/cfg"
@@ -112,5 +114,50 @@ func TestEncodePutBlobTags(t *testing.T) {
 	}
 	if encodePutBlobTags(nil) != nil {
 		t.Fatal("expected nil for empty tags")
+	}
+}
+
+const listUploadsMissingInitiated = `<ListMultipartUploadsResult>
+  <Upload><Key>no-initiated</Key><UploadId>id1</UploadId></Upload>
+  <Upload><Key>expired</Key><UploadId>id2</UploadId><Initiated>2000-01-01T00:00:00.000Z</Initiated></Upload>
+</ListMultipartUploadsResult>`
+
+func TestS3MultipartExpireMissingInitiated(t *testing.T) {
+	aborted := make(chan string, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Query().Has("uploads"):
+			w.Header().Set("Content-Type", "application/xml")
+			io.WriteString(w, listUploadsMissingInitiated)
+		case r.Method == http.MethodDelete:
+			aborted <- r.URL.Query().Get("uploadId")
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer srv.Close()
+
+	s, err := NewS3("testbucket", &cfg.FlagStorage{Endpoint: srv.URL}, (&cfg.S3Config{
+		Region:       "us-east-1",
+		AccessKey:    "test",
+		SecretKey:    "test",
+		MultipartAge: time.Hour,
+	}).Init())
+	if err != nil {
+		t.Fatalf("NewS3: %v", err)
+	}
+
+	if _, err := s.MultipartExpire(&MultipartExpireInput{}); err != nil {
+		t.Fatalf("MultipartExpire: %v", err)
+	}
+
+	// Uploads are processed in order, so once the expired upload is aborted
+	// the one without Initiated has already been handled.
+	select {
+	case id := <-aborted:
+		if id != "id2" {
+			t.Fatalf("aborted upload %q, want id2", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expired upload was not aborted")
 	}
 }
