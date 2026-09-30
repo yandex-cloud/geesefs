@@ -17,8 +17,11 @@ package core
 import (
 	"runtime"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/yandex-cloud/geesefs/core/cfg"
 )
 
 func TestSyncFileDoesNotMissFlushCompletion(t *testing.T) {
@@ -84,5 +87,37 @@ func TestSyncFileDoesNotMissFlushCompletion(t *testing.T) {
 		case <-time.After(time.Second):
 		}
 		t.Fatal("SyncFile missed the completed flush and kept waiting")
+	}
+}
+
+func TestSyncFileRetriesFlushErrorAfterRetryInterval(t *testing.T) {
+	fs := &Goofys{flags: &cfg.FlagStorage{RetryInterval: time.Minute}}
+	fs.flusherCond = sync.NewCond(&fs.flusherMu)
+	// A deleted inode with an active flush makes TryFlush a controlled no-op.
+	inode := &Inode{fs: fs, CacheState: ST_DELETED, IsFlushing: 1,
+		flushError: syscall.EAGAIN, flushErrorTime: time.Now()}
+
+	if err := inode.SyncFile(); err != syscall.EAGAIN {
+		t.Fatalf("SyncFile returned %v within the retry interval, want %v", err, syscall.EAGAIN)
+	}
+
+	inode.flushErrorTime = time.Now().Add(-time.Hour)
+	go func() {
+		// Model the flusher completing the retry that SyncFile forces.
+		for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+			inode.mu.Lock()
+			forced := inode.forceFlush
+			if forced {
+				inode.CacheState = ST_CACHED
+			}
+			inode.mu.Unlock()
+			if forced {
+				fs.WakeupFlusher()
+				return
+			}
+		}
+	}()
+	if err := inode.SyncFile(); err != nil {
+		t.Fatalf("SyncFile returned %v after the retry interval, want a successful retry", err)
 	}
 }

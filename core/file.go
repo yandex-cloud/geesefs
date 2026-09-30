@@ -1848,10 +1848,14 @@ func (inode *Inode) SyncFile() (err error) {
 			break
 		}
 		if inode.flushError != nil {
-			// Return the error to user
-			err = inode.flushError
-			inode.mu.Unlock()
-			break
+			if time.Since(inode.flushErrorTime) < inode.fs.flags.RetryInterval {
+				// Return the error to user
+				err = inode.flushError
+				inode.mu.Unlock()
+				break
+			}
+			// Try again
+			inode.flushError = nil
 		}
 		inode.forceFlush = true
 		inode.mu.Unlock()
