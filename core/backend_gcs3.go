@@ -56,6 +56,10 @@ func (s *GCS3) Delegate() interface{} {
 }
 
 func (s *GCS3) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
+	// JSON and XML APIs can return different ETags for the same object.
+	if s.flags.EnableReadETagCheck {
+		return s.S3Backend.ListBlobs(param)
+	}
 	if s.gcs == nil {
 		// Listings with metadata are only supported in REST API
 		// And REST API requires separate authentication credentials

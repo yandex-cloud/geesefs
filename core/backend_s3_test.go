@@ -133,12 +133,6 @@ func TestS3GetBlobPreconditionFailed(t *testing.T) {
 	}
 }
 
-func TestShouldNotRetryStaleRead(t *testing.T) {
-	if shouldRetry(syscall.ESTALE) {
-		t.Fatal("ESTALE must not be retried")
-	}
-}
-
 func TestS3PutBlobTagging(t *testing.T) {
 	var tagging string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

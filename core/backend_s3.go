@@ -89,8 +89,9 @@ func NewS3(bucket string, flags *cfg.FlagStorage, config *cfg.S3Config) (*S3Back
 		flags:     flags,
 		config:    config,
 		cap: Capabilities{
-			Name:             "s3",
-			MaxMultipartSize: 5 * 1024 * 1024 * 1024,
+			Name:               "s3",
+			SupportsIfMatchGet: true,
+			MaxMultipartSize:   5 * 1024 * 1024 * 1024,
 		},
 	}
 
@@ -994,6 +995,9 @@ func (s *S3Backend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 }
 
 func shouldRetry(err error) bool {
+	if err == errReadInvalidated {
+		return false
+	}
 	err = mapAwsError(err)
 	return err != syscall.ENOENT && err != syscall.EINVAL &&
 		err != syscall.EACCES && err != syscall.ENOTSUP && err != syscall.ERANGE && err != syscall.ESTALE

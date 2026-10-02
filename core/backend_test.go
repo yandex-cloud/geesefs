@@ -39,8 +39,9 @@ func (s *TestBackend) Capabilities() *Capabilities {
 	if s.StorageBackend == nil {
 		if s.capabilities == nil {
 			s.capabilities = &Capabilities{
-				Name:             "s3",
-				MaxMultipartSize: 5 * 1024 * 1024 * 1024,
+				Name:               "s3",
+				SupportsIfMatchGet: true,
+				MaxMultipartSize:   5 * 1024 * 1024 * 1024,
 			}
 		}
 		return s.capabilities

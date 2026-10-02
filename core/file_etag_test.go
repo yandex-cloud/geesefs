@@ -25,7 +25,7 @@ import (
 	"github.com/yandex-cloud/geesefs/core/cfg"
 )
 
-func newStaleReadTestFile(t *testing.T, backend *TestBackend, size uint64, etag string, enableETagCheck bool) (*Goofys, *Inode) {
+func newStaleReadTestFile(t *testing.T, backend StorageBackend, size uint64, etag string, enableETagCheck bool) (*Goofys, *Inode) {
 	t.Helper()
 
 	flags := cfg.DefaultFlags()
@@ -173,5 +173,50 @@ func TestReadFileRejectsMissingETag(t *testing.T) {
 	}
 	if inode.buffers.Count() != 0 {
 		t.Fatalf("cached buffers = %d, want 0", inode.buffers.Count())
+	}
+}
+
+func TestReadFileSendsBackendPrecondition(t *testing.T) {
+	s3Backend, err := NewS3("test", cfg.DefaultFlags(), (&cfg.S3Config{
+		Region: "us-east-1", AccessKey: "test", SecretKey: "test",
+	}).Init())
+	if err != nil {
+		t.Fatal(err)
+	}
+	supported := *s3Backend.Capabilities()
+	supported.Name = "s3-compatible"
+	for _, tc := range []struct {
+		name         string
+		capabilities Capabilities
+		wantIfMatch  bool
+	}{
+		{"supported custom backend", supported, true},
+		{"unsupported s3-named backend", Capabilities{Name: "s3"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ifMatch *string
+			backend := &TestBackend{
+				capabilities: &tc.capabilities,
+				err:          syscall.ENOSYS,
+				GetBlobFunc: func(p *GetBlobInput) (*GetBlobOutput, error) {
+					ifMatch = p.IfMatch
+					return &GetBlobOutput{
+						HeadBlobOutput: HeadBlobOutput{BlobItemOutput: BlobItemOutput{ETag: PString(`"old"`)}},
+						Body:           io.NopCloser(bytes.NewReader([]byte("data"))),
+					}, nil
+				},
+			}
+			_, inode := newStaleReadTestFile(t, backend, 4, `"old"`, true)
+			if _, _, err := NewFileHandle(inode).ReadFile(0, 4); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantIfMatch {
+				if ifMatch == nil || *ifMatch != `"old"` {
+					t.Fatalf("backend precondition = %v, want old ETag", ifMatch)
+				}
+			} else if ifMatch != nil {
+				t.Fatalf("unsupported backend received If-Match %q", *ifMatch)
+			}
+		})
 	}
 }

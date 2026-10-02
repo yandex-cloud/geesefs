@@ -95,9 +95,13 @@ type Inode struct {
 	AttrTime   time.Time
 	ExpireTime time.Time
 
-	mu           sync.Mutex // everything below is protected by mu
-	readCond     *sync.Cond
-	pauseWriters int
+	mu               sync.Mutex // everything below is protected by mu
+	readCond         *sync.Cond
+	activeReaders    int
+	cloudWrites      int
+	cloudWriteActive bool
+	readGeneration   uint64
+	pauseWriters     int
 
 	// We are not very consistent about enforcing locks for `Parent` because, the
 	// parent field very very rarely changes and it is generally fine to operate on
