@@ -588,6 +588,11 @@ MISC OPTIONS:
 			Usage: "How long to cache file metadata.",
 		},
 
+		cli.BoolFlag{
+			Name:  "enable-read-etag-check",
+			Usage: "Check the cached object ETag when loading file data from the backend. (default: off)",
+		},
+
 		cli.DurationFlag{
 			Name:  "http-timeout",
 			Value: 30 * time.Second,
@@ -855,6 +860,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		MaxParallelParts:    c.Int("max-parallel-parts"),
 		MaxParallelCopy:     c.Int("max-parallel-copy"),
 		StatCacheTTL:        c.Duration("stat-cache-ttl"),
+		EnableReadETagCheck: c.Bool("enable-read-etag-check"),
 		HTTPTimeout:         c.Duration("http-timeout"),
 		RetryInterval:       c.Duration("retry-interval"),
 		ReadRetryInterval:   c.Duration("read-retry-interval"),

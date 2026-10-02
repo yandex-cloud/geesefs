@@ -14,7 +14,7 @@ xfstests:
 	fi
 
 s3proxy.jar:
-	@if [ ! -f s3proxy.jar ]; then wget --tries=3 --timeout=60 https://github.com/gaul/s3proxy/releases/download/s3proxy-1.8.0/s3proxy -O s3proxy.jar; fi
+	@if [ ! -f s3proxy.jar ]; then wget --tries=3 --timeout=60 https://github.com/gaul/s3proxy/releases/download/s3proxy-1.9.0/s3proxy -O s3proxy.jar; fi
 
 get-deps: s3proxy.jar
 	go get -t ./...

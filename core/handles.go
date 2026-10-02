@@ -95,9 +95,13 @@ type Inode struct {
 	AttrTime   time.Time
 	ExpireTime time.Time
 
-	mu           sync.Mutex // everything below is protected by mu
-	readCond     *sync.Cond
-	pauseWriters int
+	mu               sync.Mutex // everything below is protected by mu
+	readCond         *sync.Cond
+	activeReaders    int
+	cloudWrites      int
+	cloudWriteActive bool
+	readGeneration   uint64
+	pauseWriters     int
 
 	// We are not very consistent about enforcing locks for `Parent` because, the
 	// parent field very very rarely changes and it is generally fine to operate on
@@ -213,6 +217,9 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 			s3Log.Warnf("Conflict detected (inode %v): server-side ETag or size of %v"+
 				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
 				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
+		}
+		if (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) && inode.flushError == nil {
+			inode.recordFlushError(syscall.ESTALE)
 		}
 		inode.resetCache()
 		inode.Attributes.Size = item.Size

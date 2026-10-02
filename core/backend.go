@@ -27,7 +27,8 @@ import (
 )
 
 type Capabilities struct {
-	MaxMultipartSize uint64
+	MaxMultipartSize   uint64
+	SupportsIfMatchGet bool
 	// indicates that the blob store has native support for directories
 	DirBlob bool
 	Name    string

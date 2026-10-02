@@ -20,6 +20,7 @@ type TestBackend struct {
 	StorageBackend
 	ListBlobsFunc           func(param *ListBlobsInput) (*ListBlobsOutput, error)
 	HeadBlobFunc            func(param *HeadBlobInput) (*HeadBlobOutput, error)
+	GetBlobFunc             func(param *GetBlobInput) (*GetBlobOutput, error)
 	MultipartBlobAddFunc    func(param *MultipartBlobAddInput) (*MultipartBlobAddOutput, error)
 	MultipartBlobCopyFunc   func(param *MultipartBlobCopyInput) (*MultipartBlobCopyOutput, error)
 	MultipartBlobCommitFunc func(param *MultipartBlobCommitInput) (*MultipartBlobCommitOutput, error)
@@ -38,8 +39,9 @@ func (s *TestBackend) Capabilities() *Capabilities {
 	if s.StorageBackend == nil {
 		if s.capabilities == nil {
 			s.capabilities = &Capabilities{
-				Name:             "s3",
-				MaxMultipartSize: 5 * 1024 * 1024 * 1024,
+				Name:               "s3",
+				SupportsIfMatchGet: true,
+				MaxMultipartSize:   5 * 1024 * 1024 * 1024,
 			}
 		}
 		return s.capabilities
@@ -100,6 +102,9 @@ func (s *TestBackend) CopyBlob(param *CopyBlobInput) (*CopyBlobOutput, error) {
 }
 
 func (s *TestBackend) GetBlob(param *GetBlobInput) (*GetBlobOutput, error) {
+	if s.GetBlobFunc != nil {
+		return s.GetBlobFunc(param)
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
