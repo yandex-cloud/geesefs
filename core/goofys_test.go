@@ -2772,6 +2772,9 @@ func (s *GoofysTest) TestWriteUnlinkFlush(t *C) {
 	t.Assert(in, NotNil)
 	t.Assert(fh, NotNil)
 
+	err = fh.WriteFile(0, []byte("discarded on unlink"), true)
+	t.Assert(err, IsNil)
+
 	err = dir.Unlink("deleted")
 	t.Assert(err, IsNil)
 

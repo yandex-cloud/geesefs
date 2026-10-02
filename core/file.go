@@ -927,6 +927,7 @@ func (inode *Inode) sendRename() {
 					inode.oldParent = nil
 					inode.oldName = ""
 					inode.renamingTo = false
+					inode.recordFlushError(err)
 					inode.resetCache()
 					inode.mu.Unlock()
 					newParent.removeChild(inode)
@@ -1523,9 +1524,6 @@ func (inode *Inode) isStillDirty() bool {
 }
 
 func (inode *Inode) resetCache() {
-	if (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) && inode.flushError == nil {
-		inode.recordFlushError(syscall.ESTALE)
-	}
 	if inode.fs.flags.EnableReadETagCheck {
 		inode.readGeneration++
 		inode.readError = nil
@@ -1863,6 +1861,7 @@ func (inode *Inode) completeMultipart() {
 	if mappedErr == syscall.ENOENT || mappedErr == syscall.ERANGE {
 		// Object is deleted or resized remotely (416). Discard local version
 		s3Log.Warnf("Conflict detected (inode %v): File %v is deleted or resized remotely, discarding local changes", inode.Id, inode.FullName())
+		inode.recordFlushError(err)
 		inode.resetCache()
 		return
 	}

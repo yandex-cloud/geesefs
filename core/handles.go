@@ -218,6 +218,9 @@ func (inode *Inode) SetFromBlobItem(item *BlobItemOutput) {
 				" (%v, %v) differs from local (%v, %v). File is changed remotely, dropping cache",
 				inode.Id, inode.FullName(), NilStr(item.ETag), item.Size, inode.knownETag, inode.knownSize)
 		}
+		if (inode.CacheState == ST_CREATED || inode.CacheState == ST_MODIFIED) && inode.flushError == nil {
+			inode.recordFlushError(syscall.ESTALE)
+		}
 		inode.resetCache()
 		inode.Attributes.Size = item.Size
 		inode.knownSize = item.Size
