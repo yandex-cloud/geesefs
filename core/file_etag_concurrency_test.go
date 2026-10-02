@@ -20,7 +20,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 type concurrentReadBackend struct {
@@ -79,70 +79,72 @@ func TestReadFileConcurrentPatchPreservesWrites(t *testing.T) {
 			name = "patch_before_read"
 		}
 		t.Run(name, func(t *testing.T) {
-			backend := &concurrentReadBackend{
-				TestBackend: &TestBackend{err: syscall.ENOSYS},
-				data:        []byte("headDATAxxxx"), etag: `"old"`,
-				patchCommitted: make(chan struct{}), finishPatch: make(chan struct{}),
-				getStarted: make(chan struct{}), finishRead: make(chan struct{}),
-			}
-			fs, inode := newStaleReadTestFile(t, backend, 12, `"old"`, true)
-			inode.mu.Lock()
-			inode.SetCacheState(ST_MODIFIED)
-			allocated := inode.buffers.Add(8, []byte("KEEP"), BUF_DIRTY, false)
-			inode.mu.Unlock()
-			if err := fs.bufferPool.Use(allocated, true); err != nil {
-				t.Fatal(err)
-			}
-			patchDone := make(chan bool, 1)
-			startPatch := func() {
-				go func() {
-					inode.mu.Lock()
-					ok := inode.sendPatch(0, 4, bytes.NewReader([]byte("sent")), 4)
-					inode.mu.Unlock()
-					patchDone <- ok
-				}()
-			}
-			readDone := make(chan error, 1)
-			startRead := func() {
-				go func() {
-					data, n, err := NewFileHandle(inode).ReadFile(4, 4)
-					if err == nil && (n != 4 || !bytes.Equal(bytes.Join(data, nil), []byte("DATA"))) {
-						err = syscall.EIO
-					}
-					readDone <- err
-				}()
-			}
-			if patchFirst {
-				close(backend.finishRead)
-				startPatch()
-				<-backend.patchCommitted
-				startRead()
-				select {
-				case <-backend.getStarted:
-				case <-time.After(100 * time.Millisecond):
+			synctest.Test(t, func(t *testing.T) {
+				backend := &concurrentReadBackend{
+					TestBackend: &TestBackend{err: syscall.ENOSYS},
+					data:        []byte("headDATAxxxx"), etag: `"old"`,
+					patchCommitted: make(chan struct{}), finishPatch: make(chan struct{}),
+					getStarted: make(chan struct{}), finishRead: make(chan struct{}),
 				}
-				close(backend.finishPatch)
-			} else {
-				close(backend.finishPatch)
-				startRead()
-				<-backend.getStarted
-				startPatch()
-				select {
-				case <-backend.patchCommitted:
-				case <-time.After(100 * time.Millisecond):
+				fs, inode := newStaleReadTestFile(t, backend, 12, `"old"`, true)
+				inode.mu.Lock()
+				inode.SetCacheState(ST_MODIFIED)
+				allocated := inode.buffers.Add(8, []byte("KEEP"), BUF_DIRTY, false)
+				inode.mu.Unlock()
+				if err := fs.bufferPool.Use(allocated, true); err != nil {
+					t.Fatal(err)
 				}
-				close(backend.finishRead)
-			}
-			if !<-patchDone {
-				t.Error("own PATCH failed")
-			}
-			if err := <-readDone; err != nil {
-				t.Errorf("read concurrent with own PATCH: %v", err)
-			}
-			data, n, err := NewFileHandle(inode).ReadFile(8, 4)
-			if err != nil || n != 4 || !bytes.Equal(bytes.Join(data, nil), []byte("KEEP")) {
-				t.Errorf("pending write lost: data=%q n=%d err=%v", data, n, err)
-			}
+				patchDone := make(chan bool, 1)
+				startPatch := func() {
+					started := make(chan struct{})
+					go func() {
+						close(started)
+						inode.mu.Lock()
+						ok := inode.sendPatch(0, 4, bytes.NewReader([]byte("sent")), 4)
+						inode.mu.Unlock()
+						patchDone <- ok
+					}()
+					<-started
+				}
+				readDone := make(chan error, 1)
+				startRead := func() {
+					started := make(chan struct{})
+					go func() {
+						close(started)
+						data, n, err := NewFileHandle(inode).ReadFile(4, 4)
+						if err == nil && (n != 4 || !bytes.Equal(bytes.Join(data, nil), []byte("DATA"))) {
+							err = syscall.EIO
+						}
+						readDone <- err
+					}()
+					<-started
+				}
+				if patchFirst {
+					close(backend.finishRead)
+					startPatch()
+					<-backend.patchCommitted
+					startRead()
+					synctest.Wait()
+					close(backend.finishPatch)
+				} else {
+					close(backend.finishPatch)
+					startRead()
+					<-backend.getStarted
+					startPatch()
+					synctest.Wait()
+					close(backend.finishRead)
+				}
+				if !<-patchDone {
+					t.Error("own PATCH failed")
+				}
+				if err := <-readDone; err != nil {
+					t.Errorf("read concurrent with own PATCH: %v", err)
+				}
+				data, n, err := NewFileHandle(inode).ReadFile(8, 4)
+				if err != nil || n != 4 || !bytes.Equal(bytes.Join(data, nil), []byte("KEEP")) {
+					t.Errorf("pending write lost: data=%q n=%d err=%v", data, n, err)
+				}
+			})
 		})
 	}
 }
@@ -229,41 +231,40 @@ func (b *reorderedPatchBackend) GetBlob(p *GetBlobInput) (*GetBlobOutput, error)
 }
 
 func TestReadFileAfterReorderedPatchResponses(t *testing.T) {
-	backend := &reorderedPatchBackend{
-		TestBackend: &TestBackend{err: syscall.ENOSYS}, etag: `"old"`,
-		firstCommitted: make(chan struct{}), finishFirst: make(chan struct{}),
-	}
-	_, inode := newStaleReadTestFile(t, backend, 12, `"old"`, true)
-	inode.mu.Lock()
-	inode.SetCacheState(ST_MODIFIED)
-	inode.mu.Unlock()
-	done := make(chan bool, 2)
-	patch := func(offset uint64) {
+	synctest.Test(t, func(t *testing.T) {
+		backend := &reorderedPatchBackend{
+			TestBackend: &TestBackend{err: syscall.ENOSYS}, etag: `"old"`,
+			firstCommitted: make(chan struct{}), finishFirst: make(chan struct{}),
+		}
+		_, inode := newStaleReadTestFile(t, backend, 12, `"old"`, true)
 		inode.mu.Lock()
-		ok := inode.sendPatch(offset, 4, bytes.NewReader([]byte("sent")), 4)
+		inode.SetCacheState(ST_MODIFIED)
 		inode.mu.Unlock()
-		done <- ok
-	}
-	go patch(0)
-	<-backend.firstCommitted
-	go patch(4)
-	remaining := 2
-	select {
-	case ok := <-done:
-		remaining--
-		if !ok {
-			t.Error("second PATCH failed")
+		done := make(chan bool, 2)
+		patch := func(offset uint64) {
+			inode.mu.Lock()
+			ok := inode.sendPatch(offset, 4, bytes.NewReader([]byte("sent")), 4)
+			inode.mu.Unlock()
+			done <- ok
 		}
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(backend.finishFirst)
-	for i := 0; i < remaining; i++ {
-		if !<-done {
-			t.Fatal("own PATCH failed")
+		go patch(0)
+		<-backend.firstCommitted
+		secondStarted := make(chan struct{})
+		go func() {
+			close(secondStarted)
+			patch(4)
+		}()
+		<-secondStarted
+		synctest.Wait()
+		close(backend.finishFirst)
+		for i := 0; i < 2; i++ {
+			if !<-done {
+				t.Fatal("own PATCH failed")
+			}
 		}
-	}
-	data, n, err := NewFileHandle(inode).ReadFile(8, 4)
-	if err != nil || n != 4 || !bytes.Equal(bytes.Join(data, nil), []byte("DATA")) {
-		t.Fatalf("read after own PATCHes: data=%q n=%d err=%v", data, n, err)
-	}
+		data, n, err := NewFileHandle(inode).ReadFile(8, 4)
+		if err != nil || n != 4 || !bytes.Equal(bytes.Join(data, nil), []byte("DATA")) {
+			t.Fatalf("read after own PATCHes: data=%q n=%d err=%v", data, n, err)
+		}
+	})
 }

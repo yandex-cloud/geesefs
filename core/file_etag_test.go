@@ -52,7 +52,7 @@ func newStaleReadTestFile(t *testing.T, backend StorageBackend, size uint64, eta
 	return fs, inode
 }
 
-func TestReadFileDoesNotCheckETagByDefault(t *testing.T) {
+func TestReadFileWithETagCheckDisabled(t *testing.T) {
 	const oldETag = `"old"`
 	const newETag = `"new"`
 	newData := []byte("new-data")
