@@ -588,6 +588,12 @@ MISC OPTIONS:
 			Usage: "How long to cache file metadata.",
 		},
 
+		cli.IntFlag{
+			Name:  "negative-lookup-cache-size",
+			Value: 0,
+			Usage: "Maximum missing-name entries to cache per directory (0 disables). TTL uses --stat-cache-ttl.",
+		},
+
 		cli.DurationFlag{
 			Name:  "http-timeout",
 			Value: 30 * time.Second,
@@ -831,6 +837,11 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		panic("--read-retry-attempts must be at least 1")
 	}
 
+	negativeLookupCacheSize := c.Int("negative-lookup-cache-size")
+	if negativeLookupCacheSize < 0 {
+		panic("--negative-lookup-cache-size must not be negative")
+	}
+
 	flags := &FlagStorage{
 		// File system
 		MountOptions:                       c.StringSlice("o"),
@@ -893,6 +904,8 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		PreferPatchUploads:  c.Bool("prefer-patch-uploads"),
 		NoPreloadDir:        c.Bool("no-preload-dir"),
 		NoVerifySSL:         c.Bool("no-verify-ssl"),
+
+		NegativeLookupCacheSize: negativeLookupCacheSize,
 
 		// Common Backend Config
 		Endpoint:       c.String("endpoint"),

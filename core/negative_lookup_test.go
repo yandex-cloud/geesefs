@@ -71,6 +71,7 @@ func lookupFS(t *testing.T, ttl time.Duration, options ...func(*cfg.FlagStorage)
 	}
 	flags := cfg.DefaultFlags()
 	flags.StatCacheTTL = ttl
+	flags.NegativeLookupCacheSize = 3
 	flags.NoPreloadDir = true
 	flags.Cheap = true
 	// These tests exercise the local namespace, not background persistence.
@@ -150,11 +151,27 @@ func TestNegativeLookupExpiry(t *testing.T) {
 }
 
 func TestNegativeLookupDisabled(t *testing.T) {
-	fs, store := lookupFS(t, 0)
-	requireMissing(t, fs, "external")
-	store.put("external")
-	if inode, err := fs.LookupPath("external"); err != nil || inode == nil {
-		t.Fatalf("TTL=0 hid external creation: %v, %v", inode, err)
+	for _, tc := range []struct {
+		name string
+		ttl  time.Duration
+		size int
+	}{
+		{"ttl-zero", 0, 3},
+		{"cache-size-zero", time.Minute, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs, store := lookupFS(t, tc.ttl, func(flags *cfg.FlagStorage) { flags.NegativeLookupCacheSize = tc.size })
+			requireMissing(t, fs, "external")
+			calls := store.count()
+			requireMissing(t, fs, "external")
+			if store.count() == calls {
+				t.Fatal("disabled cache reused a negative lookup")
+			}
+			store.put("external")
+			if inode, err := fs.LookupPath("external"); err != nil || inode == nil {
+				t.Fatalf("disabled cache hid external creation: %v, %v", inode, err)
+			}
+		})
 	}
 }
 
@@ -213,7 +230,10 @@ func TestNegativeLookupLocalCreation(t *testing.T) {
 }
 
 func TestNegativeLookupPreload(t *testing.T) {
-	fs, store := lookupFS(t, time.Minute, func(flags *cfg.FlagStorage) { flags.NoPreloadDir = false })
+	fs, store := lookupFS(t, time.Minute, func(flags *cfg.FlagStorage) {
+		flags.NoPreloadDir = false
+		flags.Cheap = false
+	})
 	store.put("present")
 	requireMissing(t, fs, ".~tmp~")
 	// The first slurp may populate positive children and invalidate the
@@ -223,33 +243,38 @@ func TestNegativeLookupPreload(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		requireMissing(t, fs, ".~tmp~")
 	}
+	if inode, err := fs.LookupPath("present"); err != nil || inode == nil {
+		t.Fatalf("preloaded child not visible: %v, %v", inode, err)
+	}
 	if store.count() != calls {
-		t.Fatal("preloading still repeats missing-name requests")
+		t.Fatal("preloading did not cache missing names and positive children")
 	}
 }
 
 func TestNegativeLookupPartialErrors(t *testing.T) {
 	for _, request := range []string{"directory marker", "prefix listing"} {
-		t.Run(request, func(t *testing.T) {
-			fs, store := lookupFS(t, time.Minute)
-			store.mu.Lock()
-			if request == "directory marker" {
-				store.headErrors = map[string]error{"external/": syscall.EACCES}
-			} else {
-				store.listErr = syscall.EACCES
-			}
-			store.mu.Unlock()
-			if _, err := fs.LookupPath("external"); err != syscall.EACCES {
-				t.Fatalf("partial failure became %v", err)
-			}
-			store.mu.Lock()
-			store.headErrors, store.listErr = nil, nil
-			store.mu.Unlock()
-			store.put("external")
-			if _, err := fs.LookupPath("external"); err != nil {
-				t.Fatal(err)
-			}
-		})
+		for _, cheap := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/cheap-%t", request, cheap), func(t *testing.T) {
+				fs, store := lookupFS(t, time.Minute, func(flags *cfg.FlagStorage) { flags.Cheap = cheap })
+				store.mu.Lock()
+				if request == "directory marker" {
+					store.headErrors = map[string]error{"external/": syscall.EACCES}
+				} else {
+					store.listErr = syscall.EACCES
+				}
+				store.mu.Unlock()
+				if _, err := fs.LookupPath("external"); err != syscall.EACCES {
+					t.Fatalf("partial failure became %v", err)
+				}
+				store.mu.Lock()
+				store.headErrors, store.listErr = nil, nil
+				store.mu.Unlock()
+				store.put("external")
+				if _, err := fs.LookupPath("external"); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
 	}
 }
 
@@ -349,32 +374,82 @@ func TestNegativeLookupSlowRequest(t *testing.T) {
 }
 
 func TestNegativeLookupBounded(t *testing.T) {
-	fs, store := lookupFS(t, time.Minute)
-	requireMissing(t, fs, "first")
-	for i := 0; i < 1024; i++ {
-		requireMissing(t, fs, fmt.Sprintf("missing-%d", i))
-	}
-	store.put("first")
-	if _, err := fs.LookupPath("first"); err != nil {
-		t.Fatalf("old miss retained after cache pressure: %v", err)
+	for _, size := range []int{1, 3} {
+		t.Run(fmt.Sprintf("size-%d", size), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				fs, store := lookupFS(t, time.Minute, func(flags *cfg.FlagStorage) { flags.NegativeLookupCacheSize = size })
+				for i := 0; i < size; i++ {
+					requireMissing(t, fs, fmt.Sprintf("missing-%d", i))
+					time.Sleep(time.Second)
+				}
+				// Hits must not make the oldest entry newer for eviction.
+				requireMissing(t, fs, "missing-0")
+				requireMissing(t, fs, "overflow")
+				calls := store.count()
+				for i := 1; i < size; i++ {
+					requireMissing(t, fs, fmt.Sprintf("missing-%d", i))
+				}
+				requireMissing(t, fs, "overflow")
+				if got := store.count(); got != calls {
+					t.Fatalf("cache pressure evicted more than the oldest entry: %d extra requests", got-calls)
+				}
+				store.put("missing-0")
+				if inode, err := fs.LookupPath("missing-0"); err != nil || inode == nil {
+					t.Fatalf("oldest miss retained beyond size %d: %v, %v", size, inode, err)
+				}
+			})
+		})
 	}
 }
 
-func TestNegativeLookupCreateUnlink(t *testing.T) {
+func TestNegativeLookupReclaimsExpired(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fs, store := lookupFS(t, time.Minute)
+		root, _ := fs.LookupPath("")
+		requireMissing(t, fs, "expired")
+		time.Sleep(30 * time.Second)
+		requireMissing(t, fs, "recent")
+		time.Sleep(30 * time.Second)
+		requireMissing(t, fs, "new")
+		// Reclaim expired storage even when the cache has room for a new name.
+		root.mu.Lock()
+		entries := len(root.dir.negativeLookups)
+		_, retainedExpired := root.dir.negativeLookups["expired"]
+		root.mu.Unlock()
+		if entries != 2 || retainedExpired {
+			t.Fatalf("cache retained expired storage: entries=%d, expired=%v", entries, retainedExpired)
+		}
+		calls := store.count()
+		requireMissing(t, fs, "recent")
+		requireMissing(t, fs, "new")
+		if got := store.count(); got != calls {
+			t.Fatalf("expiry reclamation evicted fresh entries: %d extra requests", got-calls)
+		}
+	})
+}
+
+func TestNegativeLookupInflightUnlink(t *testing.T) {
 	fs, store := lookupFS(t, time.Minute)
 	root, _ := fs.LookupPath("")
-	requireMissing(t, fs, "external")
-	_, handle, err := root.Create("external")
+	_, handle, err := root.Create("local")
 	if err != nil {
 		t.Fatal(err)
 	}
 	handle.Release()
-	if err := root.Unlink("external"); err != nil {
+	started, unblock := store.blockNextList(t)
+	done := make(chan error, 1)
+	go func() { _, err := fs.LookupPath("external"); done <- err }()
+	<-started
+	if err := root.Unlink("local"); err != nil {
 		t.Fatal(err)
 	}
 	store.put("external")
+	unblock()
+	if err := <-done; err != syscall.ENOENT {
+		t.Fatalf("old snapshot returned %v", err)
+	}
 	if _, err := fs.LookupPath("external"); err != nil {
-		t.Fatalf("old negative entry survived local mutations: %v", err)
+		t.Fatalf("late ENOENT survived unlink: %v", err)
 	}
 }
 
@@ -400,4 +475,40 @@ func TestNegativeLookupConcurrentExpiry(t *testing.T) {
 			t.Fatalf("concurrent miss extended expiry: %v", err)
 		}
 	})
+}
+
+func TestNegativeLookupConcurrentFull(t *testing.T) {
+	for _, initial := range []int{2, 3} {
+		t.Run(fmt.Sprintf("initial-%d", initial), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				fs, store := lookupFS(t, time.Minute)
+				for i := 0; i < initial; i++ {
+					requireMissing(t, fs, fmt.Sprintf("missing-%d", i))
+					time.Sleep(time.Millisecond)
+				}
+				started, unblock := store.blockNextList(t)
+				done := make(chan error, 1)
+				go func() { _, err := fs.LookupPath("overlap"); done <- err }()
+				<-started
+				time.Sleep(time.Second)
+				requireMissing(t, fs, "overlap")
+				unblock()
+				if err := <-done; err != syscall.ENOENT {
+					t.Fatalf("overlapping lookup returned %v", err)
+				}
+				calls := store.count()
+				firstRetained := 0
+				if initial == 3 {
+					firstRetained = 1
+				}
+				for i := firstRetained; i < initial; i++ {
+					requireMissing(t, fs, fmt.Sprintf("missing-%d", i))
+				}
+				requireMissing(t, fs, "overlap")
+				if got := store.count(); got != calls {
+					t.Fatalf("overlapping misses evicted retained entries: %d extra backend requests", got-calls)
+				}
+			})
+		})
+	}
 }

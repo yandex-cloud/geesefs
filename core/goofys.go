@@ -838,8 +838,7 @@ func (fs *Goofys) mount(mp *Inode, b *Mount) {
 		defer prev.mu.Unlock()
 		prev.dir.cloud = b.cloud
 		prev.dir.mountPrefix = b.prefix
-		prev.dir.negativeLookups = nil
-		prev.dir.lookupGeneration++
+		prev.invalidateNegativeLookupsUnlocked("")
 		prev.SetAttrTime(TIME_MAX)
 
 	}

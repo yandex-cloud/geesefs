@@ -651,8 +651,7 @@ func (fs *ClusterFs) trySteal(inode *Inode) (success bool, err error) {
 func (fs *ClusterFs) applyStolenInode(inode *Inode, stolenInode *pb.StolenInode) {
 	if inode.isDir() {
 		inode.mu.Lock()
-		inode.dir.negativeLookups = nil
-		inode.dir.lookupGeneration++
+		inode.invalidateNegativeLookupsUnlocked("")
 		inode.mu.Unlock()
 		for _, pbInode := range stolenInode.Children {
 			child := fs.ensure(inode, pbInode)
@@ -711,8 +710,7 @@ func (fs *ClusterFs) tryYield(inode *Inode, newOwner NodeId) *pb.StolenInode {
 			}
 			if len(inode.dir.DeletedChildren) == 0 {
 				inode.mu.Lock()
-				inode.dir.negativeLookups = nil
-				inode.dir.lookupGeneration++
+				inode.invalidateNegativeLookupsUnlocked("")
 				inode.mu.Unlock()
 				inode.dir.Children = nil
 				inode.dir.DeletedChildren = nil

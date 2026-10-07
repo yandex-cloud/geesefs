@@ -36,9 +36,6 @@ type SlurpGap struct {
 	loadTime   time.Time
 }
 
-// Bound memory even when a client probes many distinct missing names.
-const maxNegativeLookups = 256
-
 type DirInodeData struct {
 	cloud       StorageBackend
 	mountPrefix string
@@ -68,6 +65,18 @@ type DirInodeData struct {
 	// prevents an in-flight miss from repopulating the cache after a mutation.
 	negativeLookups  map[string]time.Time
 	lookupGeneration uint64
+}
+
+// LOCKS_REQUIRED(parent.mu)
+// An empty name invalidates the entire directory. Also reject in-flight misses
+// from before the mutation, even if they are for a different name.
+func (parent *Inode) invalidateNegativeLookupsUnlocked(name string) {
+	if name == "" {
+		parent.dir.negativeLookups = nil
+	} else {
+		delete(parent.dir.negativeLookups, name)
+	}
+	parent.dir.lookupGeneration++
 }
 
 // Returns the position of first char < '/' in `inp` after prefixLen + any continued '/' characters.
@@ -888,8 +897,7 @@ func (inode *Inode) resetDirTimeRec() {
 	}
 	inode.dir.listDone = false
 	inode.dir.DirTime = time.Time{}
-	inode.dir.negativeLookups = nil
-	inode.dir.lookupGeneration++
+	inode.invalidateNegativeLookupsUnlocked("")
 	// Make a copy of the child nodes before giving up the lock.
 	// This protects us from any addition/removal of child nodes
 	// under this node.
@@ -1024,8 +1032,7 @@ func (parent *Inode) removeChildUnlocked(inode *Inode) {
 	copy(parent.dir.Children[i:], parent.dir.Children[i+1:])
 	parent.dir.Children[l-1] = nil
 	parent.dir.Children = parent.dir.Children[:l-1]
-	delete(parent.dir.negativeLookups, inode.Name)
-	parent.dir.lookupGeneration++
+	parent.invalidateNegativeLookupsUnlocked(inode.Name)
 
 	if cap(parent.dir.Children) >= len(parent.dir.Children)*2 {
 		tmp := make([]*Inode, len(parent.dir.Children))
@@ -1054,8 +1061,7 @@ func (parent *Inode) removeAllChildrenUnlocked() {
 		dh.lastInternalOffset = -1
 	}
 	parent.dir.Children = nil
-	parent.dir.negativeLookups = nil
-	parent.dir.lookupGeneration++
+	parent.invalidateNegativeLookupsUnlocked("")
 }
 
 // LOCKS_EXCLUDED(parent.fs.mu)
@@ -1087,8 +1093,7 @@ func (parent *Inode) insertChild(inode *Inode) {
 
 // LOCKS_REQUIRED(parent.mu)
 func (parent *Inode) insertChildUnlocked(inode *Inode) {
-	delete(parent.dir.negativeLookups, inode.Name)
-	parent.dir.lookupGeneration++
+	parent.invalidateNegativeLookupsUnlocked(inode.Name)
 	inode.Ref()
 
 	l := len(parent.dir.Children)
@@ -1949,7 +1954,8 @@ func (parent *Inode) LookUpCached(name string) (inode *Inode, err error) {
 			return nil, syscall.ENOENT
 		}
 		if when, found := parent.dir.negativeLookups[name]; found {
-			if parent.fs.flags.StatCacheTTL > 0 && !expired(when, parent.fs.flags.StatCacheTTL) {
+			if parent.fs.flags.NegativeLookupCacheSize > 0 &&
+				parent.fs.flags.StatCacheTTL > 0 && !expired(when, parent.fs.flags.StatCacheTTL) {
 				parent.mu.Unlock()
 				return nil, syscall.ENOENT
 			}
@@ -1966,15 +1972,29 @@ func (parent *Inode) LookUpCached(name string) (inode *Inode, err error) {
 			// the backend request. Never hide that inode with a stale miss.
 			inode = parent.findChildUnlocked(name)
 			if inode == nil && generation == parent.dir.lookupGeneration &&
+				parent.fs.flags.NegativeLookupCacheSize > 0 &&
 				parent.fs.flags.StatCacheTTL > 0 && !expired(lookupStart, parent.fs.flags.StatCacheTTL) {
-				if len(parent.dir.negativeLookups) >= maxNegativeLookups {
-					parent.dir.negativeLookups = nil
-				}
-				if parent.dir.negativeLookups == nil {
-					parent.dir.negativeLookups = make(map[string]time.Time)
-				}
-				// Concurrent misses must not extend an existing entry's TTL.
-				if old, found := parent.dir.negativeLookups[name]; !found || lookupStart.Before(old) {
+				if old, found := parent.dir.negativeLookups[name]; found {
+					// Concurrent misses must not evict entries or extend TTL.
+					if lookupStart.Before(old) {
+						parent.dir.negativeLookups[name] = lookupStart
+					}
+				} else {
+					var oldestName string
+					var oldestTime time.Time
+					for cachedName, when := range parent.dir.negativeLookups {
+						if expired(when, parent.fs.flags.StatCacheTTL) {
+							delete(parent.dir.negativeLookups, cachedName)
+						} else if oldestTime.IsZero() || when.Before(oldestTime) {
+							oldestName, oldestTime = cachedName, when
+						}
+					}
+					if len(parent.dir.negativeLookups) >= parent.fs.flags.NegativeLookupCacheSize {
+						delete(parent.dir.negativeLookups, oldestName)
+					}
+					if parent.dir.negativeLookups == nil {
+						parent.dir.negativeLookups = make(map[string]time.Time)
+					}
 					parent.dir.negativeLookups[name] = lookupStart
 				}
 			}
@@ -2074,21 +2094,31 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 	var object, dirObject *HeadBlobOutput
 	var prefixList *ListBlobsOutput
 	var objectError, dirError, prefixError error
-	results := make(chan int, 3)
+	type lookupResult struct {
+		kind int
+		head *HeadBlobOutput
+		list *ListBlobsOutput
+		err  error
+	}
+	// Publish each probe's result through the channel; only this goroutine
+	// reads or writes the aggregate results, including on early success.
+	results := make(chan lookupResult, 3)
 	n := 0
 
 	for {
 		n++
 		go func() {
-			object, objectError = cloud.HeadBlob(&HeadBlobInput{Key: key})
-			results <- 1
+			resp, err := cloud.HeadBlob(&HeadBlobInput{Key: key})
+			results <- lookupResult{kind: 1, head: resp, err: err}
 		}()
 		if cloud.Capabilities().DirBlob {
-			<-results
+			result := <-results
+			object, objectError = result.head, result.err
 			break
 		}
 		if parent.fs.flags.Cheap {
-			<-results
+			result := <-results
+			object, objectError = result.head, result.err
 			if mapAwsError(objectError) != syscall.ENOENT {
 				break
 			}
@@ -2097,11 +2127,12 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		if !parent.fs.flags.NoDirObject {
 			n++
 			go func() {
-				dirObject, dirError = cloud.HeadBlob(&HeadBlobInput{Key: key + "/"})
-				results <- 2
+				resp, err := cloud.HeadBlob(&HeadBlobInput{Key: key + "/"})
+				results <- lookupResult{kind: 2, head: resp, err: err}
 			}()
 			if parent.fs.flags.Cheap {
-				<-results
+				result := <-results
+				dirObject, dirError = result.head, result.err
 				if mapAwsError(dirError) != syscall.ENOENT {
 					break
 				}
@@ -2111,15 +2142,16 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		if !parent.fs.flags.ExplicitDir {
 			n++
 			go func() {
-				prefixList, prefixError = RetryListBlobs(parent.fs.flags, cloud, &ListBlobsInput{
+				resp, err := RetryListBlobs(parent.fs.flags, cloud, &ListBlobsInput{
 					Delimiter: PString("/"),
 					MaxKeys:   PUInt32(1),
 					Prefix:    PString(key + "/"),
 				})
-				results <- 3
+				results <- lookupResult{kind: 3, list: resp, err: err}
 			}()
 			if parent.fs.flags.Cheap {
-				<-results
+				result := <-results
+				prefixList, prefixError = result.list, result.err
 			}
 		}
 
@@ -2129,7 +2161,15 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 	for n > 0 {
 		n--
 		if !cloud.Capabilities().DirBlob && !parent.fs.flags.Cheap {
-			<-results
+			result := <-results
+			switch result.kind {
+			case 1:
+				object, objectError = result.head, result.err
+			case 2:
+				dirObject, dirError = result.head, result.err
+			case 3:
+				prefixList, prefixError = result.list, result.err
+			}
 		}
 		if object != nil {
 			return &object.BlobItemOutput, nil

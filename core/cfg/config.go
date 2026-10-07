@@ -112,6 +112,8 @@ type FlagStorage struct {
 	NoVerifySSL         bool
 	WinRefreshDirs      bool
 
+	NegativeLookupCacheSize int
+
 	// Debugging
 	DebugMain  bool
 	DebugFuse  bool

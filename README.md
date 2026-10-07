@@ -182,13 +182,19 @@ There's a lot of tuning you can do. Consult `geesefs -h` to view the list of opt
 
 ## Missing Files
 
+Missing-name caching is disabled by default. Enable it with
+`--negative-lookup-cache-size=N`, where `N > 0` limits the number of negative
+entries per directory; `0` disables it and negative values are rejected.
+This per-directory limit does not impose a global memory budget.
+
 Confirmed missing names are cached for up to `--stat-cache-ttl`, measured from
-the start of the lookup. Repeated misses do not extend this interval. Files
-created by another client may therefore remain invisible until it expires;
-use `--stat-cache-ttl 0` to disable this negative cache. Local namespace changes,
-positive listings and explicit cache invalidation take effect immediately.
-Each directory retains at most 256 negative entries; cache pressure can evict
-them earlier. Backend errors other than `ENOENT` are not cached.
+the start of the lookup. Repeated misses, including concurrent completions,
+do not extend this interval. Files created by another client may therefore
+remain invisible until it expires; `--stat-cache-ttl 0` also disables this
+negative cache. Local namespace changes, positive listings and explicit cache
+invalidation take effect immediately. New entries first reclaim expired entries,
+then evict the oldest entry if the directory's cache is full. Backend errors
+other than `ENOENT` are not cached.
 
 ## Memory Limit
 
