@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jacobsa/fuse/fuseops"
 
@@ -325,14 +326,26 @@ func (parent *Inode) listObjectsSlurp(inode *Inode, startAfter string, sealEnd b
 		nextStartAfter = *obj.Key
 	}
 
-	// Remember this range as already loaded
-	parent.dir.markGapLoaded(NilStr(startWith), nextStartAfter)
+	// Remember this range as already loaded. A listing that is not truncated covers
+	// everything after startWith within the prefix, not just up to its last item.
+	gapEnd := nextStartAfter
+	if !resp.IsTruncated {
+		gapEnd = prefix + "\xff"
+	}
+	parent.dir.markGapLoaded(NilStr(startWith), gapEnd)
 
 	if lock {
 		parent.mu.Unlock()
 	}
 
 	return
+}
+
+// slurpMarkerBefore returns a listing marker that sorts strictly before key, so the
+// listing includes key itself: key with its last rune removed (a proper prefix of key).
+func slurpMarkerBefore(key string) string {
+	_, size := utf8.DecodeLastRuneInString(key)
+	return key[:len(key)-size]
 }
 
 func (dir *DirInodeData) markGapLoaded(start, end string) {
@@ -356,7 +369,10 @@ func (dir *DirInodeData) markGapLoaded(start, end string) {
 		dir.Gaps[endPos-1].start = end
 		endPos--
 	}
-	l := len(dir.Gaps) - (endPos - pos)
+	// Gaps [pos, endPos) are replaced by one new gap, so the slice grows by one when
+	// nothing is replaced. Without the +1 a non-overlapping gap is appended and then
+	// sliced off again, so freshly listed ranges were never remembered.
+	l := len(dir.Gaps) - (endPos - pos) + 1
 	if pos == endPos {
 		dir.Gaps = append(dir.Gaps, nil)
 	}
@@ -1980,7 +1996,12 @@ func (parent *Inode) LookUp(name string, doSlurp bool) (*Inode, error) {
 		// The only case where it may be missing from the listing is when it's a directory
 		// and there's a lot of (more than 1000) files named "<file>[\x20-\x2E]...", because
 		// these names will come before "file/".
-		_, err := root.listObjectsSlurp(&Inode{Parent: parent}, key, false, true)
+		// List from just before the key: S3 markers are exclusive, so a listing that
+		// starts after `key` can never contain `key` itself, and the gap it records
+		// starts at `key`, which checkGapLoaded(key) does not count as covered.
+		// Without this, every negative lookup falls through to HEAD key + HEAD key/,
+		// and a 404 HEAD can take hundreds of milliseconds on some providers.
+		_, err := root.listObjectsSlurp(&Inode{Parent: parent}, slurpMarkerBefore(key), false, true)
 		if err != nil {
 			return nil, err
 		}

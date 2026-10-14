@@ -27,6 +27,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -599,7 +601,8 @@ func (s *GoofysTest) TestSlurpLookupNoCloud(t *C) {
 		ListBlobsFunc: func(param *ListBlobsInput) (*ListBlobsOutput, error) {
 			p, d, a := NilStr(param.Prefix), NilStr(param.Delimiter), NilStr(param.StartAfter)
 			fmt.Printf("ListBlobs: Prefix=%v, Delimiter=%v, StartAfter=%v\n", p, d, a)
-			if p == "" && d == "" && a == "testdir" {
+			// Lookup slurps start listing just before the key, so "testdir" lists after "testdi"
+			if p == "" && d == "" && a == "testdi" {
 				return &ListBlobsOutput{
 					IsTruncated: true,
 					// No testdir/ or testdir in result - suppose testdir/ comes in next pages
@@ -630,6 +633,63 @@ func (s *GoofysTest) TestSlurpLookupNoCloud(t *C) {
 	t.Assert(err, IsNil)
 }
 
+// Check that a lookup of a missing name in an expired directory is answered
+// from the slurp listing, both for the name itself and for other missing names
+// in the listed range, without falling back to HEAD requests
+func (s *GoofysTest) TestSlurpLookupMissingNoCloud(t *C) {
+	var err error
+
+	flags := cfg.DefaultFlags()
+	flags.StatCacheTTL = 1 * time.Second
+
+	// Use mocked backend that lists a fixed set of keys like S3 does
+	keys := []string{"testdir/", "testdir/abc"}
+	var mu sync.Mutex
+	var heads []string
+	backend := &TestBackend{
+		err: syscall.ENOSYS,
+		ListBlobsFunc: func(param *ListBlobsInput) (*ListBlobsOutput, error) {
+			p, d, a := NilStr(param.Prefix), NilStr(param.Delimiter), NilStr(param.StartAfter)
+			fmt.Printf("ListBlobs: Prefix=%v, Delimiter=%v, StartAfter=%v\n", p, d, a)
+			var o []BlobItemOutput
+			for _, k := range keys {
+				if strings.HasPrefix(k, p) && k > a {
+					o = append(o, BlobItemOutput{Key: PString(k)})
+				}
+			}
+			return &ListBlobsOutput{Items: o}, nil
+		},
+		HeadBlobFunc: func(param *HeadBlobInput) (*HeadBlobOutput, error) {
+			fmt.Printf("HeadBlob: Key=%v\n", param.Key)
+			mu.Lock()
+			heads = append(heads, param.Key)
+			mu.Unlock()
+			return nil, syscall.ENOENT
+		},
+	}
+	s.cloud = backend
+	s.fs, err = newGoofys(context.Background(), "test", flags, func(string, *cfg.FlagStorage) (StorageBackend, error) {
+		return backend, nil
+	})
+	t.Assert(err, IsNil)
+
+	dir, err := s.fs.LookupPath("testdir")
+	t.Assert(err, IsNil)
+
+	// Let the directory listing expire, so missing names can't be answered from it
+	time.Sleep(1500 * time.Millisecond)
+
+	for _, name := range []string{"missing", "zzz"} {
+		inode, err := dir.LookUp(name, true)
+		t.Assert(err == nil || err == syscall.ENOENT, Equals, true)
+		t.Assert(inode, IsNil)
+	}
+	// "zzz" comes after the listing for "missing", which was not truncated, so it is covered too
+	mu.Lock()
+	t.Assert(heads, IsNil)
+	mu.Unlock()
+}
+
 // Case # 1 - check that a directory longer than eviction limit is listed correctly
 // Case # 2 - check that it is listed correctly in 2 parallel threads
 func (s *GoofysTest) TestListParallelExpireNoCloud(t *C) {
@@ -648,7 +708,8 @@ func (s *GoofysTest) TestListParallelExpireNoCloud(t *C) {
 		ListBlobsFunc: func(param *ListBlobsInput) (*ListBlobsOutput, error) {
 			p, d, a := NilStr(param.Prefix), NilStr(param.Delimiter), NilStr(param.StartAfter)
 			fmt.Printf("ListBlobs: Prefix=%v, Delimiter=%v, StartAfter=%v\n", p, d, a)
-			if p == "" && d == "" && a == "testdir" {
+			// Lookup slurps start listing just before the key, so "testdir" lists after "testdi"
+			if p == "" && d == "" && a == "testdi" {
 				return &ListBlobsOutput{
 					IsTruncated: true,
 					Items: []BlobItemOutput{
@@ -734,11 +795,13 @@ func (s *GoofysTest) TestListSlurpExpireNoCloud(t *C) {
 			p, d, a := NilStr(param.Prefix), NilStr(param.Delimiter), NilStr(param.StartAfter)
 			time.Sleep(1 * time.Second)
 			fmt.Printf("ListBlobs: Prefix=%v, Delimiter=%v, StartAfter=%v\n", p, d, a)
-			if p == "" && d == "" && (a == "testdir" || a == "testdir/g" || a == "testdir/h" || a == "testdir/i") {
+			// Lookup slurps start listing just before the key: "testdir" lists after "testdi",
+			// and "testdir/g", "testdir/h" and "testdir/i" list after "testdir/", like a readdir
+			if p == "" && d == "" && a == "testdi" {
 				return &ListBlobsOutput{
 					IsTruncated: true,
 					Items: []BlobItemOutput{
-						{Key: PString(a + "/")},
+						{Key: PString("testdir/")},
 					},
 				}, nil
 			} else if p == "" && d == "" && (a == "testdir/" || a == "testdir/g/" || a == "testdir/h/" || a == "testdir/i/") {

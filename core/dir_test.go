@@ -1,6 +1,8 @@
 package core
 
 import (
+	"time"
+
 	. "gopkg.in/check.v1"
 
 	"github.com/yandex-cloud/geesefs/core/cfg"
@@ -188,4 +190,28 @@ func (s *DirTest) TestIntelligentListCut(t *C) {
 	t.Assert(len(resp.Prefixes), Equals, 3)
 	t.Assert(err, IsNil)
 	t.Assert(listCalled, Equals, 1)
+}
+
+func (s *DirTest) TestMarkGapLoadedKeepsDisjointGaps(t *C) {
+	var dir DirInodeData
+	past := time.Now().Add(-time.Minute)
+	dir.markGapLoaded("a", "b")
+	t.Assert(len(dir.Gaps), Equals, 1)
+	dir.markGapLoaded("c", "d")
+	t.Assert(len(dir.Gaps), Equals, 2)
+	t.Assert(dir.checkGapLoaded("a1", past), Equals, true)
+	t.Assert(dir.checkGapLoaded("c1", past), Equals, true)
+	t.Assert(dir.checkGapLoaded("b1", past), Equals, false)
+	// An overlapping gap trims its neighbours and fills the hole between them
+	dir.markGapLoaded("a5", "c5")
+	t.Assert(len(dir.Gaps), Equals, 3)
+	t.Assert(dir.checkGapLoaded("b1", past), Equals, true)
+	t.Assert(dir.checkGapLoaded("c6", past), Equals, true)
+}
+
+func (s *DirTest) TestSlurpMarkerBefore(t *C) {
+	t.Assert(slurpMarkerBefore("testdir/missing"), Equals, "testdir/missin")
+	// Multi-byte characters are removed whole
+	t.Assert(slurpMarkerBefore("testdir/wø"), Equals, "testdir/w")
+	t.Assert(slurpMarkerBefore("a"), Equals, "")
 }
