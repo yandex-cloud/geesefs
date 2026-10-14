@@ -139,7 +139,8 @@ func (s *S3Backend) TryIAM() (err error) {
 	var ttl time.Duration
 	var resp *http.Response
 	if s.config.IAMFlavor == "gcp" {
-		req, err := http.NewRequest("GET", credUrl, nil)
+		var req *http.Request
+		req, err = http.NewRequest("GET", credUrl, nil)
 		if err != nil {
 			s3Log.Infof("Failed to get IAM token from %v: %v", credUrl, err)
 			return err

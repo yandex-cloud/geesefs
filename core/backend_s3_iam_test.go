@@ -1,9 +1,11 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -290,5 +292,160 @@ func TestSetIAMSignerRefreshesAndSetsHeader(t *testing.T) {
 	}
 	if h := signedReq.Header.Get(s.config.IAMHeader); h != "token-2" {
 		t.Fatalf("refreshed token must land in the IAM header, got %q", h)
+	}
+}
+
+// tryIAMOutcome is what TestTryIAMErrors expects TryIAM to return.
+type tryIAMOutcome int
+
+const (
+	iamOK         tryIAMOutcome = iota // nil error, token stored
+	iamURLError                        // error unwraps to *url.Error
+	iamOtherError                      // non-nil error that is not a *url.Error
+)
+
+// TestTryIAMErrors checks that a failed metadata request surfaces the
+// underlying *url.Error. The gcp flavor (also the default) used to lose it to
+// a shadowed err and return a generic "no response" instead.
+func TestTryIAMErrors(t *testing.T) {
+	serve := func(h http.HandlerFunc) func(t *testing.T) string {
+		return func(t *testing.T) string {
+			srv := httptest.NewServer(h)
+			t.Cleanup(srv.Close)
+			return srv.URL
+		}
+	}
+	fixed := func(u string) func(t *testing.T) string {
+		return func(t *testing.T) string { return u }
+	}
+	// A server closed straight away gives a URL that refuses connections.
+	refused := func(t *testing.T) string {
+		srv := httptest.NewServer(nil)
+		srv.Close()
+		return srv.URL
+	}
+	// Accepts the connection, then drops it without writing a response.
+	hangUp := serve(func(w http.ResponseWriter, r *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			conn.Close()
+		}
+	})
+	gcpToken := serve(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"access_token":"gcp-token","token_type":"Bearer","expires_in":3600}`)
+	})
+	imdsToken := serve(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"Code":"Success","Token":"imds-token","Expiration":%q}`,
+			time.Now().Add(time.Hour).Format(time.RFC3339))
+	})
+
+	cases := []struct {
+		description string
+		flavor      string
+		server      func(t *testing.T) string // returns the IAM URL
+		expected    tryIAMOutcome
+	}{
+		// Positive: a well-formed token response succeeds.
+		{
+			description: "positive: gcp flavor, valid token",
+			flavor:      "gcp",
+			server:      gcpToken,
+			expected:    iamOK,
+		},
+		{
+			description: "positive: imdsv1 flavor, valid token",
+			flavor:      "imdsv1",
+			server:      imdsToken,
+			expected:    iamOK,
+		},
+		// Negative: the request itself fails, and that error is returned.
+		{
+			description: "negative: gcp flavor, connection refused",
+			flavor:      "gcp",
+			server:      refused,
+			expected:    iamURLError,
+		},
+		{
+			description: "negative: default (empty) flavor, connection refused",
+			flavor:      "",
+			server:      refused,
+			expected:    iamURLError,
+		},
+		{
+			description: "negative: imdsv1 flavor, connection refused",
+			flavor:      "imdsv1",
+			server:      refused,
+			expected:    iamURLError,
+		},
+		// Boundary: the request gets as far as the server, or just past it.
+		{
+			description: "boundary: gcp flavor, server hangs up before responding",
+			flavor:      "gcp",
+			server:      hangUp,
+			expected:    iamURLError,
+		},
+		{
+			description: "boundary: gcp flavor, HTTP 500 with a non-JSON body",
+			flavor:      "gcp",
+			server: serve(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "metadata unavailable", http.StatusInternalServerError)
+			}),
+			expected: iamOtherError,
+		},
+		{
+			description: "boundary: gcp flavor, valid JSON with an empty token",
+			flavor:      "gcp",
+			server: serve(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, `{"access_token":"","expires_in":3600}`)
+			}),
+			expected: iamOtherError,
+		},
+		// Corner: failures before the request is sent, and non-success codes.
+		{
+			description: "corner: gcp flavor, malformed URL",
+			flavor:      "gcp",
+			server:      fixed("http://[::1"),
+			expected:    iamURLError,
+		},
+		{
+			description: "corner: imdsv1 flavor, non-success code",
+			flavor:      "imdsv1",
+			server: serve(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, `{"Code":"AccessDenied"}`)
+			}),
+			expected: iamOtherError,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.description, func(t *testing.T) {
+			s := &S3Backend{
+				config: (&cfg.S3Config{
+					UseIAM:    true,
+					IAMFlavor: tc.flavor,
+					IAMUrl:    tc.server(t),
+				}).Init(),
+			}
+			err := s.TryIAM()
+			stopRefreshTimer(s)
+
+			var uerr *url.Error
+			switch tc.expected {
+			case iamOK:
+				if err != nil {
+					t.Fatalf("TryIAM: %v, expected success", err)
+				}
+				if currentIAMToken(t, s) == "" {
+					t.Fatal("TryIAM succeeded but stored an empty token")
+				}
+			case iamURLError:
+				if !errors.As(err, &uerr) {
+					t.Fatalf("TryIAM error %v, expected a *url.Error", err)
+				}
+			case iamOtherError:
+				if err == nil || errors.As(err, &uerr) {
+					t.Fatalf("TryIAM error %v, expected a non-URL error", err)
+				}
+			}
+		})
 	}
 }
