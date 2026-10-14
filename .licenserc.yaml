@@ -1,0 +1,47 @@
+header:
+  license:
+    spdx-id: Apache-2.0
+    copyright-owner: Yandex LLC
+    # Text inserted by the `fix` command into files that have no header.
+    # New files are stamped with the current year; existing files keep
+    # whatever copyright lines they already have (see `pattern` below).
+    content: |
+      Copyright 2026 Yandex LLC
+
+      Licensed under the Apache License, Version 2.0 (the "License");
+      you may not use this file except in compliance with the License.
+      You may obtain a copy of the License at
+
+          http://www.apache.org/licenses/LICENSE-2.0
+
+      Unless required by applicable law or agreed to in writing, software
+      distributed under the License is distributed on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      See the License for the specific language governing permissions and
+      limitations under the License.
+    # Regex matching the invariant Apache-2.0 body. It lets `check` accept any
+    # existing header regardless of its copyright lines (Ka-Hing Cheung,
+    # Databricks, Microsoft, Yandex LLC, etc.) without rewriting attributions.
+    pattern: |
+      Licensed under the Apache License, Version 2\.0 \(the "License"\);
+      you may not use this file except in compliance with the License\.
+      You may obtain a copy of the License at
+
+          http://www\.apache\.org/licenses/LICENSE-2\.0
+
+      Unless required by applicable law or agreed to in writing, software
+      distributed under the License is distributed on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied\.
+      See the License for the specific language governing permissions and
+      limitations under the License\.
+
+  paths:
+    - '**/*.go'
+
+  paths-ignore:
+    # Generated code — do not stamp headers.
+    - '**/*.pb.go'
+    - 'core/pb/**'
+
+  # `never` avoids requiring GITHUB_TOKEN; CI fails via the check exit code.
+  comment: never

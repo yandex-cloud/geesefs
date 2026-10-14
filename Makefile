@@ -44,3 +44,13 @@ docker-clean:
 .PHONY: protoc docker-build docker-binary docker-clean
 protoc:
 	protoc --go_out=. --experimental_allow_proto3_optional --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative core/pb/*.proto
+
+
+# License header targets (apache/skywalking-eyes, config in .licenserc.yaml)
+LICENSE_EYE_IMG ?= apache/skywalking-eyes:0.8.0
+
+license-check:
+	docker run --rm -v "$(CURDIR)":/github/workspace $(LICENSE_EYE_IMG) header check
+
+license-fix:
+	docker run --rm -v "$(CURDIR)":/github/workspace $(LICENSE_EYE_IMG) header fix
