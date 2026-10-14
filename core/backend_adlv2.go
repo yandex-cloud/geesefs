@@ -767,16 +767,9 @@ func (b *ADLv2) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBl
 		RenewLeaseStop: make(chan bool, 1),
 	}
 
-	go func() {
-		for {
-			select {
-			case <-commitData.RenewLeaseStop:
-				break
-			case <-time.After(30 * time.Second):
-				b.lease(adl2.Renew, param.Key, leaseId, 60, "")
-			}
-		}
-	}()
+	go renewLease(commitData.RenewLeaseStop, 30*time.Second, func() {
+		b.lease(adl2.Renew, param.Key, leaseId, 60, "")
+	})
 
 	return &MultipartBlobCommitInput{
 		Key:         &param.Key,
@@ -784,6 +777,19 @@ func (b *ADLv2) MultipartBlobBegin(param *MultipartBlobBeginInput) (*MultipartBl
 		UploadId:    &leaseId,
 		backendData: commitData,
 	}, nil
+}
+
+// renewLease calls renew every interval until stop receives a value or is
+// closed.
+func renewLease(stop <-chan bool, interval time.Duration, renew func()) {
+	for {
+		select {
+		case <-stop:
+			return
+		case <-time.After(interval):
+			renew()
+		}
+	}
 }
 
 func (b *ADLv2) lease(action adl2.PathLeaseAction, key string, leaseId string, durationSec int32,
