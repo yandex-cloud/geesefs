@@ -38,6 +38,18 @@ import (
 
 type SASTokenProvider func() (string, error)
 
+// pickAccountKey returns the value of the first full-permission key in keys,
+// falling back to the first key if none has full permissions. keys must not
+// be empty.
+func pickAccountKey(keys []azblob.AccountKey) string {
+	for _, k := range keys {
+		if k.Permissions == azblob.Full {
+			return *k.Value
+		}
+	}
+	return *keys[0].Value
+}
+
 type AZBlobConfig struct {
 	Endpoint         string
 	AccountName      string
@@ -372,15 +384,7 @@ func AzureBlobConfig(endpoint string, location string, storageType string) (conf
 					return
 				}
 
-				// prefer full permission keys
-				for _, k := range *keysRes.Keys {
-					if k.Permissions == azblob.Full {
-						key = *k.Value
-						break
-					}
-				}
-				// if not just take the first one
-				key = *(*keysRes.Keys)[0].Value
+				key = pickAccountKey(*keysRes.Keys)
 			}
 		} else {
 			if key == "" {
