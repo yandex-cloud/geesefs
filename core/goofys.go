@@ -611,10 +611,7 @@ func (fs *Goofys) Flusher() {
 		if priority > 1 || priority == 1 && nextQueueID != 0 {
 			attempts = 2
 		}
-		curPriorityOk := false
-		for i := 1; i <= priority; i++ {
-			curPriorityOk = curPriorityOk || atomic.LoadInt64(&fs.flushPriorities[priority]) > 0
-		}
+		curPriorityOk := anyFlushInFlight(fs.flushPriorities, priority)
 		for attempts > 0 && atomic.LoadInt64(&fs.activeFlushers) < fs.flags.MaxFlushers {
 			inodeID, nextQueueID = fs.inodeQueue.Next(nextQueueID)
 			if inodeID == 0 {
@@ -649,6 +646,20 @@ func (fs *Goofys) Flusher() {
 			}
 		}
 	}
+}
+
+// anyFlushInFlight reports whether a flush is in progress at any priority
+// from 1 to upTo. priorities[p] counts the flushes running at priority p.
+func anyFlushInFlight(priorities []int64, upTo int) bool {
+	inFlight := priorities[1 : upTo+1]
+	for i := range inFlight {
+		// Index rather than range by value: the counters are updated
+		// concurrently and must be read atomically.
+		if atomic.LoadInt64(&inFlight[i]) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (fs *Goofys) EvictEntry(id fuseops.InodeID) bool {
