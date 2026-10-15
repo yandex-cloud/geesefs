@@ -141,10 +141,8 @@ func NilStr(v *string) string {
 
 func PMetadata(m map[string]string) map[string]*string {
 	metadata := make(map[string]*string)
-	for k, _ := range m {
-		k = strings.ToLower(k)
-		v := m[k]
-		metadata[k] = &v
+	for k, v := range m {
+		metadata[strings.ToLower(k)] = &v
 	}
 	return metadata
 }
