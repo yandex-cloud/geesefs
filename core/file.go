@@ -1091,25 +1091,31 @@ func (inode *Inode) sendUploadParts(priority int) (bool, bool) {
 		}
 		return true
 	})
-	if !initiated && len(partlyZero) > 0 {
-		for _, partNum := range partlyZero {
+	if !initiated {
+		parts, partPriority := zeroPartsToFlush(anyEvicted, partlyZero, fullyZero)
+		for _, partNum := range parts {
 			partOffset, partSize := inode.fs.partRange(partNum)
-			initiated = initiated || inode.goFlushPart(partNum, partOffset, partSize, 2)
-			if inode.flushLimitsExceeded() {
-				break
-			}
-		}
-	}
-	if !initiated && anyEvicted && len(fullyZero) > 0 {
-		for _, partNum := range partlyZero {
-			partOffset, partSize := inode.fs.partRange(partNum)
-			initiated = initiated || inode.goFlushPart(partNum, partOffset, partSize, 3)
+			initiated = initiated || inode.goFlushPart(partNum, partOffset, partSize, partPriority)
 			if inode.flushLimitsExceeded() {
 				break
 			}
 		}
 	}
 	return initiated, shouldComplete
+}
+
+// zeroPartsToFlush picks the parts with empty ranges to flush, and their
+// flush priority, when no regular part could be started: partly zero parts
+// first (2), and only when there are none, fully zero parts (3) if some
+// parts are held back by RMW-evicted buffers.
+func zeroPartsToFlush(anyEvicted bool, partlyZero, fullyZero []uint64) ([]uint64, uint64) {
+	if len(partlyZero) > 0 {
+		return partlyZero, 2
+	}
+	if anyEvicted && len(fullyZero) > 0 {
+		return fullyZero, 3
+	}
+	return nil, 0
 }
 
 // LOCKS_REQUIRED(inode.mu)
