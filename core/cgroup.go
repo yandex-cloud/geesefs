@@ -42,13 +42,7 @@ func getCgroupAvailableMem() (retVal uint64, err error) {
 		return 0, err
 	}
 
-	// newer version of docker mounts the cgroup memory limit/usage files directly under
-	// /sys/fs/cgroup/memory/ rather than /sys/fs/cgroup/memory/docker/$container_id/
-	if _, err := os.Stat(filepath.Join(CGROUP_FOLDER_PREFIX, path)); os.IsExist(err) {
-		path = filepath.Join(CGROUP_FOLDER_PREFIX, path)
-	} else {
-		path = filepath.Join(CGROUP_FOLDER_PREFIX)
-	}
+	path = memoryCgroupDir(CGROUP_FOLDER_PREFIX, path)
 
 	mem_limit, err := readFileAndGetValue(filepath.Join(path, MEM_LIMIT_FILE_SUFFIX))
 	if err != nil {
@@ -63,6 +57,19 @@ func getCgroupAvailableMem() (retVal uint64, err error) {
 	}
 
 	return (mem_limit - mem_usage), nil
+}
+
+// memoryCgroupDir returns the directory holding the memory limit/usage files
+// for cgroupPath under root. Newer versions of docker mount those files
+// directly under root (/sys/fs/cgroup/memory/) rather than under
+// root/docker/$container_id/, so fall back to root when the cgroup's own
+// directory does not exist.
+func memoryCgroupDir(root, cgroupPath string) string {
+	dir := filepath.Join(root, cgroupPath)
+	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+		return dir
+	}
+	return root
 }
 
 func getMemoryCgroupPath(data string) (string, error) {
