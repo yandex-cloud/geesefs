@@ -993,11 +993,12 @@ func (inode *Inode) sendStartMultipart() {
 	if inode.isDir() {
 		key += "/"
 	}
+	params := inode.multipartBeginInput(key)
 	inode.IsFlushing += inode.fs.flags.MaxParallelParts
 	atomic.AddInt64(&inode.fs.stats.flushes, 1)
 	atomic.AddInt64(&inode.fs.activeFlushers, 1)
 	go func() {
-		inode.beginMultipartUpload(cloud, key)
+		inode.beginMultipartUpload(cloud, params)
 		inode.IsFlushing -= inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.activeFlushers, -1)
 		inode.fs.WakeupFlusher()
@@ -1005,7 +1006,11 @@ func (inode *Inode) sendStartMultipart() {
 	}()
 }
 
-func (inode *Inode) beginMultipartUpload(cloud StorageBackend, key string) {
+// multipartBeginInput reads the user metadata, so it must be called with
+// inode.mu held, before the flush goroutine starts.
+//
+// LOCKS_REQUIRED(inode.mu)
+func (inode *Inode) multipartBeginInput(key string) *MultipartBlobBeginInput {
 	params := &MultipartBlobBeginInput{
 		Key:         key,
 		ContentType: inode.fs.flags.GetMimeType(key),
@@ -1016,6 +1021,12 @@ func (inode *Inode) beginMultipartUpload(cloud StorageBackend, key string) {
 		// since the multipart upload was initiated
 		inode.userMetadataDirty = 1
 	}
+	return params
+}
+
+// beginMultipartUpload is called without inode.mu and returns with it held.
+func (inode *Inode) beginMultipartUpload(cloud StorageBackend, params *MultipartBlobBeginInput) {
+	key := params.Key
 	resp, err := cloud.MultipartBlobBegin(params)
 	inode.mu.Lock()
 	inode.recordFlushError(err)
@@ -1145,6 +1156,7 @@ func (inode *Inode) uploadMinMultipart() {
 	if inode.isDir() {
 		key += "/"
 	}
+	params := inode.multipartBeginInput(key)
 
 	go func() {
 		defer func() {
@@ -1155,7 +1167,7 @@ func (inode *Inode) uploadMinMultipart() {
 		}()
 
 		atomic.AddInt64(&inode.fs.stats.flushes, 1)
-		inode.beginMultipartUpload(cloud, key)
+		inode.beginMultipartUpload(cloud, params)
 		if inode.mpu == nil {
 			return
 		}
