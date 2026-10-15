@@ -126,6 +126,7 @@ func (s *GCS3) ListBlobs(param *ListBlobsInput) (*ListBlobsOutput, error) {
 func (s *GCS3) DeleteBlobs(param *DeleteBlobsInput) (*DeleteBlobsOutput, error) {
 	// GCS does not have multi-delete
 	var wg sync.WaitGroup
+	var mu sync.Mutex
 	var overallErr error
 
 	for _, key := range param.Items {
@@ -135,7 +136,9 @@ func (s *GCS3) DeleteBlobs(param *DeleteBlobsInput) (*DeleteBlobsOutput, error) 
 				Key: key,
 			})
 			if err != nil && err != syscall.ENOENT {
+				mu.Lock()
 				overallErr = err
+				mu.Unlock()
 			}
 			wg.Done()
 		}(key)
