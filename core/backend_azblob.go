@@ -649,8 +649,13 @@ func (b *AZBlob) DeleteBlob(param *DeleteBlobInput) (*DeleteBlobOutput, error) {
 
 func (b *AZBlob) DeleteBlobs(param *DeleteBlobsInput) (ret *DeleteBlobsOutput, deleteError error) {
 	var wg sync.WaitGroup
+	// The delete goroutines and the loop below share overallErr, so it is
+	// only accessed with mu held. deleteError is set after wg.Wait().
+	var mu sync.Mutex
+	var overallErr error
 	defer func() {
 		wg.Wait()
+		deleteError = overallErr
 		if deleteError != nil {
 			ret = nil
 		} else {
@@ -672,12 +677,17 @@ func (b *AZBlob) DeleteBlobs(param *DeleteBlobsInput) (ret *DeleteBlobsOutput, d
 			if err != nil {
 				err = mapAZBError(err)
 				if err != syscall.ENOENT {
-					deleteError = err
+					mu.Lock()
+					overallErr = err
+					mu.Unlock()
 				}
 			}
 		}(i)
 
-		if deleteError != nil {
+		mu.Lock()
+		failed := overallErr != nil
+		mu.Unlock()
+		if failed {
 			return
 		}
 	}
