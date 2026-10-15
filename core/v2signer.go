@@ -134,7 +134,7 @@ func (v2 *signer) Sign() error {
 	path := rest.EscapePath(uri, false)
 	if !v2.pathStyle {
 		host := strings.SplitN(v2.Request.URL.Host, ".", 2)[0]
-		path = "/" + host + uri
+		path = "/" + host + path
 	}
 	if path == "" {
 		path = "/"
