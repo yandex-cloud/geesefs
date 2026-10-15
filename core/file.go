@@ -20,6 +20,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1573,7 +1574,7 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 	var ranges []uint64
 	var startPart, endPart uint64
 	var startOffset, endOffset uint64
-	for i := uint64(0); i < numParts; i++ {
+	for i := range numParts {
 		partOffset, partSize := inode.fs.partRange(i)
 		partEnd := partOffset + partSize
 		if partEnd > inode.Attributes.Size {
@@ -1604,12 +1605,19 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 			key = appendChildName(key, inode.oldName)
 		}
 		mpu := inode.mpu
-		guard := make(chan int, inode.fs.flags.MaxParallelCopy)
+		guard := make(chan struct{}, inode.fs.flags.MaxParallelCopy)
 		var wg sync.WaitGroup
+		// The copy goroutines and this loop share err, so it is only
+		// accessed with errMu held until wg.Wait() returns.
+		var errMu sync.Mutex
 		inode.mu.Unlock()
-		for i := 0; i < len(ranges); i += 3 {
-			guard <- i
-			if err != nil {
+		// Each range is 3 numbers: part number, offset and size
+		for r := range slices.Chunk(ranges, 3) {
+			guard <- struct{}{}
+			errMu.Lock()
+			failed := err != nil
+			errMu.Unlock()
+			if failed {
 				break
 			}
 			wg.Add(1)
@@ -1618,7 +1626,9 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 				if inode.mpu == nil {
 					// Upload was canceled (file deleted)
 					inode.mu.Unlock()
+					errMu.Lock()
 					err = syscall.ENOENT
+					errMu.Unlock()
 				} else {
 					inode.mu.Unlock()
 					log.Debugf("Copying unmodified range %v-%v MB of object %v",
@@ -1633,14 +1643,16 @@ func (inode *Inode) copyUnmodifiedParts(numParts uint64) (err error) {
 					if requestErr != nil {
 						log.Warnf("Failed to copy unmodified range %v-%v MB of object %v: %v",
 							offset/1024/1024, (offset+size+1024*1024-1)/1024/1024, key, requestErr)
+						errMu.Lock()
 						err = requestErr
+						errMu.Unlock()
 					} else {
 						mpu.Parts[partNum] = resp.PartId
 					}
 				}
 				wg.Done()
 				<-guard
-			}(uint64(ranges[i]), uint64(ranges[i+1]), uint64(ranges[i+2]))
+			}(r[0], r[1], r[2])
 		}
 		wg.Wait()
 		inode.mu.Lock()
