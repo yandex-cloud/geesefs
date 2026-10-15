@@ -1179,7 +1179,7 @@ func (inode *Inode) SendDelete() {
 			// We don't remove directories until all children are deleted
 			// So that we don't revive the directory after removing it
 			// by fetching a list of files not all of which are actually deleted
-			if inode.refcnt == 0 {
+			if atomic.LoadInt64(&inode.refcnt) == 0 {
 				// Don't call forget with inode locks taken ... :-X
 				forget = true
 			}
@@ -1301,7 +1301,7 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 				inode.ToDir()
 				inode.Id = oldInode.Id
 				// We leave the older inode in place only for forget() calls
-				inode.refcnt = oldInode.refcnt
+				atomic.StoreInt64(&inode.refcnt, atomic.LoadInt64(&oldInode.refcnt))
 				oldInode.mu.Lock()
 				parent.fs.mu.Lock()
 				parent.fs.inodes[oldInode.Id] = inode
@@ -1311,7 +1311,7 @@ func (parent *Inode) doMkDir(name string) (inode *Inode) {
 				oldInode.userMetadataDirty = 0
 				oldInode.userMetadata = make(map[string][]byte)
 				oldInode.touch()
-				oldInode.refcnt = 0
+				atomic.StoreInt64(&oldInode.refcnt, 0)
 				oldInode.Ref()
 				oldInode.SetCacheState(ST_MODIFIED)
 				oldInode.Attributes.Ctime = time.Now()
@@ -1680,7 +1680,9 @@ func renameRecursive(fromInode *Inode, newParent *Inode, to string) {
 	fromInode.dirtyQueueId = toDir.dirtyQueueId
 	toDir.dirtyQueueId = oldQId
 	// Swap reference counts - the kernel will still send forget ops for the new inode
-	fromInode.refcnt, toDir.refcnt = toDir.refcnt, fromInode.refcnt
+	fromRefcnt := atomic.LoadInt64(&fromInode.refcnt)
+	atomic.StoreInt64(&fromInode.refcnt, atomic.LoadInt64(&toDir.refcnt))
+	atomic.StoreInt64(&toDir.refcnt, fromRefcnt)
 	for len(fromInode.dir.Children) > 0 {
 		child := fromInode.dir.Children[0]
 		child.mu.Lock()

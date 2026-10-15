@@ -919,7 +919,7 @@ func (inode *Inode) DumpThis(withBuffers bool) (children []*Inode) {
 	}
 	dataMap["knownSize"] = inode.knownSize
 	dataMap["knownETag"] = inode.knownETag
-	dataMap["refcnt"] = inode.refcnt
+	dataMap["refcnt"] = atomic.LoadInt64(&inode.refcnt)
 	if inode.pauseWriters != 0 {
 		dataMap["pauseWriters"] = inode.pauseWriters
 	}
