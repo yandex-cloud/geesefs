@@ -19,6 +19,7 @@ import (
 	"github.com/yandex-cloud/geesefs/core"
 	"github.com/yandex-cloud/geesefs/core/cfg"
 
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -34,6 +35,24 @@ import (
 )
 
 var log = cfg.GetLogger("main")
+
+// dropPrivileges changes to gid and then to uid; a zero id is left alone.
+// The group has to go first: once the process is no longer root it is not
+// allowed to change its group.
+func dropPrivileges(uid, gid int, setuid, setgid func(int) error) error {
+	var errs []error
+	if gid != 0 {
+		if err := setgid(gid); err != nil {
+			errs = append(errs, fmt.Errorf("setgid(%d): %w", gid, err))
+		}
+	}
+	if uid != 0 {
+		if err := setuid(uid); err != nil {
+			errs = append(errs, fmt.Errorf("setuid(%d): %w", uid, err))
+		}
+	}
+	return errors.Join(errs...)
+}
 
 func registerSIGINTHandler(fs *core.Goofys, mfs core.MountedFS, flags *cfg.FlagStorage) {
 	// Register for SIGINT.
@@ -159,11 +178,8 @@ func main() {
 			registerSIGINTHandler(fs, mfs, flags)
 
 			// Drop root privileges
-			if flags.Setuid != 0 {
-				setuid(flags.Setuid)
-			}
-			if flags.Setgid != 0 {
-				setgid(flags.Setgid)
+			if err := dropPrivileges(flags.Setuid, flags.Setgid, setuid, setgid); err != nil {
+				log.Errorf("Dropping root privileges: %v", err)
 			}
 
 			// Wait for the file system to be unmounted.
