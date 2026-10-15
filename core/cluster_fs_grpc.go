@@ -4,6 +4,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	iofs "io/fs"
 	"sync/atomic"
 	"syscall"
@@ -474,10 +475,15 @@ func (fs *ClusterFsGrpc) ForgetInode2(ctx context.Context, req *pb.ForgetInode2R
 
 // utils
 
+// toErrno converts err for an Errno response field. Errors that are not (or do
+// not wrap) a syscall.Errno, such as gRPC errors from another node, become EIO.
 func toErrno(err error) syscall.Errno {
-	if err != nil {
-		return err.(syscall.Errno)
-	} else {
+	if err == nil {
 		return 0
 	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno
+	}
+	return syscall.EIO
 }
