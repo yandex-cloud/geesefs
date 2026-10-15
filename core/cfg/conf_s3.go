@@ -101,7 +101,7 @@ func (c *S3Config) Init() *S3Config {
 		c.IAMFlavor = "gcp"
 	}
 	if c.MultipartCopyThreshold == 0 {
-		c.MultipartCopyThreshold = 128
+		c.MultipartCopyThreshold = 128 * 1024 * 1024
 	}
 	return c
 }
