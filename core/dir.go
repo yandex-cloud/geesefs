@@ -1904,7 +1904,7 @@ func (parent *Inode) LookUpCached(name string) (inode *Inode, err error) {
 		ok = true
 		if expired(inode.AttrTime, parent.fs.flags.StatCacheTTL) {
 			ok = false
-			if inode.CacheState != ST_CACHED ||
+			if atomic.LoadInt32(&inode.CacheState) != ST_CACHED ||
 				inode.isDir() && atomic.LoadInt64(&inode.dir.ModifiedChildren) > 0 {
 				// we have an open file handle, object
 				// in S3 may not represent the true
