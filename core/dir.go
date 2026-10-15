@@ -2023,24 +2023,44 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 	key := appendChildName(parentKey, name)
 	parent.logFuse("Inode.LookUp", key)
 
+	// The requests run in goroutines. They send their results to this
+	// goroutine through the channel; only recv() writes the variables
+	// below, so the loops can read them without a lock.
+	type lookupResult struct {
+		kind int // 1: HEAD key, 2: HEAD key/, 3: LIST key/
+		head *HeadBlobOutput
+		list *ListBlobsOutput
+		err  error
+	}
 	var object, dirObject *HeadBlobOutput
 	var prefixList *ListBlobsOutput
 	var objectError, dirError, prefixError error
-	results := make(chan int, 3)
+	results := make(chan lookupResult, 3)
+	recv := func() {
+		r := <-results
+		switch r.kind {
+		case 1:
+			object, objectError = r.head, r.err
+		case 2:
+			dirObject, dirError = r.head, r.err
+		case 3:
+			prefixList, prefixError = r.list, r.err
+		}
+	}
 	n := 0
 
 	for {
 		n++
 		go func() {
-			object, objectError = cloud.HeadBlob(&HeadBlobInput{Key: key})
-			results <- 1
+			head, err := cloud.HeadBlob(&HeadBlobInput{Key: key})
+			results <- lookupResult{kind: 1, head: head, err: err}
 		}()
 		if cloud.Capabilities().DirBlob {
-			<-results
+			recv()
 			break
 		}
 		if parent.fs.flags.Cheap {
-			<-results
+			recv()
 			if mapAwsError(objectError) != syscall.ENOENT {
 				break
 			}
@@ -2049,11 +2069,11 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		if !parent.fs.flags.NoDirObject {
 			n++
 			go func() {
-				dirObject, dirError = cloud.HeadBlob(&HeadBlobInput{Key: key + "/"})
-				results <- 2
+				head, err := cloud.HeadBlob(&HeadBlobInput{Key: key + "/"})
+				results <- lookupResult{kind: 2, head: head, err: err}
 			}()
 			if parent.fs.flags.Cheap {
-				<-results
+				recv()
 				if mapAwsError(dirError) != syscall.ENOENT {
 					break
 				}
@@ -2063,15 +2083,15 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 		if !parent.fs.flags.ExplicitDir {
 			n++
 			go func() {
-				prefixList, prefixError = RetryListBlobs(parent.fs.flags, cloud, &ListBlobsInput{
+				list, err := RetryListBlobs(parent.fs.flags, cloud, &ListBlobsInput{
 					Delimiter: PString("/"),
 					MaxKeys:   PUInt32(1),
 					Prefix:    PString(key + "/"),
 				})
-				results <- 3
+				results <- lookupResult{kind: 3, list: list, err: err}
 			}()
 			if parent.fs.flags.Cheap {
-				<-results
+				recv()
 			}
 		}
 
@@ -2081,7 +2101,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string) (*BlobItemOutput, error) {
 	for n > 0 {
 		n--
 		if !cloud.Capabilities().DirBlob && !parent.fs.flags.Cheap {
-			<-results
+			recv()
 		}
 		if object != nil {
 			return &object.BlobItemOutput, nil
