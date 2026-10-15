@@ -1826,6 +1826,11 @@ func (inode *Inode) commitMultipartUpload(numParts, finalSize uint64) {
 func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *time.Time, storageClass *string) {
 	if etag != nil {
 		inode.s3Metadata["etag"] = []byte(*etag)
+		inode.knownETag = *etag
+	} else {
+		// The previous ETag no longer describes the uploaded object
+		delete(inode.s3Metadata, "etag")
+		inode.knownETag = ""
 	}
 	if storageClass != nil {
 		inode.s3Metadata["storage-class"] = []byte(*storageClass)
@@ -1834,7 +1839,6 @@ func (inode *Inode) updateFromFlush(size uint64, etag *string, lastModified *tim
 		inode.Attributes.Ctime = *lastModified
 	}
 	inode.knownSize = size
-	inode.knownETag = *etag
 	inode.SetAttrTime(time.Now())
 }
 
