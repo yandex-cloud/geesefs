@@ -35,6 +35,19 @@ import (
 
 var log = cfg.GetLogger("main")
 
+// checkArgs reports whether --help was given, and otherwise whether the
+// command line has the bucket and mount point it needs.
+func checkArgs(c *cli.Context) (showHelp bool, err error) {
+	if c.Bool("help") {
+		return true, nil
+	}
+	// We should get two arguments exactly. Otherwise error out.
+	if len(c.Args()) != 2 {
+		return false, fmt.Errorf("%s takes exactly two arguments", c.App.Name)
+	}
+	return false, nil
+}
+
 func registerSIGINTHandler(fs *core.Goofys, mfs core.MountedFS, flags *cfg.FlagStorage) {
 	// Register for SIGINT.
 	signalChan := make(chan os.Signal, 1)
@@ -73,12 +86,13 @@ func main() {
 	var child *os.Process
 
 	app.Action = func(c *cli.Context) (err error) {
-		// We should get two arguments exactly. Otherwise error out.
-		if len(c.Args()) != 2 {
-			fmt.Fprintf(
-				os.Stderr,
-				"Error: %s takes exactly two arguments.\n\n",
-				app.Name)
+		showHelp, err := checkArgs(c)
+		if showHelp {
+			cli.ShowAppHelp(c)
+			return nil
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v.\n\n", err)
 			cli.ShowAppHelp(c)
 			os.Exit(1)
 		}
