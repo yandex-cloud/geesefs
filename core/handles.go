@@ -898,8 +898,8 @@ func (inode *Inode) DumpThis(withBuffers bool) (children []*Inode) {
 
 	dataMap["attrTime"] = inode.AttrTime.Unix()
 	dataMap["expireTime"] = inode.ExpireTime.Unix()
-	if inode.fileHandles != 0 {
-		dataMap["fileHandles"] = inode.fileHandles
+	if n := atomic.LoadInt32(&inode.fileHandles); n != 0 {
+		dataMap["fileHandles"] = n
 	}
 	if inode.oldParent != nil {
 		oldPath := inode.oldName

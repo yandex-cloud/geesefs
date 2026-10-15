@@ -1246,7 +1246,7 @@ func (parent *Inode) CreateOrOpen(name string, open bool) (inode *Inode, fh *Fil
 	fs.WakeupFlusher()
 
 	fh = NewFileHandle(inode)
-	inode.fileHandles = 1
+	atomic.StoreInt32(&inode.fileHandles, 1)
 	// protect directories with open files from eviction
 	parent.addModified(1)
 
@@ -1770,7 +1770,7 @@ func renameInCache(fromInode *Inode, newParent *Inode, to string) {
 	}
 	fromInode.Ref()
 	parent.removeChildUnlocked(fromInode)
-	if fromInode.fileHandles > 0 {
+	if atomic.LoadInt32(&fromInode.fileHandles) > 0 {
 		// Move filehandle modification protection
 		parent.addModified(-1)
 		newParent.addModified(1)

@@ -738,7 +738,7 @@ func (inode *Inode) sendUpload(priority int) bool {
 
 	if smallFile && inode.mpu == nil {
 		// Don't flush small files with active file handles (if not under memory pressure)
-		if inode.IsFlushing == 0 && (inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0) {
+		if inode.IsFlushing == 0 && (atomic.LoadInt32(&inode.fileHandles) == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0) {
 			// Don't accidentally trigger a parallel multipart flush
 			inode.IsFlushing += inode.fs.flags.MaxParallelParts
 			atomic.AddInt64(&inode.fs.stats.flushes, 1)
@@ -771,7 +771,7 @@ func (inode *Inode) sendUpload(priority int) bool {
 
 	canComplete = canComplete && !inode.IsRangeLocked(0, inode.Attributes.Size, true)
 
-	if canComplete && (inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0) {
+	if canComplete && (atomic.LoadInt32(&inode.fileHandles) == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0) {
 		// Complete the multipart upload
 		inode.IsFlushing += inode.fs.flags.MaxParallelParts
 		atomic.AddInt64(&inode.fs.stats.flushes, 1)
@@ -1030,7 +1030,7 @@ func (inode *Inode) beginMultipartUpload(cloud StorageBackend, key string) {
 func (inode *Inode) sendUploadParts(priority int) (bool, bool) {
 	initiated := false
 	shouldComplete := true
-	flushInode := inode.fileHandles == 0 || inode.forceFlush
+	flushInode := atomic.LoadInt32(&inode.fileHandles) == 0 || inode.forceFlush
 	wantFree := atomic.LoadInt32(&inode.fs.wantFree) > 0
 	var partlyZero []uint64
 	var fullyZero []uint64
@@ -1194,7 +1194,7 @@ func (inode *Inode) syncFlushPartsUpTo(part uint64) bool {
 
 func (inode *Inode) patchObjectRanges() (initiated bool) {
 	smallFile := inode.Attributes.Size <= inode.fs.flags.SinglePartMB*1024*1024
-	wantFlush := inode.fileHandles == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0
+	wantFlush := atomic.LoadInt32(&inode.fileHandles) == 0 || inode.forceFlush || atomic.LoadInt32(&inode.fs.wantFree) > 0
 
 	if smallFile {
 		if inode.flushLimitsExceeded() || !wantFlush {
