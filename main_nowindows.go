@@ -18,7 +18,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -27,9 +26,6 @@ import (
 	"syscall"
 
 	daemon "github.com/sevlyar/go-daemon"
-
-	"github.com/yandex-cloud/geesefs/core"
-	"github.com/yandex-cloud/geesefs/core/cfg"
 )
 
 var signalsToHandle = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1}
@@ -120,19 +116,6 @@ func (p *Daemonizer) NotifySuccess(success bool) {
 		sig = syscall.SIGUSR2
 	}
 	kill(os.Getppid(), sig)
-}
-
-// Mount the file system based on the supplied arguments, returning a
-// MountedFS that can be joined to wait for unmounting.
-func mount(
-	ctx context.Context,
-	bucketName string,
-	flags *cfg.FlagStorage) (fs *core.Goofys, mfs core.MountedFS, err error) {
-	if flags.ClusterMode {
-		return core.MountCluster(ctx, bucketName, flags)
-	} else {
-		return core.MountFuse(ctx, bucketName, flags)
-	}
 }
 
 func messagePath() {

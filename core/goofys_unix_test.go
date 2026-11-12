@@ -15,7 +15,7 @@
 
 // Tests for a mounted UNIX (but not Windows) FUSE FS
 
-//go:build !windows
+//go:build !windows && !fuset
 
 package core
 
