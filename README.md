@@ -150,6 +150,21 @@ You can also use a different path to the credentials file by adding `,--shared-c
 
 See also: [Instruction for Azure Blob Storage](https://github.com/yandex-cloud/geesefs/blob/master/README-azure.md).
 
+## macOS with FUSE-T
+
+As an alternative to macFUSE, GeeseFS can be built against [FUSE-T](https://www.fuse-t.org),
+which is NFS-based and doesn't need a kernel extension. Install FUSE-T first, then build with
+the `fuset` tag. This uses the same cgofuse frontend as the Windows build, which loads
+`libfuse-t.dylib` at runtime, so cgo is required but no extra linker flags are:
+
+```ShellSession
+$ brew install --cask macos-fuse-t/cask/fuse-t
+$ CGO_ENABLED=1 go build -tags fuset
+```
+
+Limitations: cluster mode is not available in `fuset` builds, and background mode (daemonizing)
+hasn't been tested with FUSE-T, so run with `-f`, for example under launchd.
+
 ## Windows
 
 Everything is the same after installing [WinFSP](https://winfsp.dev) and GeeseFS, except that GeeseFS
