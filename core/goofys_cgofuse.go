@@ -104,6 +104,21 @@ func (fs *GoofysWin) Statfs(path string, stat *fuse.Statfs_t) int {
 	const TOTAL_SPACE = 1 * 1024 * 1024 * 1024 * 1024 * 1024 // 1PB
 	const TOTAL_BLOCKS = TOTAL_SPACE / BLOCK_SIZE
 	const INODES = 1 * 1000 * 1000 * 1000 // 1 billion
+	if runtime.GOOS == "darwin" {
+		// FUSE-T truncates block counts to 32 bits: 1PB reads as 0 bytes
+		// free and Finder then refuses to copy files in. Report 8TB.
+		const MAX_BLOCKS = 0x7fffffff
+		stat.Bsize = BLOCK_SIZE
+		stat.Frsize = BLOCK_SIZE
+		stat.Blocks = MAX_BLOCKS
+		stat.Bfree = MAX_BLOCKS
+		stat.Bavail = MAX_BLOCKS
+		stat.Files = INODES
+		stat.Ffree = INODES
+		stat.Favail = INODES
+		stat.Namemax = 255
+		return 0
+	}
 	stat.Bsize = BLOCK_SIZE
 	stat.Frsize = BLOCK_SIZE
 	stat.Blocks = TOTAL_BLOCKS
