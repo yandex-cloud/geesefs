@@ -811,7 +811,14 @@ func (fs *GoofysWin) Readdir(path string,
 		} else if dh.lastExternalOffset == 1 {
 			name = ".."
 		}
-		if !fill(name, st, int64(dh.lastExternalOffset)) {
+		fillOfst := int64(dh.lastExternalOffset)
+		if runtime.GOOS == "darwin" {
+			// FUSE-T pages the listing itself: give it offset 0 ("no paging")
+			// for every entry, otherwise fill() refuses the second entry and
+			// readdir fails with EIO.
+			fillOfst = 0
+		}
+		if !fill(name, st, fillOfst) {
 			break
 		}
 		fuseLog.Debugf("<- Readdir %v %v %v = %v %v", path, ofst, dhId, name, dh.lastExternalOffset)
